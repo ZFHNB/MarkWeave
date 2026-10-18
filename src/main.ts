@@ -159,6 +159,16 @@ app.innerHTML = `
         <div id="file-list-items"></div>
       </div>
     </div>
+    <!-- 侧边栏底部设置 (Sidebar Footer) -->
+    <div class="ty-sidebar-footer">
+      <button class="ty-sidebar-footer-btn" id="btn-open-settings" title="偏好设置 (Settings)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        <span>偏好设置</span>
+      </button>
+    </div>
   </aside>
 
   <!-- 主编辑区 -->
@@ -558,6 +568,133 @@ function downloadMarkdown() {
   downloadMarkdown,
   showExportModal,
 };
+
+/**
+ * 偏好设置面板 (Settings Modal)
+ * 支持设置全局 Mermaid 默认渲染模式（自定义模式 vs 普通模式）
+ */
+function openSettingsModal() {
+  const currentDefaultMode = localStorage.getItem("markweave_mermaid_default_mode") || "custom";
+
+  const modalOverlay = document.createElement("div");
+  modalOverlay.className = "ty-modal-overlay";
+  modalOverlay.id = "settings-modal-overlay";
+
+  modalOverlay.innerHTML = `
+    <div class="ty-modal-card" style="max-width: 520px;">
+      <div class="ty-modal-header">
+        <div class="ty-modal-title" style="display: flex; align-items: center; gap: 8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          偏好设置 (Preferences)
+        </div>
+        <button class="ty-modal-close" id="btn-close-settings-x">&times;</button>
+      </div>
+
+      <div class="ty-modal-body">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-color);">
+          Mermaid 图表默认预览模式
+        </div>
+        <div style="font-size: 12px; color: #777; margin-bottom: 12px; line-height: 1.45;">
+          控制新加载或创建 Markdown 图表时的默认渲染引擎与交互体系：
+        </div>
+
+        <div class="ty-export-options">
+          <label class="ty-export-option-card ${currentDefaultMode === "custom" ? "selected" : ""}" id="setting-card-custom">
+            <input type="radio" name="mermaid-default-mode" value="custom" ${currentDefaultMode === "custom" ? "checked" : ""} />
+            <div class="ty-export-option-content">
+              <div class="ty-export-option-title">
+                🎨 自定义模式 (MarkWeave 样式) <span style="font-size: 11px; color: var(--primary-color); background: rgba(66, 133, 244, 0.1); padding: 1px 6px; border-radius: 4px; margin-left: 4px;">默认推荐</span>
+              </div>
+              <div class="ty-export-option-desc">
+                展示 MarkWeave 独创样式与全部功能，支持拖拽排版、正交拐角圆弧/直角折线、箭头反转、行内修改连线文字等完整功能。
+              </div>
+            </div>
+          </label>
+
+          <label class="ty-export-option-card ${currentDefaultMode === "standard" ? "selected" : ""}" id="setting-card-standard">
+            <input type="radio" name="mermaid-default-mode" value="standard" ${currentDefaultMode === "standard" ? "checked" : ""} />
+            <div class="ty-export-option-content">
+              <div class="ty-export-option-title">
+                🌐 普通模式 (主流兼容样式)
+              </div>
+              <div class="ty-export-option-desc">
+                展示可兼容主流官方 Mermaid 的标准样式，仅支持纵向与横向排布转换功能，保证与 GitHub、Typora 等平台预览完全一致。
+              </div>
+            </div>
+          </label>
+        </div>
+
+        <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-size: 12px; color: #888;">
+            MarkWeave v0.1.0 • 纯本地运行
+          </div>
+          <a href="https://github.com/ZFHNB/MarkWeave.git" target="_blank" style="font-size: 12px; color: var(--primary-color); text-decoration: none;">
+            GitHub 仓库
+          </a>
+        </div>
+      </div>
+
+      <div class="ty-modal-footer">
+        <button class="ty-btn" id="btn-cancel-settings">取消</button>
+        <button class="ty-btn ty-btn-primary" id="btn-save-settings">保存并应用</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modalOverlay);
+
+  const cardCustom = modalOverlay.querySelector("#setting-card-custom") as HTMLElement;
+  const cardStandard = modalOverlay.querySelector("#setting-card-standard") as HTMLElement;
+  const radioCustom = cardCustom.querySelector("input") as HTMLInputElement;
+  const radioStandard = cardStandard.querySelector("input") as HTMLInputElement;
+
+  cardCustom.addEventListener("click", () => {
+    radioCustom.checked = true;
+    cardCustom.classList.add("selected");
+    cardStandard.classList.remove("selected");
+  });
+
+  cardStandard.addEventListener("click", () => {
+    radioStandard.checked = true;
+    cardStandard.classList.add("selected");
+    cardCustom.classList.remove("selected");
+  });
+
+  const closeModal = () => modalOverlay.remove();
+
+  modalOverlay.querySelector("#btn-close-settings-x")?.addEventListener("click", closeModal);
+  modalOverlay.querySelector("#btn-cancel-settings")?.addEventListener("click", closeModal);
+  modalOverlay.addEventListener("click", (e) => {
+    if (e.target === modalOverlay) closeModal();
+  });
+
+  modalOverlay.querySelector("#btn-save-settings")?.addEventListener("click", () => {
+    const selectedMode = radioStandard.checked ? "standard" : "custom";
+    localStorage.setItem("markweave_mermaid_default_mode", selectedMode);
+
+    // 广播设置变动通知，所有当前图表 0ms 实时响应更新
+    window.dispatchEvent(
+      new CustomEvent("markweave-default-mode-change", { detail: { mode: selectedMode } })
+    );
+
+    closeModal();
+  });
+}
+
+(window as any).__MARKWEAVE_SETTINGS__ = {
+  openSettingsModal,
+  getDefaultMode: () => localStorage.getItem("markweave_mermaid_default_mode") || "custom",
+  setDefaultMode: (mode: "custom" | "standard") => {
+    localStorage.setItem("markweave_mermaid_default_mode", mode);
+    window.dispatchEvent(new CustomEvent("markweave-default-mode-change", { detail: { mode } }));
+  },
+};
+
+const btnOpenSettings = document.getElementById("btn-open-settings");
+btnOpenSettings?.addEventListener("click", openSettingsModal);
 
 btnSaveMd.addEventListener("click", downloadMarkdown);
 

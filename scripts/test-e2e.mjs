@@ -731,6 +731,81 @@ async function runTests() {
     const isModalClosed = await page.evaluate(() => document.querySelector(".ty-modal-overlay") === null);
     assert("成功响应取消并关闭模态框", isModalClosed);
 
+    // ==========================================
+    // 25. 侧边栏底部设置按钮与偏好设置模态框
+    // ==========================================
+    console.log("\n--- 测试 25: 侧边栏底部设置按钮与偏好设置模态框 ---");
+    // 检测侧边栏底部设置按钮存在
+    const hasSettingsBtn = await page.$eval("#btn-open-settings", (el) => !!el);
+    assert("侧边栏左下角成功挂载「偏好设置」入口按钮", hasSettingsBtn);
+
+    // 点击打开偏好设置模态框
+    await page.click("#btn-open-settings");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isSettingsModalOpen = await page.evaluate(() => {
+      const modal = document.querySelector("#settings-modal-overlay");
+      return modal !== null && getComputedStyle(modal).display !== "none";
+    });
+    assert("点击左下角设置按钮后，成功弹出偏好设置 (Preferences) 模态框", isSettingsModalOpen);
+
+    const hasBothModeSettings = await page.evaluate(() => {
+      const customCard = document.querySelector("#setting-card-custom");
+      const standardCard = document.querySelector("#setting-card-standard");
+      return customCard !== null && standardCard !== null;
+    });
+    assert("设置面板包含「自定义模式 (MarkWeave 样式)」与「普通模式 (主流兼容样式)」选项", hasBothModeSettings);
+
+    await page.screenshot({ path: path.join(artifactsDir, "19-settings-modal-preferences.png") });
+
+    // 选择「普通模式」并保存
+    await page.click("#setting-card-standard");
+    await new Promise((r) => setTimeout(r, 100));
+    await page.click("#btn-save-settings");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const savedDefaultMode = await page.evaluate(() => window.__MARKWEAVE_SETTINGS__.getDefaultMode());
+    assert("成功将默认预览模式保存为「普通模式」并持久化", savedDefaultMode === "standard");
+
+    // ==========================================
+    // 26. 普通模式 (主流兼容) 与自定义模式即时切换
+    // ==========================================
+    console.log("\n--- 测试 26: 普通模式 (主流兼容) 与自定义模式即时切换 ---");
+    // 验证当前图表已被实时联动切换为「普通模式」
+    const isDiagramInStandardMode = await page.evaluate(() => {
+      const stdBtn = document.querySelector(".md-diagram-toolbar .md-mode-btn-standard");
+      const dragBtn = document.querySelector(".md-diagram-toolbar .md-diagram-drag-btn");
+      return stdBtn?.classList.contains("active") && dragBtn?.style.display === "none";
+    });
+    assert("图表工具栏自动响应设置变动，高亮「普通模式」并隐藏自定义编辑按钮", isDiagramInStandardMode);
+
+    // 验证普通模式下依然支持横纵向切换
+    const canSwitchDirectionInStandard = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-diagram-toolbar .md-diagram-btn"));
+      const lrBtn = btns.find((b) => b.textContent?.includes("横向"));
+      return lrBtn !== null && lrBtn?.style?.display !== "none";
+    });
+    assert("普通模式下保留并展示「横向/纵向」切换按钮", canSwitchDirectionInStandard);
+
+    await page.screenshot({ path: path.join(artifactsDir, "20-mermaid-standard-compatible-mode.png") });
+
+    // 在图表工具栏上直接点击「🎨 自定义」切换回自定义模式
+    await page.click(".md-diagram-toolbar .md-mode-btn-custom");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isCustomRestored = await page.evaluate(() => {
+      const customBtn = document.querySelector(".md-diagram-toolbar .md-mode-btn-custom");
+      const dragBtn = document.querySelector(".md-diagram-toolbar .md-diagram-drag-btn");
+      return customBtn?.classList.contains("active") && dragBtn?.style.display !== "none";
+    });
+    assert("点击「自定义」后，图表展开全部 MarkWeave 增强特性与排版编辑工具", isCustomRestored);
+
+    await page.screenshot({ path: path.join(artifactsDir, "21-mermaid-custom-mode-restored.png") });
+
+    // 还原全局默认设置回自定义模式
+    await page.evaluate(() => window.__MARKWEAVE_SETTINGS__.setDefaultMode("custom"));
+    await new Promise((r) => setTimeout(r, 200));
+
 
   } catch (err) {
     console.error("测试执行过程中出现异常:", err);

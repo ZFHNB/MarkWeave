@@ -941,3 +941,58 @@ body.theme-night .md-edge-popover {
   background: #3367d6;
   border-color: #3367d6;
 }
+
+/* ================= 侧边栏底部设置栏 (Sidebar Footer) ================= */
+.ty-sidebar-footer {
+  height: 46px;
+  min-height: 46px;
+  border-top: 1px solid var(--sidebar-border-color);
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background-color: var(--sidebar-bg-color);
+}
+
+.ty-sidebar-footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-color);
+  opacity: 0.8;
+  font-size: 13px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  width: 100%;
+  font-weight: 500;
+}
+
+.ty-sidebar-footer-btn:hover {
+  opacity: 1;
+  background-color: var(--item-hover-bg-color);
+  color: var(--primary-color);
+}
+
+.theme-night .ty-sidebar-footer-btn:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+/* ================= Mermaid 预览模式切换栏样式 ================= */
+.md-diagram-mode-group {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  padding: 1px;
+}
+.theme-night .md-diagram-mode-group {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.md-diagram-mode-group .md-diagram-btn.active {
+  background: var(--primary-color);
+  color: #fff;
+  border-color: var(--primary-color);
+}
+
