@@ -291,9 +291,11 @@ export class MermaidInteractor {
 
     const wrap = document.createElement("div");
     wrap.className = "md-diagram-toolbar-wrap";
+    wrap.setAttribute("contenteditable", "false");
 
     const bar = document.createElement("div");
     bar.className = "md-diagram-toolbar";
+    bar.setAttribute("contenteditable", "false");
 
     // 0. 模式切换按钮组 (自定义模式 vs 普通模式)
     const modeGroup = document.createElement("div");
@@ -454,6 +456,12 @@ export class MermaidInteractor {
       this.editModeBtn.style.display = "none";
       resetBtn.style.display = "none";
     }
+
+    // 彻底杜绝所有工具栏按钮出现光标、文字被选或文字被误修改的可能
+    bar.querySelectorAll("button, span, div").forEach((el) => {
+      el.setAttribute("contenteditable", "false");
+      el.addEventListener("mousedown", (e) => e.preventDefault());
+    });
 
     wrap.appendChild(bar);
     this.container.appendChild(wrap);
@@ -990,6 +998,7 @@ export class MermaidInteractor {
     const rect = this.container.getBoundingClientRect();
     const popover = document.createElement("div");
     popover.className = "md-edge-popover";
+    popover.setAttribute("contenteditable", "false");
     let left = e.clientX ? e.clientX - rect.left : 0;
     let top = e.clientY ? e.clientY - rect.top - 36 : 0;
     if ((!e.clientX && !e.clientY) || left <= 0 || top <= 0) {
@@ -1011,6 +1020,8 @@ export class MermaidInteractor {
       const btn = document.createElement("button");
       btn.className = "md-edge-popover-btn";
       btn.innerHTML = `${opt.icon} ${opt.label}`;
+      btn.setAttribute("contenteditable", "false");
+      btn.addEventListener("mousedown", (evt) => evt.preventDefault());
       btn.addEventListener("click", (evt) => {
         evt.stopPropagation();
         this.changeArrowDirection(edge, opt.style);

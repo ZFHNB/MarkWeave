@@ -40,6 +40,7 @@ export class CodeBlockView implements NodeView {
     // 悬浮工具栏 (语言输入 + 模式切换 + 复制按钮)
     const toolbar = document.createElement("div");
     toolbar.className = "md-fences-toolbar";
+    toolbar.setAttribute("contenteditable", "false");
 
     const leftGroup = document.createElement("div");
     leftGroup.style.display = "flex";
@@ -72,6 +73,8 @@ export class CodeBlockView implements NodeView {
     this.toggleModeBtn.className = "md-fences-toggle-btn";
     this.toggleModeBtn.textContent = "编辑源码";
     this.toggleModeBtn.style.display = "none";
+    this.toggleModeBtn.setAttribute("contenteditable", "false");
+    this.toggleModeBtn.addEventListener("mousedown", (e) => e.preventDefault());
     this.toggleModeBtn.addEventListener("click", () => {
       this.isEditingMermaid = !this.isEditingMermaid;
       this.updateViewMode();
@@ -80,6 +83,8 @@ export class CodeBlockView implements NodeView {
     this.copyBtn = document.createElement("button");
     this.copyBtn.className = "md-fences-copy-btn";
     this.copyBtn.textContent = "复制";
+    this.copyBtn.setAttribute("contenteditable", "false");
+    this.copyBtn.addEventListener("mousedown", (e) => e.preventDefault());
     this.copyBtn.addEventListener("click", async () => {
       if (this.isMermaid() && !this.isEditingMermaid) {
         // 预览图表模式：直接复制预览图图片 (PNG)
@@ -135,6 +140,7 @@ export class CodeBlockView implements NodeView {
     // Mermaid 图表预览 DOM
     this.diagramContainer = document.createElement("div");
     this.diagramContainer.className = "md-diagram-preview";
+    this.diagramContainer.setAttribute("contenteditable", "false");
     this.diagramContainer.style.display = "none";
     this.diagramContainer.addEventListener("click", (e) => {
       if (this.isEditingMermaid) return;

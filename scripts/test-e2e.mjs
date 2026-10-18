@@ -1165,6 +1165,54 @@ async function runTests() {
     assert("节点文字修改后 0ms 实时更新图表渲染并同步更新 Markdown 源码，保持原有语法括号形态不变", isNodeTextUpdatedLive);
     await page.screenshot({ path: path.join(artifactsDir, "31-node-text-live-edited.png") });
 
+    // ==========================================
+    // 35. 彻底杜绝所有工具栏按钮出现输入光标与文字被修改
+    // ==========================================
+    console.log("\n--- 测试 35: 彻底杜绝所有工具栏按钮出现输入光标与文字被修改 ---");
+    // 1. 进入图表编辑模式
+    await page.click(".md-mermaid-block .md-diagram-drag-btn");
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 2. 验证所有按钮与工具栏容器具有 contenteditable="false" 且 user-select: none, caret-color: transparent
+    const buttonsCheck = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-toolbar");
+      const buttons = Array.from(document.querySelectorAll(".md-diagram-toolbar button, .md-fences-toolbar button"));
+      const allReadonly = buttons.every((b) => {
+        const ce = b.getAttribute("contenteditable");
+        const style = window.getComputedStyle(b);
+        const userSelect = style.userSelect || style.webkitUserSelect;
+        const caretColor = style.caretColor;
+        return (
+          ce === "false" &&
+          (userSelect === "none" || userSelect === "-webkit-none") &&
+          (caretColor === "transparent" || caretColor === "rgba(0, 0, 0, 0)")
+        );
+      });
+
+      return {
+        toolbarCE: tb?.getAttribute("contenteditable"),
+        buttonsCount: buttons.length,
+        allReadonly,
+      };
+    });
+    assert("所有工具栏与按钮均显式声明 contenteditable=\"false\"", buttonsCheck.toolbarCE === "false");
+    assert("所有按钮均强制设置 user-select: none 与 caret-color: transparent，杜绝出现输入光标与文字修改", buttonsCheck.allReadonly, `检测按钮数: ${buttonsCheck.buttonsCount}`);
+
+    // 3. 点击「退出编辑」按钮文本处，验证不会产生选区光标
+    const editBtn = await page.$(".md-diagram-drag-btn");
+    if (editBtn) {
+      await editBtn.click();
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const hasNoSelectionOnButton = await page.evaluate(() => {
+      const sel = window.getSelection();
+      const selectedText = sel ? sel.toString().trim() : "";
+      return selectedText === "";
+    });
+    assert("点击工具条按钮不会产生文本选区光标 (Selection 为空)", hasNoSelectionOnButton);
+    await page.screenshot({ path: path.join(artifactsDir, "32-buttons-no-cursor-immutable.png") });
+
     const brainArtifactsDir = "C:\\Users\\27953\\.gemini\\antigravity-cli\\brain\\9b60e45b-628a-4e99-bdb9-3e175a116ca9";
     if (fs.existsSync(brainArtifactsDir)) {
       for (const file of fs.readdirSync(artifactsDir)) {

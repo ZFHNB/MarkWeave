@@ -553,10 +553,14 @@ body.theme-night .md-diagram-btn-group {
   font-size: 11px;
   color: var(--text-color);
   border-radius: 3px;
-  cursor: pointer;
+  cursor: pointer !important;
   transition: all 0.15s ease;
   line-height: 1.4;
   white-space: nowrap;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  caret-color: transparent !important;
+  outline: none !important;
 }
 
 .md-diagram-btn:hover {
@@ -574,8 +578,47 @@ body.theme-night .md-diagram-btn-group {
   padding: 0 4px;
   font-size: 10px;
   color: #888;
-  cursor: pointer;
-  user-select: none;
+  cursor: pointer !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  caret-color: transparent !important;
+}
+
+/* 彻底杜绝所有工具栏、按钮与控件出现光标与文字被修改的可能 */
+.md-fences-toolbar,
+.md-fences-toolbar *:not(.md-fences-lang-input),
+.md-fences-toggle-btn,
+.md-fences-copy-btn,
+.md-diagram-toolbar-wrap,
+.md-diagram-toolbar-wrap *,
+.md-diagram-toolbar,
+.md-diagram-toolbar *,
+.md-diagram-btn-group,
+.md-diagram-btn,
+.md-diagram-zoom-label,
+.md-edge-popover,
+.md-edge-popover * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+  caret-color: transparent !important;
+  -webkit-user-modify: read-only !important;
+}
+
+.md-fences-toggle-btn,
+.md-fences-copy-btn,
+.md-diagram-btn,
+.md-edge-popover-btn {
+  cursor: pointer !important;
+  outline: none !important;
+}
+
+.md-fences-lang-input {
+  user-select: text !important;
+  -webkit-user-select: text !important;
+  caret-color: auto !important;
+  cursor: text !important;
 }
 
 /* 可视化编辑模式激活视觉 (含 20px 网格点阵背景) */
