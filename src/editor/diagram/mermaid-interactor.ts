@@ -211,6 +211,15 @@ export class MermaidInteractor {
     const allLabelGroups = Array.from(this.svg.querySelectorAll<SVGGElement>(".edgeLabels > g.edgeLabel"));
 
     linkPaths.forEach((pathEl) => {
+      // 彻底消除 Mermaid 引擎内部设置的 stroke-dasharray 导致实线出现 4px 断续残缺间隙的问题
+      if (
+        !pathEl.classList.contains("edge-pattern-dots") &&
+        !pathEl.classList.contains("edge-pattern-dashed")
+      ) {
+        pathEl.style.strokeDasharray = "none";
+        pathEl.removeAttribute("stroke-dasharray");
+      }
+
       const id = pathEl.id || pathEl.parentElement?.id || "";
       const match = /L_([^_]+)_([^_]+)(?:_(\d+))?$/.exec(id);
       if (match) {
@@ -1339,6 +1348,14 @@ export class MermaidInteractor {
 
       const { pathD, labelPos } = this.calculateEdgeRoute(edge, idx);
       edge.el.setAttribute("d", pathD);
+
+      if (
+        !edge.el.classList.contains("edge-pattern-dots") &&
+        !edge.el.classList.contains("edge-pattern-dashed")
+      ) {
+        edge.el.style.strokeDasharray = "none";
+        edge.el.removeAttribute("stroke-dasharray");
+      }
 
       if (edge.labelEl) {
         edge.labelEl.setAttribute("transform", `translate(${labelPos.x}, ${labelPos.y})`);

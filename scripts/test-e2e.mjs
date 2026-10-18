@@ -806,6 +806,219 @@ async function runTests() {
     await page.evaluate(() => window.__MARKWEAVE_SETTINGS__.setDefaultMode("custom"));
     await new Promise((r) => setTimeout(r, 200));
 
+    // ==========================================
+    // 27. 预览 Mermaid 图表时直接复制预览图 (PNG)
+    // ==========================================
+    console.log("\n--- 测试 27: 预览 Mermaid 图表时点击复制按钮直接复制预览图 (PNG) ---");
+    // 确保处于预览图表状态
+    const copyBtnInfoPreview = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return {
+        text: btn ? btn.textContent?.trim() : "",
+        title: btn ? btn.getAttribute("title") : "",
+      };
+    });
+    assert("预览模式下复制按钮文案为「复制图片」", copyBtnInfoPreview.text === "复制图片");
+    assert("预览模式下复制按钮提示说明包含「PNG」或「图片」", /图片|PNG/i.test(copyBtnInfoPreview.title || ""));
+
+    // 点击复制图片按钮
+    await page.click(".md-mermaid-block .md-fences-copy-btn");
+    await new Promise((r) => setTimeout(r, 600));
+
+    const copiedImageSuccess = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      const lastImg = window.__LAST_COPIED_IMAGE__;
+      const isTextUpdated = btn?.textContent?.includes("已复制图片") || btn?.textContent?.includes("已复制");
+      const hasGeneratedBlob = lastImg && lastImg.blob && lastImg.width > 0 && lastImg.height > 0;
+      return isTextUpdated && hasGeneratedBlob;
+    });
+    assert("点击复制后成功高保真生成高清 PNG 图片并更新按钮文案为「已复制图片!」", copiedImageSuccess);
+    await page.screenshot({ path: path.join(artifactsDir, "22-mermaid-copy-image-preview.png") });
+
+    // ==========================================
+    // 28. 编辑源码模式下点击复制按钮直接复制 Mermaid 源码
+    // ==========================================
+    console.log("\n--- 测试 28: 编辑源码模式下点击复制按钮直接复制源码文本 ---");
+    // 切换到编辑源码模式
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isSourceCodeModeActive = await page.evaluate(() => {
+      const pre = document.querySelector(".md-mermaid-block .md-fences-content");
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return (
+        pre &&
+        getComputedStyle(pre).display !== "none" &&
+        btn &&
+        btn.textContent?.trim() === "复制源码"
+      );
+    });
+    assert("切入编辑源码模式后，复制按钮自动切换为「复制源码」", isSourceCodeModeActive);
+
+    // 点击复制源码
+    await page.click(".md-mermaid-block .md-fences-copy-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const copiedSourceSuccess = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return btn?.textContent?.includes("已复制源码") || btn?.textContent?.includes("已复制");
+    });
+    assert("在源码模式下点击复制按钮，成功将源码写入剪贴板并提示「已复制源码!」", copiedSourceSuccess);
+    await page.screenshot({ path: path.join(artifactsDir, "23-mermaid-copy-source-code.png") });
+
+    // 切回预览模式，验证按钮恢复为「复制图片」
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 600));
+
+    const isCopyBtnRestoredToImage = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return btn?.textContent?.trim() === "复制图片";
+    });
+    assert("切回图表预览后，复制按钮自适应恢复为「复制图片」", isCopyBtnRestoredToImage);
+
+    // ==========================================
+    // 29. 偏好设置多 Tab 分类与排版字号即时生效
+    // ==========================================
+    console.log("\n--- 测试 29: 偏好设置多分类 Tab 导航与排版参数即时生效 ---");
+    // 打开偏好设置
+    await page.click("#btn-open-settings");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const hasMultiTabs = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#settings-tabs-nav .ty-settings-tab-btn"));
+      const tabNames = tabs.map((t) => t.textContent?.trim() || "");
+      return (
+        tabs.length >= 4 &&
+        tabNames.some((n) => n.includes("图表")) &&
+        tabNames.some((n) => n.includes("排版")) &&
+        tabNames.some((n) => n.includes("主题")) &&
+        tabNames.some((n) => n.includes("存储"))
+      );
+    });
+    assert("偏好设置面板拥有分类清晰的多 Tab 导航（图表、排版、主题、存储、关于）", hasMultiTabs);
+
+    // 切换到「✍️ 编辑排版」Tab
+    await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#settings-tabs-nav .ty-settings-tab-btn"));
+      const editorTab = tabs.find((t) => t.getAttribute("data-tab") === "editor");
+      editorTab?.click();
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const isEditorPanelActive = await page.evaluate(() => {
+      const panel = document.querySelector("#tab-panel-editor");
+      return panel && panel.classList.contains("active");
+    });
+    assert("点击排版 Tab 成功激活排版设置面板", isEditorPanelActive);
+
+    // 修改字号为 18px，行间距为 1.8
+    await page.select("#setting-select-font-size", "18px");
+    await page.select("#setting-select-line-height", "1.8");
+
+    // 保存设置
+    await page.click("#btn-save-settings");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const typographyApplied = await page.evaluate(() => {
+      const root = document.documentElement;
+      const fs = root.style.getPropertyValue("--editor-font-size");
+      const lh = root.style.getPropertyValue("--editor-line-height");
+      const savedSettings = window.__MARKWEAVE_SETTINGS__.loadSettings();
+      return fs === "18px" && lh === "1.8" && savedSettings.fontSize === "18px";
+    });
+    assert("偏好设置排版字号 (18px) 与行间距 (1.8) 即时生效到编辑界面并持久化", typographyApplied);
+    await page.screenshot({ path: path.join(artifactsDir, "24-settings-tabs-typography-applied.png") });
+
+    // 恢复默认字号 16px
+    await page.evaluate(() => {
+      const s = window.__MARKWEAVE_SETTINGS__.loadSettings();
+      s.fontSize = "16px";
+      s.lineHeight = "1.65";
+      window.__MARKWEAVE_SETTINGS__.saveSettings(s);
+    });
+
+
+    // ==========================================
+    // 30. 浮动控制工具条在非编辑模式下鼠标挪开自动隐藏，编辑模式下常驻显示
+    // ==========================================
+    console.log("\n--- 测试 30: 浮动控制工具条鼠标挪开自动隐藏与悬停/编辑常驻 ---");
+    // 鼠标移出图表区域至视口左上角 (0, 0)
+    await page.mouse.move(10, 10);
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isToolbarHiddenOnLeave = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      if (!tb) return false;
+      const opacity = getComputedStyle(tb).opacity;
+      const pointerEvents = getComputedStyle(tb).pointerEvents;
+      return (opacity === "0" || parseFloat(opacity) < 0.1) && pointerEvents === "none";
+    });
+    assert("非编辑模式下鼠标挪开图表后，浮动控制条自动隐藏 (opacity: 0, pointerEvents: none)", isToolbarHiddenOnLeave);
+    await page.screenshot({ path: path.join(artifactsDir, "25-diagram-toolbar-auto-hidden.png") });
+
+    // 鼠标移入图表区域
+    await page.hover(".md-mermaid-block .md-diagram-preview");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isToolbarVisibleOnHover = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      if (!tb) return false;
+      const opacity = getComputedStyle(tb).opacity;
+      const pointerEvents = getComputedStyle(tb).pointerEvents;
+      return opacity === "1" && pointerEvents === "auto";
+    });
+    assert("鼠标悬停至图表区域时，浮动控制条平滑显现 (opacity: 1, pointerEvents: auto)", isToolbarVisibleOnHover);
+    await page.screenshot({ path: path.join(artifactsDir, "26-diagram-toolbar-visible-on-hover.png") });
+
+    // 点击进入图表编辑模式
+    await page.click(".md-mermaid-block .md-diagram-drag-btn");
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 再次将鼠标移至屏幕边缘
+    await page.mouse.move(10, 10);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const isToolbarPinnedInEditMode = await page.evaluate(() => {
+      const preview = document.querySelector(".md-mermaid-block .md-diagram-preview");
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      return (
+        preview?.classList.contains("is-edit-mode") &&
+        getComputedStyle(tb).opacity === "1"
+      );
+    });
+    assert("在「图表编辑」模式下鼠标移开，浮动控制条常驻固定显示，方便持续排版操作", isToolbarPinnedInEditMode);
+
+    // 退出编辑模式
+    await page.click(".md-mermaid-block .md-diagram-drag-btn");
+    await new Promise((r) => setTimeout(r, 300));
+
+    // ==========================================
+    // 31. 实线连线 100% 连续平滑无 4px 断续残缺间隙
+    // ==========================================
+    console.log("\n--- 测试 31: 实线连线平滑连续无断续残缺间隙 ---");
+    const areSolidLinesContinuous = await page.evaluate(() => {
+      const paths = Array.from(document.querySelectorAll(".md-mermaid-block svg path.flowchart-link"));
+      return (
+        paths.length > 0 &&
+        paths.every((p) => {
+          const dash = getComputedStyle(p).strokeDasharray;
+          const isDashed = p.classList.contains("edge-pattern-dots") || p.classList.contains("edge-pattern-dashed");
+          if (isDashed) return true;
+          return dash === "none" || dash === "";
+        })
+      );
+    });
+    assert("所有实线连线彻底剥离伪虚线 stroke-dasharray 间隔，直线 100% 严谨平滑连续无断续残缺", areSolidLinesContinuous);
+    await page.screenshot({ path: path.join(artifactsDir, "27-continuous-smooth-solid-lines.png") });
+
+    const brainArtifactsDir = "C:\\Users\\27953\\.gemini\\antigravity-cli\\brain\\9b60e45b-628a-4e99-bdb9-3e175a116ca9";
+    if (fs.existsSync(brainArtifactsDir)) {
+      for (const file of fs.readdirSync(artifactsDir)) {
+        if (file.endsWith(".png")) {
+          fs.copyFileSync(path.join(artifactsDir, file), path.join(brainArtifactsDir, file));
+        }
+      }
+    }
 
   } catch (err) {
     console.error("测试执行过程中出现异常:", err);

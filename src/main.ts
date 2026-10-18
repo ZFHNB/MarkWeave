@@ -553,9 +553,18 @@ function downloadMarkdown() {
   const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
   const filename = currentDoc ? currentDoc.title : "document.md";
 
+  const exportPolicy = localStorage.getItem("markweave_default_export_policy") || "ask";
+
   if (hasMarkWeaveMermaid(content)) {
-    // 识别到 MarkWeave 形式 Mermaid，提示用户双重导出方式
-    showExportModal(content, filename);
+    if (exportPolicy === "markweave") {
+      doDownloadFile(content, filename);
+    } else if (exportPolicy === "compatible") {
+      const cleanContent = cleanMermaidForCompatibility(content);
+      doDownloadFile(cleanContent, filename);
+    } else {
+      // 识别到 MarkWeave 形式 Mermaid，提示用户双重导出方式
+      showExportModal(content, filename);
+    }
   } else {
     // 纯文本无专有标记，直接导出
     doDownloadFile(content, filename);
@@ -569,19 +578,92 @@ function downloadMarkdown() {
   showExportModal,
 };
 
+export interface MarkWeaveSettings {
+  mermaidDefaultMode: "custom" | "standard";
+  mermaidDefaultCurve: "step-round" | "step" | "basis" | "linear";
+  gridSnap: boolean;
+  exportScale: number;
+  fontSize: string;
+  lineHeight: string;
+  fontFamily: string;
+  exportPolicy: "ask" | "markweave" | "compatible";
+  theme: "system" | "light" | "night";
+}
+
+function loadSettings(): MarkWeaveSettings {
+  return {
+    mermaidDefaultMode: (localStorage.getItem("markweave_mermaid_default_mode") as any) || "custom",
+    mermaidDefaultCurve: (localStorage.getItem("markweave_mermaid_default_curve") as any) || "step-round",
+    gridSnap: localStorage.getItem("markweave_grid_snap") !== "false",
+    exportScale: parseInt(localStorage.getItem("markweave_export_scale") || "2", 10) || 2,
+    fontSize: localStorage.getItem("markweave_font_size") || "16px",
+    lineHeight: localStorage.getItem("markweave_line_height") || "1.65",
+    fontFamily: localStorage.getItem("markweave_font_family") || "default",
+    exportPolicy: (localStorage.getItem("markweave_default_export_policy") as any) || "ask",
+    theme: (localStorage.getItem("markweave_theme") as any) || "light",
+  };
+}
+
+function saveSettings(settings: MarkWeaveSettings) {
+  localStorage.setItem("markweave_mermaid_default_mode", settings.mermaidDefaultMode);
+  localStorage.setItem("markweave_mermaid_default_curve", settings.mermaidDefaultCurve);
+  localStorage.setItem("markweave_grid_snap", String(settings.gridSnap));
+  localStorage.setItem("markweave_export_scale", String(settings.exportScale));
+  localStorage.setItem("markweave_font_size", settings.fontSize);
+  localStorage.setItem("markweave_line_height", settings.lineHeight);
+  localStorage.setItem("markweave_font_family", settings.fontFamily);
+  localStorage.setItem("markweave_default_export_policy", settings.exportPolicy);
+  localStorage.setItem("markweave_theme", settings.theme);
+
+  applySettings(settings);
+}
+
+function applySettings(settings: MarkWeaveSettings) {
+  const root = document.documentElement;
+  root.style.setProperty("--editor-font-size", settings.fontSize);
+  root.style.setProperty("--editor-line-height", settings.lineHeight);
+
+  if (settings.fontFamily === "serif") {
+    root.style.setProperty("--editor-font-family", "Georgia, 'Songti SC', SimSun, serif");
+  } else if (settings.fontFamily === "pingfang") {
+    root.style.setProperty("--editor-font-family", "'PingFang SC', 'Microsoft YaHei', sans-serif");
+  } else if (settings.fontFamily === "lxgw") {
+    root.style.setProperty("--editor-font-family", "'LXGW WenKai', 'Kaiti SC', KaiTi, STKaiti, serif");
+  } else {
+    root.style.setProperty("--editor-font-family", "var(--font-family)");
+  }
+
+  // 主题应用
+  if (settings.theme === "night") {
+    document.body.classList.add("theme-night");
+  } else if (settings.theme === "light") {
+    document.body.classList.remove("theme-night");
+  } else if (settings.theme === "system") {
+    const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+    document.body.classList.toggle("theme-night", isDark);
+  }
+
+  window.dispatchEvent(
+    new CustomEvent("markweave-default-mode-change", { detail: { mode: settings.mermaidDefaultMode } })
+  );
+  window.dispatchEvent(
+    new CustomEvent("markweave-settings-updated", { detail: settings })
+  );
+}
+
 /**
  * 偏好设置面板 (Settings Modal)
- * 支持设置全局 Mermaid 默认渲染模式（自定义模式 vs 普通模式）
+ * 提供分类清晰的多 Tab 导航与丰富的图表、排版、主题、导出设置
  */
 function openSettingsModal() {
-  const currentDefaultMode = localStorage.getItem("markweave_mermaid_default_mode") || "custom";
+  const currentSettings = loadSettings();
 
   const modalOverlay = document.createElement("div");
   modalOverlay.className = "ty-modal-overlay";
   modalOverlay.id = "settings-modal-overlay";
 
   modalOverlay.innerHTML = `
-    <div class="ty-modal-card" style="max-width: 520px;">
+    <div class="ty-modal-card ty-settings-dialog">
       <div class="ty-modal-header">
         <div class="ty-modal-title" style="display: flex; align-items: center; gap: 8px;">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -593,47 +675,172 @@ function openSettingsModal() {
         <button class="ty-modal-close" id="btn-close-settings-x">&times;</button>
       </div>
 
-      <div class="ty-modal-body">
-        <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--text-color);">
-          Mermaid 图表默认预览模式
-        </div>
-        <div style="font-size: 12px; color: #777; margin-bottom: 12px; line-height: 1.45;">
-          控制新加载或创建 Markdown 图表时的默认渲染引擎与交互体系：
-        </div>
+      <div class="ty-settings-nav" id="settings-tabs-nav">
+        <button class="ty-settings-tab-btn active" data-tab="charts">📊 图表设置</button>
+        <button class="ty-settings-tab-btn" data-tab="editor">✍️ 编辑排版</button>
+        <button class="ty-settings-tab-btn" data-tab="appearance">🎨 外观主题</button>
+        <button class="ty-settings-tab-btn" data-tab="storage">📁 存储与导出</button>
+        <button class="ty-settings-tab-btn" data-tab="about">ℹ️ 关于系统</button>
+      </div>
 
-        <div class="ty-export-options">
-          <label class="ty-export-option-card ${currentDefaultMode === "custom" ? "selected" : ""}" id="setting-card-custom">
-            <input type="radio" name="mermaid-default-mode" value="custom" ${currentDefaultMode === "custom" ? "checked" : ""} />
-            <div class="ty-export-option-content">
-              <div class="ty-export-option-title">
-                🎨 自定义模式 (MarkWeave 样式) <span style="font-size: 11px; color: var(--primary-color); background: rgba(66, 133, 244, 0.1); padding: 1px 6px; border-radius: 4px; margin-left: 4px;">默认推荐</span>
-              </div>
-              <div class="ty-export-option-desc">
-                展示 MarkWeave 独创样式与全部功能，支持拖拽排版、正交拐角圆弧/直角折线、箭头反转、行内修改连线文字等完整功能。
-              </div>
-            </div>
-          </label>
-
-          <label class="ty-export-option-card ${currentDefaultMode === "standard" ? "selected" : ""}" id="setting-card-standard">
-            <input type="radio" name="mermaid-default-mode" value="standard" ${currentDefaultMode === "standard" ? "checked" : ""} />
-            <div class="ty-export-option-content">
-              <div class="ty-export-option-title">
-                🌐 普通模式 (主流兼容样式)
-              </div>
-              <div class="ty-export-option-desc">
-                展示可兼容主流官方 Mermaid 的标准样式，仅支持纵向与横向排布转换功能，保证与 GitHub、Typora 等平台预览完全一致。
-              </div>
-            </div>
-          </label>
-        </div>
-
-        <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
-          <div style="font-size: 12px; color: #888;">
-            MarkWeave v0.1.0 • 纯本地运行
+      <div class="ty-modal-body" style="overflow-y: auto; max-height: 56vh; padding-right: 6px;">
+        <!-- Tab 1: 图表设置 -->
+        <div class="ty-settings-panel active" id="tab-panel-charts">
+          <div class="ty-settings-section-title">Mermaid 图表默认预览模式</div>
+          <div style="font-size: 12px; color: #777; margin-bottom: 10px; line-height: 1.45;">
+            控制新加载或创建 Markdown 图表时的默认渲染引擎与交互体系：
           </div>
-          <a href="https://github.com/ZFHNB/MarkWeave.git" target="_blank" style="font-size: 12px; color: var(--primary-color); text-decoration: none;">
-            GitHub 仓库
-          </a>
+
+          <div class="ty-export-options">
+            <label class="ty-export-option-card ${currentSettings.mermaidDefaultMode === "custom" ? "selected" : ""}" id="setting-card-custom">
+              <input type="radio" name="mermaid-default-mode" value="custom" ${currentSettings.mermaidDefaultMode === "custom" ? "checked" : ""} />
+              <div class="ty-export-option-content">
+                <div class="ty-export-option-title">
+                  🎨 自定义模式 (MarkWeave 样式) <span style="font-size: 11px; color: var(--primary-color); background: rgba(66, 133, 244, 0.1); padding: 1px 6px; border-radius: 4px; margin-left: 4px;">默认推荐</span>
+                </div>
+                <div class="ty-export-option-desc">
+                  展示 MarkWeave 独创样式与全部功能，支持拖拽排版、正交拐角圆弧/直角折线、箭头反转、行内修改连线文字等完整功能。
+                </div>
+              </div>
+            </label>
+
+            <label class="ty-export-option-card ${currentSettings.mermaidDefaultMode === "standard" ? "selected" : ""}" id="setting-card-standard">
+              <input type="radio" name="mermaid-default-mode" value="standard" ${currentSettings.mermaidDefaultMode === "standard" ? "checked" : ""} />
+              <div class="ty-export-option-content">
+                <div class="ty-export-option-title">
+                  🌐 普通模式 (主流兼容样式)
+                </div>
+                <div class="ty-export-option-desc">
+                  展示可兼容主流官方 Mermaid 的标准样式，仅支持纵向与横向排布转换功能，保证与 GitHub、Typora 等平台预览完全一致。
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <div class="ty-settings-row" style="margin-top: 14px;">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">默认折线拐角风格</span>
+              <span class="ty-settings-desc">新图表或未指定 curve 时默认连线形态</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-curve">
+              <option value="step-round" ${currentSettings.mermaidDefaultCurve === "step-round" ? "selected" : ""}>正交圆角折线 (Rounded Step, 推荐)</option>
+              <option value="step" ${currentSettings.mermaidDefaultCurve === "step" ? "selected" : ""}>正交直角折线 (Orthogonal Step)</option>
+              <option value="basis" ${currentSettings.mermaidDefaultCurve === "basis" ? "selected" : ""}>平滑贝塞尔曲线 (Smooth Curve)</option>
+              <option value="linear" ${currentSettings.mermaidDefaultCurve === "linear" ? "selected" : ""}>经典折线/直线 (Linear)</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">节点拖拽吸附网格</span>
+              <span class="ty-settings-desc">拖拽节点时自动吸附对齐到 10px 网格，连线更规整</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-grid" ${currentSettings.gridSnap ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">预览图复制分辨率</span>
+              <span class="ty-settings-desc">在预览模式下一键复制图片到剪贴板的分辨率倍数</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-scale">
+              <option value="1" ${currentSettings.exportScale === 1 ? "selected" : ""}>标准清晰度 (1x / 72 DPI)</option>
+              <option value="2" ${currentSettings.exportScale === 2 ? "selected" : ""}>Retina 视网膜高清 (2x / 144 DPI, 推荐)</option>
+              <option value="3" ${currentSettings.exportScale === 3 ? "selected" : ""}>出版印刷超清 (3x / 216 DPI)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tab 2: 编辑排版 -->
+        <div class="ty-settings-panel" id="tab-panel-editor">
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">正文字体大小</span>
+              <span class="ty-settings-desc">主编辑区域段落与正文的渲染字号</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-font-size">
+              <option value="14px" ${currentSettings.fontSize === "14px" ? "selected" : ""}>14px (精致紧凑)</option>
+              <option value="15px" ${currentSettings.fontSize === "15px" ? "selected" : ""}>15px (小巧)</option>
+              <option value="16px" ${currentSettings.fontSize === "16px" ? "selected" : ""}>16px (默认推荐)</option>
+              <option value="18px" ${currentSettings.fontSize === "18px" ? "selected" : ""}>18px (舒适大号)</option>
+              <option value="20px" ${currentSettings.fontSize === "20px" ? "selected" : ""}>20px (醒目演示)</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">正文行间距</span>
+              <span class="ty-settings-desc">段落文字的垂直行高比例</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-line-height">
+              <option value="1.5" ${currentSettings.lineHeight === "1.5" ? "selected" : ""}>1.5 (紧凑)</option>
+              <option value="1.65" ${currentSettings.lineHeight === "1.65" ? "selected" : ""}>1.65 (标准 Typora)</option>
+              <option value="1.8" ${currentSettings.lineHeight === "1.8" ? "selected" : ""}>1.8 (宽松舒适)</option>
+              <option value="2.0" ${currentSettings.lineHeight === "2.0" ? "selected" : ""}>2.0 (双倍行距)</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">正文字体族</span>
+              <span class="ty-settings-desc">渲染文章所用的主要字体方案</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-font-family">
+              <option value="default" ${currentSettings.fontFamily === "default" ? "selected" : ""}>系统原生无衬线 (System Default)</option>
+              <option value="pingfang" ${currentSettings.fontFamily === "pingfang" ? "selected" : ""}>苹方 / 微软雅黑 (Modern UI)</option>
+              <option value="serif" ${currentSettings.fontFamily === "serif" ? "selected" : ""}>宋体 / 优雅衬线 (Elegant Serif)</option>
+              <option value="lxgw" ${currentSettings.fontFamily === "lxgw" ? "selected" : ""}>霞鹜文楷风格 / 楷体 (Chinese KaiTi)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tab 3: 外观主题 -->
+        <div class="ty-settings-panel" id="tab-panel-appearance">
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">界面主题模式</span>
+              <span class="ty-settings-desc">选择编辑器的色彩外观风格</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-theme">
+              <option value="light" ${currentSettings.theme === "light" ? "selected" : ""}>Typora 浅色明亮</option>
+              <option value="night" ${currentSettings.theme === "night" ? "selected" : ""}>夜间深色模式 (Night)</option>
+              <option value="system" ${currentSettings.theme === "system" ? "selected" : ""}>跟随系统自动切换</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tab 4: 存储与导出 -->
+        <div class="ty-settings-panel" id="tab-panel-storage">
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">导出 Markdown 默认行为</span>
+              <span class="ty-settings-desc">导出含 MarkWeave 排版图表时的默认处理机制</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-export-policy">
+              <option value="ask" ${currentSettings.exportPolicy === "ask" ? "selected" : ""}>检测到自定义排版时弹窗选择 (推荐)</option>
+              <option value="markweave" ${currentSettings.exportPolicy === "markweave" ? "selected" : ""}>优先保留 MarkWeave 增强排版</option>
+              <option value="compatible" ${currentSettings.exportPolicy === "compatible" ? "selected" : ""}>始终清洗为通用兼容 Mermaid</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Tab 5: 关于系统 -->
+        <div class="ty-settings-panel" id="tab-panel-about">
+          <div style="text-align: center; padding: 18px 0 10px;">
+            <h2 style="font-size: 22px; font-weight: 700; color: var(--text-color); margin-bottom: 4px;">MarkWeave</h2>
+            <div style="font-size: 13px; color: var(--primary-color); font-weight: 500; margin-bottom: 16px;">v0.2.0 • 交互式 Markdown 绘图编辑器</div>
+            <p style="font-size: 13px; color: #666; line-height: 1.6; max-width: 480px; margin: 0 auto 20px;">
+              MarkWeave 是下一代所见即所得 Markdown 编辑器。首创 Mermaid 图表可视化拖拽节点、拐角平滑圆角、任意箭头换向、文字原地修改，并无缝兼容主流标准。
+            </p>
+            <div style="display: flex; justify-content: center; gap: 12px;">
+              <a href="https://github.com/ZFHNB/MarkWeave.git" target="_blank" class="ty-btn" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                <span>🌐</span> GitHub 仓库
+              </a>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -646,21 +853,32 @@ function openSettingsModal() {
 
   document.body.appendChild(modalOverlay);
 
-  const cardCustom = modalOverlay.querySelector("#setting-card-custom") as HTMLElement;
-  const cardStandard = modalOverlay.querySelector("#setting-card-standard") as HTMLElement;
-  const radioCustom = cardCustom.querySelector("input") as HTMLInputElement;
-  const radioStandard = cardStandard.querySelector("input") as HTMLInputElement;
-
-  cardCustom.addEventListener("click", () => {
-    radioCustom.checked = true;
-    cardCustom.classList.add("selected");
-    cardStandard.classList.remove("selected");
+  // Tab 切换交互
+  const tabBtns = modalOverlay.querySelectorAll<HTMLButtonElement>(".ty-settings-tab-btn");
+  const tabPanels = modalOverlay.querySelectorAll<HTMLElement>(".ty-settings-panel");
+  tabBtns.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetTab = btn.getAttribute("data-tab");
+      tabBtns.forEach((b) => b.classList.toggle("active", b === btn));
+      tabPanels.forEach((p) => p.classList.toggle("active", p.id === `tab-panel-${targetTab}`));
+    });
   });
 
-  cardStandard.addEventListener("click", () => {
-    radioStandard.checked = true;
+  const cardCustom = modalOverlay.querySelector("#setting-card-custom") as HTMLElement;
+  const cardStandard = modalOverlay.querySelector("#setting-card-standard") as HTMLElement;
+  const radioCustom = cardCustom?.querySelector("input") as HTMLInputElement;
+  const radioStandard = cardStandard?.querySelector("input") as HTMLInputElement;
+
+  cardCustom?.addEventListener("click", () => {
+    if (radioCustom) radioCustom.checked = true;
+    cardCustom.classList.add("selected");
+    cardStandard?.classList.remove("selected");
+  });
+
+  cardStandard?.addEventListener("click", () => {
+    if (radioStandard) radioStandard.checked = true;
     cardStandard.classList.add("selected");
-    cardCustom.classList.remove("selected");
+    cardCustom?.classList.remove("selected");
   });
 
   const closeModal = () => modalOverlay.remove();
@@ -672,24 +890,43 @@ function openSettingsModal() {
   });
 
   modalOverlay.querySelector("#btn-save-settings")?.addEventListener("click", () => {
-    const selectedMode = radioStandard.checked ? "standard" : "custom";
-    localStorage.setItem("markweave_mermaid_default_mode", selectedMode);
+    const selectedMode = radioStandard?.checked ? "standard" : "custom";
+    const selectCurve = ((modalOverlay.querySelector("#setting-select-curve") as HTMLSelectElement)?.value as any) || "step-round";
+    const toggleGrid = (modalOverlay.querySelector("#setting-toggle-grid") as HTMLInputElement)?.checked ?? true;
+    const selectScale = parseInt((modalOverlay.querySelector("#setting-select-scale") as HTMLSelectElement)?.value || "2", 10) || 2;
+    const selectFontSize = (modalOverlay.querySelector("#setting-select-font-size") as HTMLSelectElement)?.value || "16px";
+    const selectLineHeight = (modalOverlay.querySelector("#setting-select-line-height") as HTMLSelectElement)?.value || "1.65";
+    const selectFontFamily = (modalOverlay.querySelector("#setting-select-font-family") as HTMLSelectElement)?.value || "default";
+    const selectExportPolicy = ((modalOverlay.querySelector("#setting-select-export-policy") as HTMLSelectElement)?.value as any) || "ask";
+    const selectTheme = ((modalOverlay.querySelector("#setting-select-theme") as HTMLSelectElement)?.value as any) || "light";
 
-    // 广播设置变动通知，所有当前图表 0ms 实时响应更新
-    window.dispatchEvent(
-      new CustomEvent("markweave-default-mode-change", { detail: { mode: selectedMode } })
-    );
+    const newSettings: MarkWeaveSettings = {
+      mermaidDefaultMode: selectedMode,
+      mermaidDefaultCurve: selectCurve,
+      gridSnap: toggleGrid,
+      exportScale: selectScale,
+      fontSize: selectFontSize,
+      lineHeight: selectLineHeight,
+      fontFamily: selectFontFamily,
+      exportPolicy: selectExportPolicy,
+      theme: selectTheme,
+    };
 
+    saveSettings(newSettings);
     closeModal();
   });
 }
 
 (window as any).__MARKWEAVE_SETTINGS__ = {
   openSettingsModal,
+  loadSettings,
+  saveSettings,
+  applySettings,
   getDefaultMode: () => localStorage.getItem("markweave_mermaid_default_mode") || "custom",
   setDefaultMode: (mode: "custom" | "standard") => {
-    localStorage.setItem("markweave_mermaid_default_mode", mode);
-    window.dispatchEvent(new CustomEvent("markweave-default-mode-change", { detail: { mode } }));
+    const s = loadSettings();
+    s.mermaidDefaultMode = mode;
+    saveSettings(s);
   },
 };
 
@@ -701,8 +938,13 @@ btnSaveMd.addEventListener("click", downloadMarkdown);
 // 主题切换 (明亮 / 暗色)
 btnToggleTheme.addEventListener("click", () => {
   document.body.classList.toggle("theme-night");
+  const isNight = document.body.classList.contains("theme-night");
+  localStorage.setItem("markweave_theme", isNight ? "night" : "light");
   window.dispatchEvent(new CustomEvent("theme-change"));
 });
+
+// 初始化加载并应用设置
+applySettings(loadSettings());
 
 // 专注模式
 btnFocusMode.addEventListener("click", () => {

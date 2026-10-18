@@ -222,8 +222,9 @@ html, body {
   border: none !important;
   min-height: 100%;
   user-select: text;
-  font-size: 16px;
-  line-height: 1.65;
+  font-family: var(--editor-font-family, var(--font-family));
+  font-size: var(--editor-font-size, 16px);
+  line-height: var(--editor-line-height, 1.65);
 }
 
 /* 消除 contenteditable 原生聚焦黑框与轮廓线 */
@@ -467,7 +468,7 @@ body.theme-night .md-blockquote {
   touch-action: none;
 }
 
-/* 浮动控制工具条 */
+/* 浮动控制工具条：非编辑模式下鼠标挪开自动隐藏，悬停时平滑显现；图表编辑模式下常驻显示 */
 .md-diagram-toolbar {
   position: absolute;
   top: 8px;
@@ -475,7 +476,7 @@ body.theme-night .md-blockquote {
   display: flex;
   align-items: center;
   gap: 6px;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(8px);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -484,12 +485,42 @@ body.theme-night .md-blockquote {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
   font-family: var(--font-family);
   font-size: 11px;
+  transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 非“图表编辑”模式下鼠标挪开时自动隐藏 */
+.md-diagram-preview:not(.is-edit-mode) .md-diagram-toolbar {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+}
+
+/* 鼠标悬停到图表或聚焦时立即优雅显现 */
+.md-diagram-preview:not(.is-edit-mode):hover .md-diagram-toolbar,
+.md-diagram-preview:not(.is-edit-mode):focus-within .md-diagram-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+/* “图表编辑”模式下常驻固定显示，方便用户随时微调操作 */
+.md-diagram-preview.is-edit-mode .md-diagram-toolbar {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: translateY(0) !important;
 }
 
 body.theme-night .md-diagram-toolbar {
-  background: rgba(40, 40, 40, 0.9);
+  background: rgba(40, 40, 40, 0.92);
   border-color: rgba(255, 255, 255, 0.12);
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+/* 彻底清除 Mermaid 默认引擎在实线连线上遗留的 4px 断续残缺与 stroke-dasharray 伪虚线间隙，使直线保持严谨平滑连续 */
+.md-mermaid-block path.flowchart-link:not(.edge-pattern-dots):not(.edge-pattern-dashed):not([class*="dashed"]):not([class*="dotted"]),
+.md-mermaid-block .edgePaths path:not(.edge-pattern-dots):not(.edge-pattern-dashed):not([class*="dashed"]):not([class*="dotted"]) {
+  stroke-dasharray: none !important;
+  stroke-dashoffset: 0 !important;
 }
 
 .md-diagram-btn-group {
@@ -995,4 +1026,177 @@ body.theme-night .md-edge-popover {
   color: #fff;
   border-color: var(--primary-color);
 }
+
+/* ================= 偏好设置模态框组件 (Settings Tabs & Controls) ================= */
+.ty-settings-dialog {
+  max-width: 660px !important;
+  width: 90% !important;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ty-settings-nav {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0 4px 10px 4px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.ty-settings-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-color);
+  opacity: 0.7;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.ty-settings-tab-btn:hover {
+  opacity: 1;
+  background: var(--item-hover-bg-color);
+}
+
+.ty-settings-tab-btn.active {
+  opacity: 1;
+  color: var(--primary-color);
+  background: rgba(66, 133, 244, 0.1);
+  border-color: rgba(66, 133, 244, 0.25);
+  font-weight: 600;
+}
+
+.theme-night .ty-settings-tab-btn.active {
+  background: rgba(77, 170, 252, 0.15);
+  border-color: rgba(77, 170, 252, 0.35);
+}
+
+.ty-settings-panel {
+  display: none;
+  animation: fadeIn 0.15s ease;
+}
+
+.ty-settings-panel.active {
+  display: block;
+}
+
+.ty-settings-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+  margin-bottom: 6px;
+}
+
+.ty-settings-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-color);
+  gap: 16px;
+}
+
+.ty-settings-row:last-child {
+  border-bottom: none;
+}
+
+.ty-settings-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+}
+
+.ty-settings-label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-color);
+}
+
+.ty-settings-desc {
+  font-size: 12px;
+  color: #777;
+  line-height: 1.4;
+}
+
+.theme-night .ty-settings-desc {
+  color: #999;
+}
+
+.ty-settings-select {
+  padding: 5px 10px;
+  font-size: 13px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--text-color);
+  outline: none;
+  min-width: 150px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.ty-settings-select:focus {
+  border-color: var(--primary-color);
+}
+
+.ty-settings-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.ty-settings-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.ty-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: 0.2s;
+  border-radius: 22px;
+}
+
+.theme-night .ty-toggle-slider {
+  background-color: #555;
+}
+
+.ty-toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: 0.2s;
+  border-radius: 50%;
+}
+
+.ty-settings-toggle input:checked + .ty-toggle-slider {
+  background-color: var(--primary-color);
+}
+
+.ty-settings-toggle input:checked + .ty-toggle-slider:before {
+  transform: translateX(18px);
+}
+
 

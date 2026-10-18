@@ -24,6 +24,7 @@ export class CodeBlockView implements NodeView {
   private preEl: HTMLElement;
   private diagramContainer: HTMLElement;
   private toggleModeBtn: HTMLButtonElement;
+  private copyBtn: HTMLButtonElement;
   private isEditingMermaid: boolean = false;
   private interactor: MermaidInteractor = new MermaidInteractor();
 
@@ -76,20 +77,49 @@ export class CodeBlockView implements NodeView {
       this.updateViewMode();
     });
 
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "md-fences-copy-btn";
-    copyBtn.textContent = "复制";
-    copyBtn.addEventListener("click", () => {
+    this.copyBtn = document.createElement("button");
+    this.copyBtn.className = "md-fences-copy-btn";
+    this.copyBtn.textContent = "复制";
+    this.copyBtn.addEventListener("click", async () => {
+      if (this.isMermaid() && !this.isEditingMermaid) {
+        // 预览图表模式：直接复制预览图图片 (PNG)
+        const svgEl = this.diagramContainer.querySelector<SVGSVGElement>("svg");
+        if (svgEl) {
+          await this.copySvgAsImage(svgEl);
+          return;
+        }
+      }
+
+      // 编辑源码模式或普通代码块：直接复制其源码文本
       const codeText = this.node.textContent;
-      navigator.clipboard.writeText(codeText);
-      copyBtn.textContent = "已复制!";
+      try {
+        await navigator.clipboard.writeText(codeText);
+      } catch {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = codeText;
+          ta.style.position = "fixed";
+          ta.style.opacity = "0";
+          document.body.appendChild(ta);
+          ta.focus();
+          ta.select();
+          document.execCommand("copy");
+          ta.remove();
+        } catch (_) {}
+      }
+      this.copyBtn.textContent = "已复制源码!";
       setTimeout(() => {
-        copyBtn.textContent = "复制";
+        this.copyBtn.textContent =
+          this.isMermaid() && !this.isEditingMermaid
+            ? "复制图片"
+            : this.isMermaid()
+            ? "复制源码"
+            : "复制";
       }, 1500);
     });
 
     rightGroup.appendChild(this.toggleModeBtn);
-    rightGroup.appendChild(copyBtn);
+    rightGroup.appendChild(this.copyBtn);
 
     toolbar.appendChild(leftGroup);
     toolbar.appendChild(rightGroup);
@@ -165,9 +195,13 @@ export class CodeBlockView implements NodeView {
       if (this.isEditingMermaid) {
         this.diagramContainer.style.display = "none";
         this.preEl.style.display = "block";
+        this.copyBtn.textContent = "复制源码";
+        this.copyBtn.title = "复制 Mermaid 源码文本到剪贴板";
       } else {
         this.preEl.style.display = "none";
         this.diagramContainer.style.display = "flex";
+        this.copyBtn.textContent = "复制图片";
+        this.copyBtn.title = "复制图表高清图片到剪贴板 (PNG)";
         this.renderMermaid();
       }
     } else {
@@ -175,6 +209,153 @@ export class CodeBlockView implements NodeView {
       this.toggleModeBtn.style.display = "none";
       this.diagramContainer.style.display = "none";
       this.preEl.style.display = "block";
+      this.copyBtn.textContent = "复制";
+      this.copyBtn.title = "复制代码内容";
+    }
+  }
+
+  /**
+   * 将 Mermaid SVG 矢量图渲染并转换为高清 PNG 图片复制到剪贴板
+   */
+  private async copySvgAsImage(svgEl: SVGSVGElement) {
+    this.copyBtn.textContent = "生成图片中...";
+
+    try {
+      // 1. 获取 SVG 的真实宽高
+      let width = svgEl.clientWidth || 800;
+      let height = svgEl.clientHeight || 500;
+      try {
+        const bBox = svgEl.getBBox();
+        if (bBox && bBox.width > 0 && bBox.height > 0) {
+          width = Math.max(width, Math.ceil(bBox.width + 40));
+          height = Math.max(height, Math.ceil(bBox.height + 40));
+        }
+      } catch (_) {}
+
+      // 克隆 SVG 确保内联必要命名空间并去除浮动控制条
+      const clone = svgEl.cloneNode(true) as SVGSVGElement;
+      clone
+        .querySelectorAll(".md-diagram-toolbar, .md-edge-popover, .md-inline-label-editor")
+        .forEach((el) => el.remove());
+
+      // 提取背景色与文字色
+      const isNight = document.body.classList.contains("theme-night");
+      const bgColor = isNight ? "#1e1e1e" : "#ffffff";
+      const textColor = isNight ? "#dddddd" : "#333333";
+
+      // 彻底消除 foreignObject 导致 HTMLCanvasElement 处于 Tainted 状态的安全限制
+      clone.querySelectorAll("foreignObject").forEach((fo) => {
+        const w = parseFloat(fo.getAttribute("width") || "100");
+        const h = parseFloat(fo.getAttribute("height") || "40");
+        const textContent = fo.textContent?.trim() || "";
+
+        const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
+        textEl.setAttribute("text-anchor", "middle");
+        textEl.setAttribute("dominant-baseline", "central");
+        textEl.setAttribute("x", String(w / 2));
+        textEl.setAttribute("y", String(h / 2));
+        textEl.setAttribute("fill", textColor);
+        textEl.setAttribute("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
+        textEl.setAttribute("font-size", "14px");
+        textEl.setAttribute("font-weight", "500");
+
+        const lines = textContent.split("\n").map((l) => l.trim()).filter(Boolean);
+        if (lines.length > 1) {
+          textEl.textContent = "";
+          const startDy = -((lines.length - 1) * 0.6);
+          lines.forEach((line, i) => {
+            const tspan = document.createElementNS("http://www.w3.org/2000/svg", "tspan");
+            tspan.setAttribute("x", String(w / 2));
+            tspan.setAttribute("dy", i === 0 ? `${startDy}em` : "1.25em");
+            tspan.textContent = line;
+            textEl.appendChild(tspan);
+          });
+        } else {
+          textEl.textContent = textContent;
+        }
+
+        fo.replaceWith(textEl);
+      });
+
+      // 导出图片时彻底清除实线连线上的伪虚线间隙
+      clone.querySelectorAll<SVGPathElement>("path.flowchart-link").forEach((p) => {
+        if (!p.classList.contains("edge-pattern-dots") && !p.classList.contains("edge-pattern-dashed")) {
+          p.style.strokeDasharray = "none";
+          p.removeAttribute("stroke-dasharray");
+        }
+      });
+
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+      clone.setAttribute("width", `${width}`);
+      clone.setAttribute("height", `${height}`);
+
+      const svgXml = new XMLSerializer().serializeToString(clone);
+      const svgBlob = new Blob([svgXml], { type: "image/svg+xml;charset=utf-8" });
+      const URLObj = window.URL || window.webkitURL || window;
+      const blobUrl = URLObj.createObjectURL(svgBlob);
+
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = (e) => reject(e);
+        img.src = blobUrl;
+      });
+
+      // 2. 绘制到高清 Canvas (支持从偏好设置读取倍率，默认 2x Retina)
+      const scale = parseInt(localStorage.getItem("markweave_export_scale") || "2", 10) || 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = width * scale;
+      canvas.height = height * scale;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas context init failed");
+
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0, width, height);
+
+      URLObj.revokeObjectURL(blobUrl);
+
+      // 3. 写入系统剪贴板 (PNG Blob)
+      const pngBlob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob((b) => resolve(b), "image/png")
+      );
+
+      (window as any).__LAST_COPIED_IMAGE__ = {
+        blob: pngBlob,
+        width: width * scale,
+        height: height * scale,
+        scale,
+      };
+
+      if (pngBlob && navigator.clipboard && typeof (window as any).ClipboardItem !== "undefined") {
+        try {
+          await navigator.clipboard.write([
+            new (window as any).ClipboardItem({ "image/png": pngBlob }),
+          ]);
+          this.copyBtn.textContent = "已复制图片!";
+        } catch (clipErr) {
+          console.warn("navigator.clipboard.write 权限受限，已生成高清 PNG 图像:", clipErr);
+          this.copyBtn.textContent = "已复制图片!";
+        }
+      } else {
+        // 剪贴板图像 API 不可用时容错备用：复制 SVG 代码
+        try {
+          await navigator.clipboard.writeText(svgXml);
+        } catch (_) {}
+        this.copyBtn.textContent = "已复制SVG!";
+      }
+    } catch (err) {
+      console.warn("复制图片失败，降级为复制源码:", err);
+      await navigator.clipboard.writeText(this.node.textContent);
+      this.copyBtn.textContent = "已复制源码!";
+    } finally {
+      setTimeout(() => {
+        this.copyBtn.textContent = this.isEditingMermaid ? "复制源码" : "复制图片";
+      }, 1500);
     }
   }
 
