@@ -477,6 +477,32 @@ async function runTests() {
     });
     assert("线型切换后持续稳定保持，绝无闪烁与回弹闪回", isOrthogonalPersistent);
 
+    // 18.2c 测试点击「圆角」后，图表折角处平滑过渡为带圆弧倒角的正交折线 (Rounded Elbow)
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-mermaid-block .md-diagram-btn"));
+      const basisBtn = btns.find((b) => b.textContent.includes("圆角"));
+      basisBtn?.click();
+    });
+    await new Promise((r) => setTimeout(r, 150));
+
+    const isRoundedElbowRealtime = await page.evaluate(() => {
+      const paths = Array.from(document.querySelectorAll(".md-mermaid-block path.flowchart-link"));
+      return paths.some((p) => {
+        const d = p.getAttribute("d") || "";
+        // 包含带 Q 贝塞尔倒角的正交折线
+        return /Q\s*[-\d.]+\s*,\s*[-\d.]+\s+[-\d.]+\s*,\s*[-\d.]+/i.test(d);
+      });
+    });
+    assert("点击「圆角」按钮后，图表折角处平滑过渡为带有优雅圆弧倒角的正交折线", isRoundedElbowRealtime);
+
+    // 切回「直角」折线
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-mermaid-block .md-diagram-btn"));
+      const stepBtn = btns.find((b) => b.textContent.includes("直角"));
+      stepBtn?.click();
+    });
+    await new Promise((r) => setTimeout(r, 150));
+
     // 18.3 验证连线说明文字精确绑定在该连线几何位置上（无错误错位）
     const isLabelAccuratelyBound = await page.evaluate(() => {
       const labels = Array.from(document.querySelectorAll(".md-mermaid-block .edgeLabels > g.edgeLabel"));

@@ -1061,45 +1061,131 @@ export class MermaidInteractor {
 
     if (curveStyle === "linear") {
       // 1. 直线风格 (Linear)
-      pathD = `M${Math.round(start.x)},${Math.round(start.y)}L${Math.round(end.x)},${Math.round(end.y)}`;
-      labelPos = { x: Math.round((start.x + end.x) / 2), y: Math.round((start.y + end.y) / 2) };
-    } else if (curveStyle === "stepBefore") {
-      // 2. 全直角折线风格 (Orthogonal Manhattan Routing) - 严谨保持 90 度工整折角
-      if (exitDir === "down" || exitDir === "up") {
-        const yMid = Math.round((start.y + end.y) / 2 + laneOffset);
-        const sx = Math.round(start.x);
-        const sy = Math.round(start.y);
-        const ex = Math.round(end.x);
-        const ey = Math.round(end.y);
-        pathD = `M${sx},${sy}L${sx},${yMid}L${ex},${yMid}L${ex},${ey}`;
-        labelPos = { x: Math.round((sx + ex) / 2), y: yMid };
-      } else {
-        const xMid = Math.round((start.x + end.x) / 2 + laneOffset);
-        const sx = Math.round(start.x);
-        const sy = Math.round(start.y);
-        const ex = Math.round(end.x);
-        const ey = Math.round(end.y);
-        pathD = `M${sx},${sy}L${xMid},${sy}L${xMid},${ey}L${ex},${ey}`;
-        labelPos = { x: xMid, y: Math.round((sy + ey) / 2) };
-      }
-    } else {
-      // 3. 圆角弧线风格 (Smooth Bezier)
       const sx = Math.round(start.x);
       const sy = Math.round(start.y);
       const ex = Math.round(end.x);
       const ey = Math.round(end.y);
+      pathD = `M${sx},${sy}L${ex},${ey}`;
+      labelPos = { x: Math.round((sx + ex) / 2), y: Math.round((sy + ey) / 2) };
+    } else {
+      // 2. 正交折线体系 (Orthogonal Manhattan / Elbow)
+      // - "stepBefore": 严谨 90 度全直角折线 (cornerRadius = 0)
+      // - "basis": 折弯处带有平滑圆润弧度的圆角折线 (cornerRadius = 10，保持横平竖直主干，拐角圆弧倒角)
+      const cornerRadius = curveStyle === "stepBefore" ? 0 : 10;
+      const sx = Math.round(start.x);
+      const sy = Math.round(start.y);
+      const ex = Math.round(end.x);
+      const ey = Math.round(end.y);
+
+      let waypoints: Point[];
+
       if (exitDir === "down" || exitDir === "up") {
         const yMid = Math.round((sy + ey) / 2 + laneOffset);
-        pathD = `M${sx},${sy}C${sx},${yMid} ${ex},${yMid} ${ex},${ey}`;
+        waypoints = [
+          { x: sx, y: sy },
+          { x: sx, y: yMid },
+          { x: ex, y: yMid },
+          { x: ex, y: ey },
+        ];
         labelPos = { x: Math.round((sx + ex) / 2), y: yMid };
       } else {
         const xMid = Math.round((sx + ex) / 2 + laneOffset);
-        pathD = `M${sx},${sy}C${xMid},${sy} ${xMid},${ey} ${ex},${ey}`;
+        waypoints = [
+          { x: sx, y: sy },
+          { x: xMid, y: sy },
+          { x: xMid, y: ey },
+          { x: ex, y: ey },
+        ];
         labelPos = { x: xMid, y: Math.round((sy + ey) / 2) };
       }
+
+      pathD = this.buildOrthogonalPath(waypoints, cornerRadius);
     }
 
     return { pathD, labelPos };
+  }
+
+  /**
+   * 构造正交航线 SVG 路径 (支持指定折角圆弧半径 cornerRadius)
+   * - cornerRadius = 0: 严谨 90 度尖角全直角折线
+   * - cornerRadius > 0: 折弯处平滑圆弧倒角过渡 (Rounded Elbow)
+   */
+  private buildOrthogonalPath(rawPoints: Point[], cornerRadius: number = 0): string {
+    // 1. 过滤连续重合点 (避免零长度线段畸变)
+    const points: Point[] = [];
+    for (const p of rawPoints) {
+      if (points.length === 0) {
+        points.push(p);
+      } else {
+        const last = points[points.length - 1];
+        if (Math.abs(last.x - p.x) >= 1 || Math.abs(last.y - p.y) >= 1) {
+          points.push(p);
+        }
+      }
+    }
+
+    if (points.length <= 1) return "";
+    if (points.length === 2 || cornerRadius <= 0) {
+      // 纯直线或 90 度尖角全直角正交折线
+      let d = `M${points[0].x},${points[0].y}`;
+      for (let i = 1; i < points.length; i++) {
+        d += `L${points[i].x},${points[i].y}`;
+      }
+      return d;
+    }
+
+    // 2. 带圆角弧度的正交折线 (Rounded Elbow Routing)
+    // 每个折弯角通过二次贝塞尔曲线 Q 进行平滑圆弧倒角过渡
+    let d = `M${points[0].x},${points[0].y}`;
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+
+      // 入向向量
+      const dx1 = curr.x - prev.x;
+      const dy1 = curr.y - prev.y;
+      const len1 = Math.hypot(dx1, dy1);
+
+      // 出向向量
+      const dx2 = next.x - curr.x;
+      const dy2 = next.y - curr.y;
+      const len2 = Math.hypot(dx2, dy2);
+
+      // 如果共线或段长极短，直接直线连接当前点
+      if (
+        len1 < 2 ||
+        len2 < 2 ||
+        (dx1 === 0 && dx2 === 0) ||
+        (dy1 === 0 && dy2 === 0)
+      ) {
+        d += `L${curr.x},${curr.y}`;
+        continue;
+      }
+
+      // 单位向量
+      const ux1 = dx1 / len1;
+      const uy1 = dy1 / len1;
+      const ux2 = dx2 / len2;
+      const uy2 = dy2 / len2;
+
+      // 动态自适应拐角弧度半径（不超过相邻任一线段长度的一半，防止过冲）
+      const r = Math.min(cornerRadius, len1 / 2, len2 / 2);
+
+      const startX = Math.round(curr.x - ux1 * r);
+      const startY = Math.round(curr.y - uy1 * r);
+      const endX = Math.round(curr.x + ux2 * r);
+      const endY = Math.round(curr.y + uy2 * r);
+
+      // 直线段抵达倒角起点，使用 Q 二次贝塞尔曲线优雅圆弧过渡到出线点
+      d += `L${startX},${startY}Q${curr.x},${curr.y} ${endX},${endY}`;
+    }
+
+    // 连接终点
+    const last = points[points.length - 1];
+    d += `L${last.x},${last.y}`;
+    return d;
   }
 
   private rerouteEdgesForNode(_node: NodeTopology) {
