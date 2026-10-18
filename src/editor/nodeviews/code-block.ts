@@ -137,12 +137,15 @@ export class CodeBlockView implements NodeView {
     this.diagramContainer.className = "md-diagram-preview";
     this.diagramContainer.style.display = "none";
     this.diagramContainer.addEventListener("click", (e) => {
+      if (this.isEditingMermaid) return;
       // 避免工具栏按钮、连线气泡、行内输入框点击或编辑模式下触发切入源码编辑
       const target = e.target as HTMLElement;
       if (
         target.closest(".md-diagram-toolbar") ||
+        target.closest(".md-diagram-toolbar-wrap") ||
         target.closest(".md-edge-popover") ||
         target.closest(".md-inline-label-editor") ||
+        target.closest(".md-inline-node-editor") ||
         this.diagramContainer.classList.contains("is-drag-mode") ||
         this.diagramContainer.classList.contains("is-edit-mode")
       ) {
@@ -153,9 +156,10 @@ export class CodeBlockView implements NodeView {
       this.updateViewMode();
     });
 
+    // 挂载顺序：顶部工具条 -> 源码编辑框 (pre) -> 图表预览 (diagramContainer)，与 Typora 完全一致
     this.dom.appendChild(toolbar);
-    this.dom.appendChild(this.diagramContainer);
     this.dom.appendChild(this.preEl);
+    this.dom.appendChild(this.diagramContainer);
 
     // 监听键盘快捷键：Ctrl+Enter 快速退出编辑并实时渲染图表
     this.preEl.addEventListener("keydown", (e: KeyboardEvent) => {
@@ -176,8 +180,16 @@ export class CodeBlockView implements NodeView {
     this.updateViewMode();
   }
 
+  private renderTimeout: any = null;
+  private scheduleDebouncedRender() {
+    if (this.renderTimeout) clearTimeout(this.renderTimeout);
+    this.renderTimeout = setTimeout(() => {
+      this.renderMermaid();
+    }, 150);
+  }
+
   private themeListener = () => {
-    if (this.isMermaid() && !this.isEditingMermaid) {
+    if (this.isMermaid()) {
       this.renderMermaid();
     }
   };
@@ -193,11 +205,16 @@ export class CodeBlockView implements NodeView {
       this.toggleModeBtn.textContent = this.isEditingMermaid ? "预览图表" : "编辑源码";
 
       if (this.isEditingMermaid) {
-        this.diagramContainer.style.display = "none";
+        this.dom.classList.add("is-editing");
+        // 编辑源码模式：上方展示源码输入框，下方同步呈现图表实时预览 (对标 Typora)
         this.preEl.style.display = "block";
+        this.diagramContainer.style.display = "flex";
         this.copyBtn.textContent = "复制源码";
         this.copyBtn.title = "复制 Mermaid 源码文本到剪贴板";
+        this.renderMermaid();
       } else {
+        this.dom.classList.remove("is-editing");
+        // 预览图表模式：收起源码输入框，全幅纯净展示图表预览
         this.preEl.style.display = "none";
         this.diagramContainer.style.display = "flex";
         this.copyBtn.textContent = "复制图片";
@@ -206,6 +223,7 @@ export class CodeBlockView implements NodeView {
       }
     } else {
       this.dom.classList.remove("md-mermaid-block");
+      this.dom.classList.remove("is-editing");
       this.toggleModeBtn.style.display = "none";
       this.diagramContainer.style.display = "none";
       this.preEl.style.display = "block";
@@ -422,6 +440,7 @@ export class CodeBlockView implements NodeView {
   }
 
   destroy() {
+    if (this.renderTimeout) clearTimeout(this.renderTimeout);
     this.interactor.destroy();
     window.removeEventListener("theme-change", this.themeListener);
   }
@@ -444,10 +463,15 @@ export class CodeBlockView implements NodeView {
       const cleanOld = stripNonStructural(oldText);
       const cleanNew = stripNonStructural(node.textContent);
 
-      // 只有当实质语法变化（如增删节点、修改文字形状或主排布方向）时才重新由 Mermaid 渲染
-      if (oldParams !== node.attrs.params || cleanOld !== cleanNew) {
-        this.isEditingMermaid = false;
+      if (oldParams !== node.attrs.params) {
         this.updateViewMode();
+      } else if (cleanOld !== cleanNew) {
+        // 实质代码变动：源码编辑态下防抖重绘下方预览 (对标 Typora)；图表预览态下直接重绘
+        if (this.isEditingMermaid) {
+          this.scheduleDebouncedRender();
+        } else {
+          this.renderMermaid();
+        }
       } else {
         // 实质图表结构未变（仅位置元数据或连线风格配置变动）：
         // 若外部、撤销重做或初始化改变了画线风格，直接调用 0ms 矢量引擎无缝重设，杜绝闪烁和回弹
@@ -470,8 +494,10 @@ export class CodeBlockView implements NodeView {
       target === this.toggleModeBtn ||
       target.classList.contains("md-fences-copy-btn") ||
       target.closest(".md-diagram-toolbar") !== null ||
+      target.closest(".md-diagram-toolbar-wrap") !== null ||
       target.closest(".md-edge-popover") !== null ||
       target.closest(".md-inline-label-editor") !== null ||
+      target.closest(".md-inline-node-editor") !== null ||
       this.diagramContainer.classList.contains("is-drag-mode") ||
       this.diagramContainer.classList.contains("is-edit-mode") ||
       this.diagramContainer.contains(target)

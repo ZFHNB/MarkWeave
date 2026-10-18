@@ -30,6 +30,8 @@ interface NodeTopology {
   dx: number;
   dy: number;
   bbox: { x: number; y: number; width: number; height: number };
+  labelText?: string;
+  labelEl?: Element;
 }
 
 interface EdgeTopology {
@@ -75,7 +77,9 @@ export class MermaidInteractor {
   private initialViewBox: { x: number; y: number; w: number; h: number } = { x: 0, y: 0, w: 0, h: 0 };
 
   // 浮动控制栏 DOM 与浮层
+  private toolbarWrapEl: HTMLElement | null = null;
   private toolbarEl: HTMLElement | null = null;
+  private hideToolbarTimer: any = null;
   private editModeBtn!: HTMLButtonElement;
   private zoomDisplay!: HTMLSpanElement;
   private popoverEl: HTMLElement | null = null;
@@ -190,6 +194,14 @@ export class MermaidInteractor {
         }
       } catch (_) {}
 
+      // 提取节点文本与对应的标签容器元素
+      const labelEl =
+        el.querySelector(".label") ||
+        el.querySelector(".nodeLabel") ||
+        el.querySelector("text") ||
+        el;
+      const labelText = labelEl ? (labelEl.textContent || "").trim() : "";
+
       this.nodesMap.set(key, {
         key,
         el,
@@ -201,6 +213,8 @@ export class MermaidInteractor {
         dx: 0,
         dy: 0,
         bbox,
+        labelText,
+        labelEl,
       });
     });
 
@@ -272,7 +286,11 @@ export class MermaidInteractor {
    * 创建并挂载顶部精致交互工具条
    */
   private createToolbar() {
+    this.toolbarWrapEl?.remove();
     this.toolbarEl?.remove();
+
+    const wrap = document.createElement("div");
+    wrap.className = "md-diagram-toolbar-wrap";
 
     const bar = document.createElement("div");
     bar.className = "md-diagram-toolbar";
@@ -437,7 +455,9 @@ export class MermaidInteractor {
       resetBtn.style.display = "none";
     }
 
-    this.container.appendChild(bar);
+    wrap.appendChild(bar);
+    this.container.appendChild(wrap);
+    this.toolbarWrapEl = wrap;
     this.toolbarEl = bar;
   }
 
@@ -729,9 +749,57 @@ export class MermaidInteractor {
    * 绑定 Pointer / Click / Wheel 事件
    */
   private bindEvents() {
-    // 1. 节点拖拽事件绑定 (含格点吸附)
+    // 0. 顶部浮动控制栏专属感应区域交互优化 (四周外延 24-30px 的感应缓冲区域，挪开后消失)
+    const onContainerMouseMove = (e: MouseEvent) => {
+      if (this.isEditMode || !this.toolbarEl || !this.toolbarWrapEl) return;
+      const rect = this.toolbarEl.getBoundingClientRect();
+      const inZone =
+        e.clientX >= rect.left - 30 &&
+        e.clientX <= rect.right + 20 &&
+        e.clientY >= rect.top - 20 &&
+        e.clientY <= rect.bottom + 30;
+
+      if (inZone) {
+        if (this.hideToolbarTimer) {
+          clearTimeout(this.hideToolbarTimer);
+          this.hideToolbarTimer = null;
+        }
+        this.toolbarWrapEl.classList.add("is-toolbar-visible");
+      } else {
+        if (!this.hideToolbarTimer && this.toolbarWrapEl.classList.contains("is-toolbar-visible")) {
+          this.hideToolbarTimer = setTimeout(() => {
+            this.toolbarWrapEl?.classList.remove("is-toolbar-visible");
+            this.hideToolbarTimer = null;
+          }, 200);
+        }
+      }
+    };
+
+    const onContainerMouseLeave = () => {
+      if (this.isEditMode || !this.toolbarWrapEl) return;
+      this.hideToolbarTimer = setTimeout(() => {
+        this.toolbarWrapEl?.classList.remove("is-toolbar-visible");
+        this.hideToolbarTimer = null;
+      }, 200);
+    };
+
+    this.container.addEventListener("mousemove", onContainerMouseMove);
+    this.container.addEventListener("mouseleave", onContainerMouseLeave);
+    this.cleanupFns.push(() => {
+      this.container.removeEventListener("mousemove", onContainerMouseMove);
+      this.container.removeEventListener("mouseleave", onContainerMouseLeave);
+      if (this.hideToolbarTimer) clearTimeout(this.hideToolbarTimer);
+    });
+
+    // 1. 节点拖拽与文字实时编辑事件绑定 (区分拖拽位移与点击，防范历史错误)
     this.nodesMap.forEach((node) => {
+      let dragStartScreen = { x: 0, y: 0 };
+      let hasDragged = false;
+
       const onPointerDown = (e: PointerEvent) => {
+        dragStartScreen = { x: e.clientX, y: e.clientY };
+        hasDragged = false;
+
         if (!this.isEditMode) return;
         e.stopPropagation();
         e.preventDefault();
@@ -746,8 +814,38 @@ export class MermaidInteractor {
         this.svg.setPointerCapture(e.pointerId);
       };
 
+      const onPointerMove = (e: PointerEvent) => {
+        if (Math.hypot(e.clientX - dragStartScreen.x, e.clientY - dragStartScreen.y) > 4) {
+          hasDragged = true;
+        }
+      };
+
+      const onClick = (e: MouseEvent) => {
+        // 编辑模式下未发生拖动时，单击节点文字直接原地编辑
+        if (!this.isEditMode || hasDragged) return;
+        e.stopPropagation();
+        e.preventDefault();
+        this.openInlineNodeEditor(node, e);
+      };
+
+      const onDblClick = (e: MouseEvent) => {
+        // 任何模式下双击节点均可直接呼出原地文字编辑
+        e.stopPropagation();
+        e.preventDefault();
+        this.openInlineNodeEditor(node, e);
+      };
+
       node.el.addEventListener("pointerdown", onPointerDown);
-      this.cleanupFns.push(() => node.el.removeEventListener("pointerdown", onPointerDown));
+      node.el.addEventListener("pointermove", onPointerMove);
+      node.el.addEventListener("click", onClick);
+      node.el.addEventListener("dblclick", onDblClick);
+
+      this.cleanupFns.push(() => {
+        node.el.removeEventListener("pointerdown", onPointerDown);
+        node.el.removeEventListener("pointermove", onPointerMove);
+        node.el.removeEventListener("click", onClick);
+        node.el.removeEventListener("dblclick", onDblClick);
+      });
     });
 
     // 2. 连线点击事件 (改变箭头方向)
@@ -1086,6 +1184,133 @@ export class MermaidInteractor {
       const labelPart = newText ? `|${newText}|` : "";
       return `${prefix}${firstNode}${arrow}${labelPart ? labelPart + " " : ""}${secondNode.trimStart()}`;
     });
+  }
+
+  /**
+   * 打开节点文字原地行内编辑框 (实时修改图表中的文字)
+   */
+  public openInlineNodeEditor(node: NodeTopology, _e?: MouseEvent) {
+    this.closeInlineInput();
+    this.closePopover();
+
+    const rect = this.container.getBoundingClientRect();
+    const wrapper = document.createElement("div");
+    wrapper.className = "md-inline-node-editor";
+
+    const targetEl = node.labelEl || node.el;
+    const box = targetEl.getBoundingClientRect();
+
+    const centerX = box.left + box.width / 2 - rect.left;
+    const centerY = box.top + box.height / 2 - rect.top;
+
+    wrapper.style.left = `${Math.max(10, centerX)}px`;
+    wrapper.style.top = `${Math.max(10, centerY)}px`;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "md-inline-node-input";
+    input.value = node.labelText || "";
+    input.placeholder = "节点文字...";
+
+    let isSaving = false;
+    const save = () => {
+      if (isSaving) return;
+      isSaving = true;
+      const newText = input.value.trim();
+      this.closeInlineInput();
+      if (newText && newText !== node.labelText) {
+        this.updateNodeLabelInSource(node.key, newText, node.labelText);
+      }
+    };
+
+    input.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") {
+        evt.preventDefault();
+        save();
+      } else if (evt.key === "Escape") {
+        this.closeInlineInput();
+      }
+    });
+
+    input.addEventListener("blur", save);
+
+    wrapper.appendChild(input);
+    this.container.appendChild(wrapper);
+    this.activeInlineInput = wrapper;
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 50);
+  }
+
+  /**
+   * 更新节点文字并无缝同步回 Markdown 源码
+   * 保留节点的形状括号符号、避免破坏任何相邻连线与位置元数据
+   */
+  public updateNodeLabelInSource(nodeKey: string, newText: string, oldText?: string) {
+    const code = this.getCurrentCode();
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Mermaid 形状括号对（按长度降序排序，杜绝短符号先行吞噬长符号）
+    const bracketPairs = [
+      { open: "[[", close: "]]" },
+      { open: "[(", close: ")]" },
+      { open: "([", close: "])" },
+      { open: "((", close: "))" },
+      { open: "{{", close: "}}" },
+      { open: "[/", close: "/]" },
+      { open: "[\\", close: "\\]" },
+      { open: "[/", close: "\\]" },
+      { open: "[\\", close: "/]" },
+      { open: ">", close: "]" },
+      { open: "[", close: "]" },
+      { open: "(", close: ")" },
+      { open: "{", close: "}" },
+    ];
+
+    let updatedCode = code;
+    let matched = false;
+
+    for (const pair of bracketPairs) {
+      const openEsc = escapeRegex(pair.open);
+      const closeEsc = escapeRegex(pair.close);
+      const pattern = new RegExp(
+        `((?:^|[^\\w\\-])\\b${escapeRegex(nodeKey)}\\b\\s*${openEsc})([\\s\\S]*?)(${closeEsc})`,
+        "m"
+      );
+      if (pattern.test(updatedCode)) {
+        updatedCode = updatedCode.replace(pattern, (_m, p1, oldContent, p3) => {
+          if (oldContent.trim().startsWith('"') && oldContent.trim().endsWith('"')) {
+            return `${p1}"${newText}"${p3}`;
+          }
+          return `${p1}${newText}${p3}`;
+        });
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      // 容错 1：若是无括号节点（如 A --> B），为其补充标准矩形 [newText]
+      const barePattern = new RegExp(`((?:^|[^\\w\\-])\\b)(${escapeRegex(nodeKey)})(\\b(?![\\w\\-\\[\\(\\{>]))`, "m");
+      if (barePattern.test(updatedCode)) {
+        updatedCode = updatedCode.replace(barePattern, `$1$2[${newText}]`);
+        matched = true;
+      }
+    }
+
+    if (!matched && oldText) {
+      // 容错 2：非 flowchart 图表或特殊语法，安全替换已知旧文字
+      const textPattern = new RegExp(escapeRegex(oldText), "g");
+      if (textPattern.test(updatedCode)) {
+        updatedCode = updatedCode.replace(textPattern, newText);
+        matched = true;
+      }
+    }
+
+    if (matched && updatedCode !== code) {
+      this.onSourceChange(updatedCode);
+    }
   }
 
   private getSvgPoint(e: PointerEvent): Point {

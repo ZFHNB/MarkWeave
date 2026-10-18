@@ -256,6 +256,10 @@ async function runTests() {
     assert("切换按钮文字更新为'预览图表'", toggleBtnText === "预览图表");
     assert("“编辑源码/预览图表”按钮成功位于工具栏右侧、紧挨复制按钮左边", isToggleOnRight);
 
+    // 收起源码折叠框，恢复纯净图表预览，确保后续图表交互测试正常运行
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 300));
+
     // 9.3 动态改写源码并触发重绘
     console.log("\n--- 测试 11: Mermaid 动态改写与实时重绘 ---");
     const updatedMermaidCode = `graph LR
@@ -956,8 +960,8 @@ async function runTests() {
     assert("非编辑模式下鼠标挪开图表后，浮动控制条自动隐藏 (opacity: 0, pointerEvents: none)", isToolbarHiddenOnLeave);
     await page.screenshot({ path: path.join(artifactsDir, "25-diagram-toolbar-auto-hidden.png") });
 
-    // 鼠标移入图表区域
-    await page.hover(".md-mermaid-block .md-diagram-preview");
+    // 鼠标移入工具条专属感应区域
+    await page.hover(".md-mermaid-block .md-diagram-toolbar-wrap");
     await new Promise((r) => setTimeout(r, 400));
 
     const isToolbarVisibleOnHover = await page.evaluate(() => {
@@ -967,7 +971,7 @@ async function runTests() {
       const pointerEvents = getComputedStyle(tb).pointerEvents;
       return opacity === "1" && pointerEvents === "auto";
     });
-    assert("鼠标悬停至图表区域时，浮动控制条平滑显现 (opacity: 1, pointerEvents: auto)", isToolbarVisibleOnHover);
+    assert("鼠标悬停至工具条感应区域时，浮动控制条平滑显现 (opacity: 1, pointerEvents: auto)", isToolbarVisibleOnHover);
     await page.screenshot({ path: path.join(artifactsDir, "26-diagram-toolbar-visible-on-hover.png") });
 
     // 点击进入图表编辑模式
@@ -1010,6 +1014,156 @@ async function runTests() {
     });
     assert("所有实线连线彻底剥离伪虚线 stroke-dasharray 间隔，直线 100% 严谨平滑连续无断续残缺", areSolidLinesContinuous);
     await page.screenshot({ path: path.join(artifactsDir, "27-continuous-smooth-solid-lines.png") });
+
+    // ==========================================
+    // 32. 编辑源码模式下，下方同步展示图表实时预览 (对标 Typora)
+    // ==========================================
+    console.log("\n--- 测试 32: 编辑源码模式下下方同步展示图表实时预览 (对标 Typora) ---");
+    // 1. 点击「编辑源码」切换按钮
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isLivePreviewShownUnderneath = await page.evaluate(() => {
+      const block = document.querySelector(".md-mermaid-block");
+      const pre = block?.querySelector("pre.md-fences-content");
+      const preview = block?.querySelector(".md-diagram-preview");
+      const svg = preview?.querySelector("svg");
+      return (
+        block?.classList.contains("is-editing") &&
+        pre &&
+        getComputedStyle(pre).display !== "none" &&
+        preview &&
+        getComputedStyle(preview).display === "flex" &&
+        !!svg
+      );
+    });
+    assert("编辑源码模式下，上方展示源码输入框，下方同步呈现图表实时预览 (对标 Typora)", isLivePreviewShownUnderneath);
+    await page.screenshot({ path: path.join(artifactsDir, "28-source-editor-with-live-preview-below.png") });
+
+    // 2. 打字实时更新：在源码末尾追加新节点
+    await page.evaluate(() => {
+      const block = document.querySelector(".md-mermaid-block");
+      const code = block?.querySelector("code");
+      if (code) {
+        code.focus();
+        const currentText = code.textContent || "";
+        code.textContent = currentText + "\n  F --> G[实时打字即时响应验证]";
+        code.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await new Promise((r) => setTimeout(r, 600));
+
+    const isLiveRenderedOnTyping = await page.evaluate(() => {
+      const svg = document.querySelector(".md-mermaid-block .md-diagram-preview svg");
+      return svg && svg.textContent?.includes("实时打字即时响应验证");
+    });
+    assert("编辑源码打字时，下方图表 0ms/防抖即时重排重绘，实时体现新节点", isLiveRenderedOnTyping);
+    await page.screenshot({ path: path.join(artifactsDir, "29-live-render-while-typing.png") });
+
+    // 3. 点击「预览图表」按钮收起源码
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isSourceFoldedToPurePreview = await page.evaluate(() => {
+      const block = document.querySelector(".md-mermaid-block");
+      const pre = block?.querySelector("pre.md-fences-content");
+      const preview = block?.querySelector(".md-diagram-preview");
+      return (
+        !block?.classList.contains("is-editing") &&
+        pre &&
+        getComputedStyle(pre).display === "none" &&
+        preview &&
+        getComputedStyle(preview).display === "flex"
+      );
+    });
+    assert("点击「预览图表」后，源码输入框顺利收起折叠，全幅展示纯净图表预览", isSourceFoldedToPurePreview);
+
+    // ==========================================
+    // 33. 浮动菜单栏专属感应区域判定 (比菜单栏稍微大一点，挪开后再消失)
+    // ==========================================
+    console.log("\n--- 测试 33: 浮动菜单栏专属感应区域判定 (比菜单栏稍微大一点，挪开后再消失) ---");
+    const tbBox = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      if (!tb) return null;
+      const r = tb.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+
+    if (tbBox) {
+      // 鼠标移动到菜单栏下方 15px (位于稍微大一点的外延感应区域内)
+      await page.mouse.move(tbBox.x + tbBox.width / 2, tbBox.y + tbBox.height + 15);
+      await new Promise((r) => setTimeout(r, 300));
+
+      const isVisibleInExtendedZone = await page.evaluate(() => {
+        const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+        return tb && getComputedStyle(tb).opacity === "1";
+      });
+      assert("鼠标移动至菜单栏边缘外侧扩展缓冲带 (+15px) 内时，菜单栏保持优雅显现", isVisibleInExtendedZone);
+
+      // 鼠标挪开这个区域 (移到远离菜单栏 100px 处)
+      await page.mouse.move(tbBox.x + tbBox.width / 2, tbBox.y + tbBox.height + 100);
+      await new Promise((r) => setTimeout(r, 500));
+
+      const isHiddenAfterLeavingZone = await page.evaluate(() => {
+        const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+        if (!tb) return false;
+        const op = getComputedStyle(tb).opacity;
+        return op === "0" || parseFloat(op) < 0.1;
+      });
+      assert("鼠标完全挪开该专属区域后，菜单栏平滑消失", isHiddenAfterLeavingZone);
+      await page.screenshot({ path: path.join(artifactsDir, "30-toolbar-sensing-zone-precision.png") });
+    }
+
+    // ==========================================
+    // 34. 图表中的文字支持实时修改 (双击/单击原地编辑并 0ms 同步源码与图表)
+    // ==========================================
+    console.log("\n--- 测试 34: 图表中的文字支持实时原地修改与源码 0ms 同步 ---");
+    // 1. 在图表中双击第一个节点
+    const firstNodeExists = await page.evaluate(() => {
+      const node = document.querySelector(".md-mermaid-block svg .node");
+      return !!node;
+    });
+    assert("图表中存在可交互节点", firstNodeExists);
+
+    await page.evaluate(() => {
+      const node = document.querySelector(".md-mermaid-block svg .node");
+      if (node) {
+        node.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+      }
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const isInlineNodeEditorOpen = await page.evaluate(() => {
+      const editor = document.querySelector(".md-inline-node-editor");
+      const input = editor?.querySelector("input.md-inline-node-input");
+      return !!editor && !!input;
+    });
+    assert("双击节点成功弹出居中原地文字编辑悬浮框 (.md-inline-node-editor)", isInlineNodeEditorOpen);
+
+    // 2. 修改文本为「输入 Markdown 文本」并回车提交
+    await page.evaluate(() => {
+      const input = document.querySelector(".md-inline-node-input");
+      if (input) {
+        input.value = "输入 Markdown 文本";
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      }
+    });
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 3. 验证图表和源码双向实时更新
+    const isNodeTextUpdatedLive = await page.evaluate(() => {
+      const preview = document.querySelector(".md-mermaid-block .md-diagram-preview");
+      const block = document.querySelector(".md-mermaid-block");
+      const previewText = preview?.textContent || "";
+      const sourceText = block?.querySelector("code")?.textContent || "";
+      return (
+        previewText.includes("输入 Markdown 文本") &&
+        sourceText.includes("输入 Markdown 文本") &&
+        sourceText.includes("A[输入 Markdown 文本]")
+      );
+    });
+    assert("节点文字修改后 0ms 实时更新图表渲染并同步更新 Markdown 源码，保持原有语法括号形态不变", isNodeTextUpdatedLive);
+    await page.screenshot({ path: path.join(artifactsDir, "31-node-text-live-edited.png") });
 
     const brainArtifactsDir = "C:\\Users\\27953\\.gemini\\antigravity-cli\\brain\\9b60e45b-628a-4e99-bdb9-3e175a116ca9";
     if (fs.existsSync(brainArtifactsDir)) {
