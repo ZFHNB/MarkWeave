@@ -627,6 +627,85 @@ async function runTests() {
     assert("源码成功切换为纵向排布 (TD)", /flowchart\s+TD/i.test(mdAfterSwitchToTD));
     await page.screenshot({ path: path.join(artifactsDir, "16-mermaid-direction-td-after-custom.png") });
 
+    console.log("\n--- 测试 23: 节点横向位移时起始/目标端点动态自适应选边 ---");
+    // 确保开启编辑模式
+    await page.evaluate(() => {
+      const preview = document.querySelector(".md-mermaid-block .md-diagram-preview");
+      if (!preview || !preview.classList.contains("is-edit-mode")) {
+        const editBtn = document.querySelector(".md-mermaid-block .md-diagram-drag-btn");
+        editBtn?.click();
+      }
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    // 拖动第一个节点 (Markdown 纯文本) 向右横向平移 220px
+    const node0Handle = (await page.$$(".md-mermaid-block .node"))[0];
+    const box0 = await node0Handle?.boundingBox();
+    if (box0) {
+      await page.mouse.move(box0.x + box0.width / 2, box0.y + box0.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(box0.x + box0.width / 2 + 220, box0.y + box0.height / 2, { steps: 10 });
+      await page.mouse.up();
+    }
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 验证相连连线的起始端点已自适应为左侧或右侧端点 (水平出线)
+    const hasAdaptiveHorizontalPorts = await page.evaluate(() => {
+      const links = Array.from(document.querySelectorAll(".md-mermaid-block path.flowchart-link"));
+      return links.some((l) => {
+        const d = l.getAttribute("d") || "";
+        // 含有水平走线起始段 (M sx,sy L xMid,sy)
+        const m = /^M\s*([-\d.]+)\s*,\s*([-\d.]+)\s*L\s*([-\d.]+)\s*,\s*([-\d.]+)/i.exec(d);
+        if (m) {
+          const sy = parseFloat(m[2]);
+          const ey1 = parseFloat(m[4]);
+          return Math.abs(sy - ey1) < 2;
+        }
+        return false;
+      });
+    });
+    assert("形状移动到右侧/左侧后，箭头起始与目标端点自适应切换为左右侧端点", hasAdaptiveHorizontalPorts);
+    await page.screenshot({ path: path.join(artifactsDir, "17-mermaid-dynamic-port-left-right.png") });
+
+    console.log("\n--- 测试 24: 导出 Markdown 识别专有图表并展示双重兼容模态框 ---");
+    // 点击顶栏「导出 Markdown」按钮
+    await page.click("#btn-save-md");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isModalVisible = await page.evaluate(() => {
+      const modal = document.querySelector(".ty-modal-overlay");
+      return modal !== null && getComputedStyle(modal).display !== "none";
+    });
+    assert("识别到 MarkWeave 图表元数据，成功弹出导出格式选择模态框", isModalVisible);
+
+    const hasBothOptions = await page.evaluate(() => {
+      const optMarkweave = document.querySelector("#opt-card-markweave");
+      const optCompat = document.querySelector("#opt-card-compat");
+      return optMarkweave !== null && optCompat !== null;
+    });
+    assert("模态框包含「MarkWeave 增强格式」与「通用兼容格式」两种选项", hasBothOptions);
+
+    // 验证通用兼容清洗函数
+    const isCleanSuccessful = await page.evaluate(() => {
+      const raw = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const clean = window.__MARKWEAVE_EXPORT__.cleanMermaidForCompatibility(raw);
+      return (
+        (/typemark_positions/.test(raw) || /%%\{init:/.test(raw)) &&
+        !/typemark_positions/.test(clean) &&
+        !/%%\{init:/.test(clean)
+      );
+    });
+    assert("通用兼容模式能彻底清洗并剥离专有排版注释，生成纯净标准语法", isCleanSuccessful);
+
+    await page.screenshot({ path: path.join(artifactsDir, "18-markdown-export-compatibility-dialog.png") });
+
+    // 关闭模态框
+    await page.click("#btn-cancel-export");
+    await new Promise((r) => setTimeout(r, 300));
+    const isModalClosed = await page.evaluate(() => document.querySelector(".ty-modal-overlay") === null);
+    assert("成功响应取消并关闭模态框", isModalClosed);
+
+
   } catch (err) {
     console.error("测试执行过程中出现异常:", err);
     failCount++;

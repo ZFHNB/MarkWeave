@@ -181,8 +181,8 @@ app.innerHTML = `
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           主题
         </button>
-        <button class="ty-icon-btn" id="btn-save-md" title="下载/保存为 .md 文件">
-          保存 Markdown
+        <button class="ty-icon-btn" id="btn-save-md" title="导出为 Markdown 文件">
+          导出 Markdown
         </button>
         <button class="ty-icon-btn" id="btn-export-html" title="导出为 HTML">
           导出 HTML
@@ -434,12 +434,22 @@ window.addEventListener("keydown", (e) => {
   }
 });
 
-// 保存/下载 Markdown
-function downloadMarkdown() {
-  const currentDoc = documents.find((d) => d.id === activeDocId);
-  const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
-  const filename = currentDoc ? currentDoc.title : "document.md";
+// 导出/保存 Markdown 功能实现 (支持识别 MarkWeave 形式 Mermaid 并提供双重兼容选项)
+function hasMarkWeaveMermaid(markdown: string): boolean {
+  return (
+    /%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%/.test(markdown) ||
+    /%%\{init:\s*\{.*?\}\s*\}\s*%%/.test(markdown)
+  );
+}
 
+function cleanMermaidForCompatibility(markdown: string): string {
+  // 彻底清洗并剥离 MarkWeave 专有位置注释与自定义 init，生成 100% 外部通用标准语法
+  return markdown
+    .replace(/%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?/g, "")
+    .replace(/%%\{init:\s*\{.*?\}\s*\}\s*%%\n?/g, "");
+}
+
+function doDownloadFile(content: string, filename: string) {
   const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -448,6 +458,106 @@ function downloadMarkdown() {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+function showExportModal(rawContent: string, defaultFilename: string) {
+  document.querySelector(".ty-modal-overlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.className = "ty-modal-overlay";
+  overlay.innerHTML = `
+    <div class="ty-modal-card">
+      <div class="ty-modal-header">
+        <span class="ty-modal-icon">📦</span>
+        <h3>导出 Markdown 格式选项</h3>
+      </div>
+      <p class="ty-modal-desc">
+        系统检测到当前文档中包含通过 <strong>MarkWeave</strong> 自定义拖拽排版的 Mermaid 图表。请根据您的使用场景选择导出方式：
+      </p>
+      <div class="ty-export-options">
+        <label class="ty-export-option-card selected" id="opt-card-markweave">
+          <input type="radio" name="export-mode" value="markweave" checked />
+          <div class="ty-export-option-content">
+            <div class="ty-export-option-title">🎨 导出 MarkWeave 增强格式（保留排版操作）</div>
+            <div class="ty-export-option-desc">完整保留您对图表组件拖拽的位置微调与排版元数据。未来在 MarkWeave 中打开可无损恢复您调整的布局，继续可视化编辑。</div>
+          </div>
+        </label>
+        <label class="ty-export-option-card" id="opt-card-compat">
+          <input type="radio" name="export-mode" value="compatible" />
+          <div class="ty-export-option-content">
+            <div class="ty-export-option-title">🌐 导出通用兼容格式 (Clean Mermaid)</div>
+            <div class="ty-export-option-desc">自动清洗并剥离专有排版注释，转换为纯净的标准 Mermaid 语法。确保在 GitHub、Typora、Notion、Obsidian 等第三方平台 100% 正常渲染。</div>
+          </div>
+        </label>
+      </div>
+      <div class="ty-modal-footer">
+        <button class="ty-btn" id="btn-cancel-export">取消</button>
+        <button class="ty-btn ty-btn-primary" id="btn-confirm-export">确认导出</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const cardMarkweave = overlay.querySelector("#opt-card-markweave") as HTMLElement;
+  const cardCompat = overlay.querySelector("#opt-card-compat") as HTMLElement;
+  const radioMarkweave = overlay.querySelector('input[value="markweave"]') as HTMLInputElement;
+  const radioCompat = overlay.querySelector('input[value="compatible"]') as HTMLInputElement;
+  const btnCancel = overlay.querySelector("#btn-cancel-export") as HTMLButtonElement;
+  const btnConfirm = overlay.querySelector("#btn-confirm-export") as HTMLButtonElement;
+
+  cardMarkweave.addEventListener("click", () => {
+    radioMarkweave.checked = true;
+    cardMarkweave.classList.add("selected");
+    cardCompat.classList.remove("selected");
+  });
+
+  cardCompat.addEventListener("click", () => {
+    radioCompat.checked = true;
+    cardCompat.classList.add("selected");
+    cardMarkweave.classList.remove("selected");
+  });
+
+  const close = () => {
+    overlay.remove();
+  };
+
+  btnCancel.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  btnConfirm.addEventListener("click", () => {
+    const isCompat = radioCompat.checked;
+    close();
+    if (isCompat) {
+      const cleanContent = cleanMermaidForCompatibility(rawContent);
+      doDownloadFile(cleanContent, defaultFilename);
+    } else {
+      doDownloadFile(rawContent, defaultFilename);
+    }
+  });
+}
+
+function downloadMarkdown() {
+  const currentDoc = documents.find((d) => d.id === activeDocId);
+  const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+  const filename = currentDoc ? currentDoc.title : "document.md";
+
+  if (hasMarkWeaveMermaid(content)) {
+    // 识别到 MarkWeave 形式 Mermaid，提示用户双重导出方式
+    showExportModal(content, filename);
+  } else {
+    // 纯文本无专有标记，直接导出
+    doDownloadFile(content, filename);
+  }
+}
+
+(window as any).__MARKWEAVE_EXPORT__ = {
+  hasMarkWeaveMermaid,
+  cleanMermaidForCompatibility,
+  downloadMarkdown,
+  showExportModal,
+};
 
 btnSaveMd.addEventListener("click", downloadMarkdown);
 

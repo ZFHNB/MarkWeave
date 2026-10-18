@@ -979,8 +979,6 @@ export class MermaidInteractor {
       return { pathD: edge.initialD, labelPos: { x: 0, y: 0 } };
     }
 
-    const currentDir = this.detectDirection();
-    const isVertical = currentDir === "TD" || currentDir === "BT";
     const curveStyle = this.detectCurveStyle();
 
     // 计算源节点与目标节点的实时边界框与中心
@@ -1021,26 +1019,40 @@ export class MermaidInteractor {
 
     const dx = tBox.cx - sBox.cx;
     const dy = tBox.cy - sBox.cy;
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
 
-    if (isVertical || Math.abs(dy) >= Math.abs(dx) * 0.7) {
-      if (dy >= 0) {
-        start = { x: sBox.cx + srcPortOffset, y: sBox.bottom };
-        end = { x: tBox.cx + tgtPortOffset, y: tBox.top };
-        exitDir = "down";
-      } else {
-        start = { x: sBox.cx + srcPortOffset, y: sBox.top };
-        end = { x: tBox.cx + tgtPortOffset, y: tBox.bottom };
-        exitDir = "up";
-      }
-    } else {
+    // 计算 Y 轴与 X 轴重叠空间
+    const yOverlap = Math.min(sBox.bottom, tBox.bottom) - Math.max(sBox.top, tBox.top);
+
+    // 智能动态端口选边算法：
+    // 无论图表全局方向是纵向还是横向，一旦图形被拖动到左边或右边 (absDx > absDy * 0.75 或 Y 轴有重叠且水平分散)，
+    // 箭头的起始端点立即切换为起始图形的左侧或右侧端点，箭头指向的图形同样切换为对应的右侧或左侧端点对接
+    const isHorizontal = (yOverlap > -30 && absDx > 30) || (absDx > absDy * 0.75);
+
+    if (isHorizontal) {
       if (dx >= 0) {
+        // Target 位于 Source 右侧：Source 从右端点出发，Target 从左端点进入
         start = { x: sBox.right, y: sBox.cy + srcPortOffset };
         end = { x: tBox.left, y: tBox.cy + tgtPortOffset };
         exitDir = "right";
       } else {
+        // Target 位于 Source 左侧：Source 从左端点出发，Target 从右端点进入
         start = { x: sBox.left, y: sBox.cy + srcPortOffset };
         end = { x: tBox.right, y: tBox.cy + tgtPortOffset };
         exitDir = "left";
+      }
+    } else {
+      if (dy >= 0) {
+        // Target 位于 Source 下方：Source 从底端点出发，Target 从顶端点进入
+        start = { x: sBox.cx + srcPortOffset, y: sBox.bottom };
+        end = { x: tBox.cx + tgtPortOffset, y: tBox.top };
+        exitDir = "down";
+      } else {
+        // Target 位于 Source 上方：Source 从顶端点出发，Target 从底端点进入
+        start = { x: sBox.cx + srcPortOffset, y: sBox.top };
+        end = { x: tBox.cx + tgtPortOffset, y: tBox.bottom };
+        exitDir = "up";
       }
     }
 

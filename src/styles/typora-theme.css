@@ -789,3 +789,155 @@ body.theme-night .md-edge-popover {
   color: var(--primary-color);
   font-weight: 600;
 }
+
+/* ================= 导出兼容性选择模态框 ================= */
+.ty-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeInModal 0.15s ease-out;
+}
+
+@keyframes fadeInModal {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.ty-modal-card {
+  background: var(--bg-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 520px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ty-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ty-modal-icon {
+  font-size: 20px;
+}
+
+.ty-modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.ty-modal-desc {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.5;
+  margin: 0;
+}
+.theme-night .ty-modal-desc {
+  color: #aaa;
+}
+
+.ty-export-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.ty-export-option-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--code-bg-color);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ty-export-option-card:hover {
+  border-color: var(--primary-color);
+  background: rgba(66, 133, 244, 0.05);
+}
+
+.ty-export-option-card.selected {
+  border-color: var(--primary-color);
+  background: rgba(66, 133, 244, 0.08);
+  box-shadow: 0 0 0 1px var(--primary-color);
+}
+
+.ty-export-option-card input[type="radio"] {
+  margin-top: 3px;
+  cursor: pointer;
+}
+
+.ty-export-option-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ty-export-option-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.ty-export-option-desc {
+  font-size: 12px;
+  color: #777;
+  line-height: 1.45;
+}
+.theme-night .ty-export-option-desc {
+  color: #999;
+}
+
+.ty-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ty-btn {
+  padding: 6px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--border-color);
+  background: var(--code-bg-color);
+  color: var(--text-color);
+  transition: all 0.15s ease;
+}
+
+.ty-btn:hover {
+  background: var(--hover-color);
+}
+
+.ty-btn-primary {
+  background: var(--primary-color);
+  color: #fff;
+  border-color: var(--primary-color);
+}
+
+.ty-btn-primary:hover {
+  background: #3367d6;
+  border-color: #3367d6;
+}
