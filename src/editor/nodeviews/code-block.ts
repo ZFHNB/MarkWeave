@@ -253,14 +253,27 @@ export class CodeBlockView implements NodeView {
     this.langInput.value = node.attrs.params || "";
 
     if (this.isMermaid()) {
-      // 提取去除位置元数据注释后的纯图表语法
-      const cleanOld = oldText.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
-      const cleanNew = node.textContent.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
+      // 提取去除位置元数据注释与画线风格 init 配置注释后的纯图表实质语法
+      const stripNonStructural = (text: string) => {
+        return text
+          .replace(/%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?/g, "")
+          .replace(/%%\{init:\s*\{.*?\}\s*\}\s*%%\n?/gs, "")
+          .trim();
+      };
+      const cleanOld = stripNonStructural(oldText);
+      const cleanNew = stripNonStructural(node.textContent);
 
-      // 只有当实质语法变化（如增删节点、文字改动或方向切换）时才重绘
+      // 只有当实质语法变化（如增删节点、修改文字形状或主排布方向）时才重新由 Mermaid 渲染
       if (oldParams !== node.attrs.params || cleanOld !== cleanNew) {
         this.isEditingMermaid = false;
         this.updateViewMode();
+      } else {
+        // 实质图表结构未变（仅位置元数据或连线风格配置变动）：
+        // 若外部、撤销重做或初始化改变了画线风格，直接调用 0ms 矢量引擎无缝重设，杜绝闪烁和回弹
+        const newCurve = this.interactor.detectCurveStyle(node.textContent);
+        if (this.interactor.activeCurveStyle !== newCurve) {
+          this.interactor.switchCurveStyle(newCurve);
+        }
       }
     } else if (oldParams !== node.attrs.params) {
       this.updateViewMode();

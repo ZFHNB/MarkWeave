@@ -459,6 +459,24 @@ async function runTests() {
     });
     assert("点击「直角」按钮后，图表连线实时保持严谨 90 度直角正交折线", isOrthogonalRealtime);
 
+    // 18.2b 验证经过 600ms 后线形持续保持，绝无回弹或闪动回旧线形的问题
+    await new Promise((r) => setTimeout(r, 600));
+    const isOrthogonalPersistent = await page.evaluate(() => {
+      const paths = Array.from(document.querySelectorAll(".md-mermaid-block path.flowchart-link"));
+      return paths.some((p) => {
+        const d = p.getAttribute("d") || "";
+        const points = d.split(/[ML]/i).filter(Boolean).map((s) => s.split(",").map(Number));
+        if (points.length < 3) return false;
+        for (let i = 0; i < points.length - 1; i++) {
+          const isHoriz = Math.abs(points[i][1] - points[i + 1][1]) < 2;
+          const isVert = Math.abs(points[i][0] - points[i + 1][0]) < 2;
+          if (!isHoriz && !isVert) return false;
+        }
+        return true;
+      });
+    });
+    assert("线型切换后持续稳定保持，绝无闪烁与回弹闪回", isOrthogonalPersistent);
+
     // 18.3 验证连线说明文字精确绑定在该连线几何位置上（无错误错位）
     const isLabelAccuratelyBound = await page.evaluate(() => {
       const labels = Array.from(document.querySelectorAll(".md-mermaid-block .edgeLabels > g.edgeLabel"));

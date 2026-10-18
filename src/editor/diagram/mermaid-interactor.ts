@@ -54,7 +54,7 @@ export class MermaidInteractor {
   private nodesMap: Map<string, NodeTopology> = new Map();
   private edgesList: EdgeTopology[] = [];
   public isEditMode: boolean = false; // 原 isDragMode 更名为 isEditMode
-  private activeCurveStyle: "basis" | "stepBefore" | "linear" | null = null;
+  public activeCurveStyle: "basis" | "stepBefore" | "linear" | null = null;
   private isDraggingNode: boolean = false;
   private activeNodeKey: string | null = null;
   private dragStartPointer: Point = { x: 0, y: 0 };
@@ -102,6 +102,12 @@ export class MermaidInteractor {
     this.createToolbar();
     this.bindEvents();
     this.applySavedPositions();
+
+    // 状态保持：始终同步代码或已选线型，并应用实时路由，确保渲染后线型 100% 保持稳定
+    const code = this.getCurrentCode();
+    const detectedCurve = this.detectCurveStyle(code);
+    this.activeCurveStyle = detectedCurve;
+    this.rerouteAllEdges(true);
 
     // 状态保持：如果先前开启了编辑模式或调整了缩放，持续保持！
     if (prevEditMode) {
@@ -392,17 +398,35 @@ export class MermaidInteractor {
    * 侦测当前代码中的画线风格
    */
   public detectCurveStyle(explicitCode?: string): "basis" | "stepBefore" | "linear" {
-    if (this.activeCurveStyle) return this.activeCurveStyle;
-    const code = explicitCode || (typeof this.getCurrentCode === "function" ? this.getCurrentCode() : "");
-    if (!code) return "basis";
-    const match = /"curve":\s*"(basis|stepBefore|stepAfter|linear|cardinal)"/i.exec(code);
-    if (match) {
-      const c = match[1];
-      if (c === "stepBefore" || c === "stepAfter") return "stepBefore";
-      if (c === "linear") return "linear";
+    // 1. 如果显式传入了代码文本（例如 CodeBlockView 初始化渲染或解析新代码），直接以传入的代码配置为准
+    if (explicitCode !== undefined) {
+      const match = /"curve":\s*"(basis|stepBefore|stepAfter|linear|cardinal)"/i.exec(explicitCode);
+      if (match) {
+        const c = match[1];
+        if (c === "stepBefore" || c === "stepAfter") return "stepBefore";
+        if (c === "linear") return "linear";
+        return "basis";
+      }
       return "basis";
     }
-    return "basis"; // Mermaid 默认平滑
+
+    // 2. 如果当前交互器已有明确的活跃风格（用户在工具栏点击了对应按钮），必须优先以用户的活跃选择为准
+    if (this.activeCurveStyle) {
+      return this.activeCurveStyle;
+    }
+
+    // 3. 否则从当前代码中解析
+    const code = typeof this.getCurrentCode === "function" ? this.getCurrentCode() : "";
+    if (code) {
+      const match = /"curve":\s*"(basis|stepBefore|stepAfter|linear|cardinal)"/i.exec(code);
+      if (match) {
+        const c = match[1];
+        if (c === "stepBefore" || c === "stepAfter") return "stepBefore";
+        if (c === "linear") return "linear";
+        return "basis";
+      }
+    }
+    return "basis"; // 默认平滑
   }
 
   /**
@@ -479,10 +503,9 @@ export class MermaidInteractor {
       }
     } else {
       const newInit = `%%{init: {"flowchart": {"curve": "${curve}"}}}%%\n`;
-      // 插入到首行注释之后或代码开头
-      if (code.startsWith("%% {typemark_positions")) {
-        const firstLineEnd = code.indexOf("\n");
-        updatedCode = code.slice(0, firstLineEnd + 1) + newInit + code.slice(firstLineEnd + 1);
+      const posMatch = /^(%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?)/.exec(code);
+      if (posMatch) {
+        updatedCode = posMatch[0] + newInit + code.slice(posMatch[0].length);
       } else {
         updatedCode = newInit + code;
       }
