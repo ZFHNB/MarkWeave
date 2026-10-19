@@ -77,14 +77,6 @@ class TableToolbarView {
         </button>
       </div>
       <div class="md-table-toolbar-group">
-        <button type="button" class="md-table-toolbar-btn" data-action="rows-wrap" title="自适应行高" contenteditable="false">
-          自适应行高
-        </button>
-        <button type="button" class="md-table-toolbar-btn" data-action="rows-nowrap" title="单行显示" contenteditable="false">
-          单行显示
-        </button>
-      </div>
-      <div class="md-table-toolbar-group">
         <button type="button" class="md-table-toolbar-btn danger" data-action="table-delete" title="删除整张表格" contenteditable="false">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           删表
@@ -175,32 +167,6 @@ class TableToolbarView {
             this.view.state.tr.setNodeMarkup(pos, undefined, {
               ...node.attrs,
               layout: "equal",
-            })
-          );
-        }
-        break;
-      }
-      case "rows-wrap": {
-        const info = this.getTableNodeInfo();
-        if (info) {
-          const { pos, node } = info;
-          this.view.dispatch(
-            this.view.state.tr.setNodeMarkup(pos, undefined, {
-              ...node.attrs,
-              rowLayout: "wrap",
-            })
-          );
-        }
-        break;
-      }
-      case "rows-nowrap": {
-        const info = this.getTableNodeInfo();
-        if (info) {
-          const { pos, node } = info;
-          this.view.dispatch(
-            this.view.state.tr.setNodeMarkup(pos, undefined, {
-              ...node.attrs,
-              rowLayout: "nowrap",
             })
           );
         }
@@ -317,17 +283,12 @@ class TableToolbarView {
 
     const info = this.getTableNodeInfo();
     const layout = info?.node.attrs.layout || "equal";
-    const rowLayout = info?.node.attrs.rowLayout || "wrap";
 
     const btnColsAuto = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-auto']");
     const btnColsEqual = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-equal']");
-    const btnRowsWrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-wrap']");
-    const btnRowsNowrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-nowrap']");
 
     btnColsAuto?.classList.toggle("active", layout === "auto");
     btnColsEqual?.classList.toggle("active", layout === "equal");
-    btnRowsWrap?.classList.toggle("active", rowLayout === "wrap");
-    btnRowsNowrap?.classList.toggle("active", rowLayout === "nowrap");
   }
 
   public destroy() {

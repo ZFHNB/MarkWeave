@@ -1635,8 +1635,6 @@ body.theme-night .md-inline-node-input {
 }
 
 #write table[data-md-table-layout="auto"] { table-layout: auto; }
-#write table[data-md-table-nowrap="true"] { display: block; overflow-x: auto; white-space: nowrap; table-layout: auto; width: max-content; min-width: 100%; }
-#write table[data-md-table-nowrap="true"] th, #write table[data-md-table-nowrap="true"] td { white-space: nowrap; }
 
 #write th,
 #write td {
@@ -1644,6 +1642,7 @@ body.theme-night .md-inline-node-input {
   padding: 6px 12px;
   min-width: 32px;
   vertical-align: top;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
