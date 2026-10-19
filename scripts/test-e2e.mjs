@@ -764,42 +764,62 @@ async function runTests() {
       const standardCard = document.querySelector("#setting-card-standard");
       return customCard !== null && standardCard !== null;
     });
-    assert("设置面板包含「自定义模式 (MarkWeave 样式)」与「普通模式 (主流兼容样式)」选项", hasBothModeSettings);
+    assert("设置面板包含「增强模式 (MarkWeave 样式)」与「兼容模式 (主流标准样式)」选项", hasBothModeSettings);
 
     await page.screenshot({ path: path.join(artifactsDir, "19-settings-modal-preferences.png") });
 
-    // 选择「普通模式」并保存
+    // 选择「兼容模式」并保存
     await page.click("#setting-card-standard");
     await new Promise((r) => setTimeout(r, 100));
     await page.click("#btn-save-settings");
     await new Promise((r) => setTimeout(r, 400));
 
     const savedDefaultMode = await page.evaluate(() => window.__MARKWEAVE_SETTINGS__.getDefaultMode());
-    assert("成功将默认预览模式保存为「普通模式」并持久化", savedDefaultMode === "standard");
+    assert("成功将默认预览模式保存为「兼容模式」并持久化", savedDefaultMode === "standard");
 
     // ==========================================
-    // 26. 普通模式 (主流兼容) 与自定义模式即时切换
+    // 26. 兼容模式与增强模式即时切换
     // ==========================================
-    console.log("\n--- 测试 26: 普通模式 (主流兼容) 与自定义模式即时切换 ---");
-    // 验证当前图表已被实时联动切换为「普通模式」
+    console.log("\n--- 测试 26: 兼容模式与增强模式即时切换 ---");
+    // 验证当前图表已被实时联动切换为「兼容模式」
     const isDiagramInStandardMode = await page.evaluate(() => {
       const stdBtn = document.querySelector(".md-diagram-toolbar .md-mode-btn-standard");
       const dragBtn = document.querySelector(".md-diagram-toolbar .md-diagram-drag-btn");
       return stdBtn?.classList.contains("active") && dragBtn?.style.display === "none";
     });
-    assert("图表工具栏自动响应设置变动，高亮「普通模式」并隐藏自定义编辑按钮", isDiagramInStandardMode);
+    assert("图表工具栏自动响应设置变动，高亮「兼容模式」并隐藏增强编辑按钮", isDiagramInStandardMode);
 
-    // 验证普通模式下依然支持横纵向切换
+    // 验证兼容模式下依然支持横纵向切换
     const canSwitchDirectionInStandard = await page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll(".md-diagram-toolbar .md-diagram-btn"));
       const lrBtn = btns.find((b) => b.textContent?.includes("横向"));
       return lrBtn !== null && lrBtn?.style?.display !== "none";
     });
-    assert("普通模式下保留并展示「横向/纵向」切换按钮", canSwitchDirectionInStandard);
+    assert("兼容模式下保留并展示「横向/纵向」切换按钮", canSwitchDirectionInStandard);
+
+    // 兼容模式下切换方向后，必须保持兼容模式，不能跳回增强模式
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-diagram-toolbar .md-diagram-btn"));
+      btns.find((b) => b.textContent?.includes("横向"))?.click();
+    });
+    await new Promise((r) => setTimeout(r, 900));
+    const standardModePersisted = await page.evaluate(() => {
+      const stdBtn = document.querySelector(".md-diagram-toolbar .md-mode-btn-standard");
+      const container = document.querySelector(".md-diagram-toolbar")?.closest(".md-diagram-preview");
+      return stdBtn?.classList.contains("active") && container?.classList.contains("is-standard-mode");
+    });
+    assert("兼容模式下切换横向/纵向后仍保持兼容模式，未跳回增强模式", standardModePersisted);
+
+    // 还原纵向排布，避免影响后续断言
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-diagram-toolbar .md-diagram-btn"));
+      btns.find((b) => b.textContent?.includes("纵向"))?.click();
+    });
+    await new Promise((r) => setTimeout(r, 700));
 
     await page.screenshot({ path: path.join(artifactsDir, "20-mermaid-standard-compatible-mode.png") });
 
-    // 在图表工具栏上直接点击「🎨 自定义」切换回自定义模式
+    // 在图表工具栏上直接点击「✨ 增强」切换回增强模式
     await page.click(".md-diagram-toolbar .md-mode-btn-custom");
     await new Promise((r) => setTimeout(r, 400));
 
@@ -808,11 +828,11 @@ async function runTests() {
       const dragBtn = document.querySelector(".md-diagram-toolbar .md-diagram-drag-btn");
       return customBtn?.classList.contains("active") && dragBtn?.style.display !== "none";
     });
-    assert("点击「自定义」后，图表展开全部 MarkWeave 增强特性与排版编辑工具", isCustomRestored);
+    assert("点击「增强」后，图表展开全部 MarkWeave 增强特性与排版编辑工具", isCustomRestored);
 
     await page.screenshot({ path: path.join(artifactsDir, "21-mermaid-custom-mode-restored.png") });
 
-    // 还原全局默认设置回自定义模式
+    // 还原全局默认设置回增强模式
     await page.evaluate(() => window.__MARKWEAVE_SETTINGS__.setDefaultMode("custom"));
     await new Promise((r) => setTimeout(r, 200));
 
