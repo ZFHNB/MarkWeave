@@ -8,6 +8,7 @@ import { splitListItem, liftListItem, sinkListItem } from "prosemirror-schema-li
 
 import { schema } from "./schema";
 import { createSyntaxFoldingPlugin } from "./plugins/syntax-folding";
+import { createCodeHighlightPlugin } from "./code/highlight-plugin";
 import { buildInputRules } from "./plugins/input-rules";
 import { CodeBlockView } from "./nodeviews/code-block";
 import { MathBlockView } from "./nodeviews/math-block";
@@ -72,6 +73,7 @@ export class MarkWeaveEditor {
         keymap(baseKeymap),
         buildInputRules(schema),
         createSyntaxFoldingPlugin(),
+        createCodeHighlightPlugin(),
         tableEditing(),
         createTrailingParagraphPlugin(),
         createTableToolbarPlugin(),

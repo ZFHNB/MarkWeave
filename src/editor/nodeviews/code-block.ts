@@ -2,6 +2,7 @@ import { Node as PMNode } from "prosemirror-model";
 import { EditorView, type NodeView } from "prosemirror-view";
 import mermaid from "mermaid";
 import { MermaidInteractor } from "../diagram/mermaid-interactor";
+import { LanguagePicker } from "../code/language-picker";
 
 // 初始化 Mermaid 全局配置
 mermaid.initialize({
@@ -20,7 +21,7 @@ export class CodeBlockView implements NodeView {
   view: EditorView;
   getPos: () => number | undefined;
 
-  private langInput: HTMLInputElement;
+  private picker: LanguagePicker;
   private preEl: HTMLElement;
   private diagramContainer: HTMLElement;
   private toggleModeBtn: HTMLButtonElement;
@@ -47,22 +48,21 @@ export class CodeBlockView implements NodeView {
     leftGroup.style.alignItems = "center";
     leftGroup.style.gap = "8px";
 
-    this.langInput = document.createElement("input");
-    this.langInput.className = "md-fences-lang-input";
-    this.langInput.placeholder = "语言 (如 javascript, mermaid, python)";
-    this.langInput.value = node.attrs.params || "";
-    this.langInput.addEventListener("change", () => {
-      const pos = this.getPos();
-      if (typeof pos === "number") {
-        this.view.dispatch(
-          this.view.state.tr.setNodeMarkup(pos, undefined, {
-            params: this.langInput.value.trim(),
-          })
-        );
-      }
+    this.picker = new LanguagePicker({
+      onChange: (languageId) => {
+        const pos = this.getPos();
+        if (typeof pos === "number") {
+          this.view.dispatch(
+            this.view.state.tr.setNodeMarkup(pos, undefined, {
+              params: languageId.trim(),
+            })
+          );
+        }
+      },
     });
+    this.picker.setValue(node.attrs.params || "");
 
-    leftGroup.appendChild(this.langInput);
+    leftGroup.appendChild(this.picker.dom);
 
     const rightGroup = document.createElement("div");
     rightGroup.style.display = "flex";
@@ -535,6 +535,7 @@ export class CodeBlockView implements NodeView {
     if (this.renderTimeout) clearTimeout(this.renderTimeout);
     this.interactor.destroy();
     window.removeEventListener("theme-change", this.themeListener);
+    this.picker.destroy();
   }
 
   update(node: PMNode): boolean {
@@ -542,7 +543,7 @@ export class CodeBlockView implements NodeView {
     const oldParams = this.node.attrs.params;
     const oldText = this.node.textContent;
     this.node = node;
-    this.langInput.value = node.attrs.params || "";
+    this.picker.setValue(node.attrs.params || "");
 
     if (this.isMermaid()) {
       // 提取去除位置元数据注释与画线风格 init 配置注释后的纯图表实质语法
@@ -582,7 +583,7 @@ export class CodeBlockView implements NodeView {
   stopEvent(e: Event): boolean {
     const target = e.target as HTMLElement;
     return (
-      target === this.langInput ||
+      Boolean(target.closest(".md-fences-lang-picker")) ||
       target === this.toggleModeBtn ||
       target.classList.contains("md-fences-copy-btn") ||
       target.closest(".md-diagram-toolbar") !== null ||
