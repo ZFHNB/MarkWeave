@@ -1,4 +1,21 @@
 import { Schema, type NodeSpec, type MarkSpec } from "prosemirror-model";
+import { tableNodes } from "prosemirror-tables";
+
+const tableSpecs = tableNodes({
+  tableGroup: "block",
+  cellContent: "paragraph",
+  cellAttributes: {
+    alignment: {
+      default: "left",
+      getFromDOM(dom: HTMLElement) {
+        return (dom.style.textAlign || dom.getAttribute("align") || "left").toLowerCase();
+      },
+      setDOMAttr(value, attrs) {
+        if (value) attrs.style = `${attrs.style || ""}text-align:${value};`;
+      },
+    },
+  },
+});
 
 const nodes: Record<string, NodeSpec> = {
   doc: {
@@ -13,6 +30,8 @@ const nodes: Record<string, NodeSpec> = {
       return ["p", { class: "md-p md-block" }, 0];
     },
   },
+
+  ...tableSpecs,
 
   blockquote: {
     content: "block+",
