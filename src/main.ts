@@ -1,12 +1,16 @@
 import "./styles/typora-theme.css";
 import { MarkWeaveEditor } from "./editor";
 import type { HeadingItem } from "./editor/outline";
-
-interface DocumentItem {
-  id: string;
-  title: string;
-  content: string;
-}
+import {
+  type StoredDocument,
+  type WorkspaceStateV1,
+  createDocument,
+  createWorkspace,
+  loadWorkspace,
+  saveWorkspace,
+  uniqueTitle,
+} from "./workspace/store";
+import { applyDocumentSwitch } from "./workspace/session";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -124,14 +128,35 @@ Typora 的即时预览并不是左右分屏，而是在同一 contenteditable �
 3. 光标移入当前段落时切换激活展开。
 `;
 
-// 工作区多文档管理状态
-const documents: DocumentItem[] = [
-  { id: "doc-1", title: "欢迎使用 Typemark.md", content: docWelcome },
-  { id: "doc-2", title: "系统架构设计规范.md", content: docArchitecture },
-  { id: "doc-3", title: "REA 逆向技术手记.md", content: docReaNotes },
+// 工作区多文档管理状态与种子文档
+const seededDocuments: StoredDocument[] = [
+  createDocument("欢迎使用 Typemark.md", docWelcome),
+  createDocument("系统架构设计规范.md", docArchitecture),
+  createDocument("REA 逆向技术手记.md", docReaNotes),
 ];
 
-let activeDocId = "doc-1";
+const seededWorkspace: WorkspaceStateV1 = createWorkspace(
+  seededDocuments,
+  seededDocuments[0].id
+);
+
+let workspaceState: WorkspaceStateV1;
+try {
+  workspaceState = loadWorkspace(localStorage, seededWorkspace);
+} catch (err) {
+  console.warn("Failed to load workspace, using fallback:", err);
+  workspaceState = seededWorkspace;
+}
+
+if (!workspaceState.documents || workspaceState.documents.length === 0) {
+  workspaceState = seededWorkspace;
+}
+
+let documents: StoredDocument[] = workspaceState.documents;
+let activeDocId: string = workspaceState.activeDocId;
+if (!documents.some((d) => d.id === activeDocId)) {
+  activeDocId = documents[0].id;
+}
 
 // 初始化应用 DOM 结构
 const app = document.querySelector<HTMLDivElement>("#app")!;
@@ -249,16 +274,78 @@ const statWords = document.getElementById("stat-words")!;
 const statChars = document.getElementById("stat-chars")!;
 const statLines = document.getElementById("stat-lines")!;
 
+// 保存工作区防抖与即时落盘
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+  }
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    flushSave();
+  }, 500);
+}
+
+function flushSave() {
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  try {
+    if (isSourceMode) {
+      const activeDoc = documents.find((d) => d.id === activeDocId);
+      if (activeDoc && activeDoc.content !== sourceEditor.value) {
+        activeDoc.content = sourceEditor.value;
+        activeDoc.dirty = true;
+        activeDoc.updatedAt = Date.now();
+      }
+    }
+    const state: WorkspaceStateV1 = {
+      version: 1,
+      documents,
+      activeDocId,
+      savedAt: Date.now(),
+    };
+    saveWorkspace(state, localStorage);
+  } catch (err) {
+    console.error("Failed to save workspace to localStorage:", err);
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    flushSave();
+  }
+});
+
+window.addEventListener("beforeunload", () => {
+  flushSave();
+});
+
+// 标题同步辅助函数
+function syncTitle(title: string) {
+  docTitleEl.textContent = title;
+  document.title = title;
+}
+
 // 实例化 MarkWeave 核心编辑器
-const currentDoc = documents.find((d) => d.id === activeDocId)!;
+const currentDoc = documents.find((d) => d.id === activeDocId) || documents[0];
+syncTitle(currentDoc.title);
+
 const editor = new MarkWeaveEditor({
   mountEl,
   initialMarkdown: currentDoc.content,
   onDocChange: (md) => {
-    // 自动将修改同步回当前文档内存对象
+    // 自动将修改同步回当前文档内存对象并调度持久化
     const doc = documents.find((d) => d.id === activeDocId);
     if (doc) {
-      doc.content = md;
+      if (doc.content !== md) {
+        doc.content = md;
+        doc.dirty = true;
+        doc.updatedAt = Date.now();
+        scheduleSave();
+      }
     }
   },
   onOutlineChange: (headings) => {
@@ -274,23 +361,204 @@ const editor = new MarkWeaveEditor({
 (window as any).__TYPEMARK_EDITOR__ = editor;
 (window as any).__MARKWEAVE_EDITOR__ = editor;
 
+// 监听源码编辑器输入，实时同步修改并防抖保存
+sourceEditor.addEventListener("input", () => {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (doc) {
+    if (doc.content !== sourceEditor.value) {
+      doc.content = sourceEditor.value;
+      doc.dirty = true;
+      doc.updatedAt = Date.now();
+      scheduleSave();
+    }
+  }
+});
+
+// 注入文件列表交互样式（悬停删除按钮与行内重命名输入框）
+const fileItemStyle = document.createElement("style");
+fileItemStyle.textContent = `
+  .ty-file-item {
+    position: relative;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    font-size: 13px;
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--text-color);
+  }
+  .ty-file-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ty-file-delete-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    color: #999;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+  }
+  .ty-file-delete-btn:hover {
+    color: #e53935;
+    background: rgba(229, 57, 53, 0.1);
+  }
+  .ty-file-item:hover .ty-file-delete-btn {
+    display: inline-flex;
+  }
+  .ty-file-rename-input {
+    flex: 1;
+    border: 1px solid var(--primary-color, #4285f4);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 13px;
+    outline: none;
+    background: var(--bg-color, #fff);
+    color: var(--text-color, #333);
+  }
+`;
+document.head.appendChild(fileItemStyle);
+
 // 渲染文件列表
 function renderFileList() {
-  fileListContainer.innerHTML = documents
-    .map(
-      (doc) => `
-    <div class="ty-file-item ${doc.id === activeDocId ? "active" : ""}" data-id="${doc.id}">
-      📄 ${doc.title}
-    </div>
-  `
-    )
-    .join("");
+  fileListContainer.innerHTML = "";
+  documents.forEach((doc) => {
+    const itemEl = document.createElement("div");
+    itemEl.className = `ty-file-item ${doc.id === activeDocId ? "active" : ""}`;
+    itemEl.setAttribute("data-id", doc.id);
 
-  fileListContainer.querySelectorAll(".ty-file-item").forEach((el) => {
-    el.addEventListener("click", () => {
-      const docId = el.getAttribute("data-id")!;
-      switchDocument(docId);
+    const iconSpan = document.createElement("span");
+    iconSpan.className = "ty-file-icon";
+    iconSpan.textContent = "📄";
+
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "ty-file-title";
+    titleSpan.textContent = doc.title;
+    titleSpan.title = "双击重命名";
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.className = "ty-file-delete-btn";
+    deleteBtn.title = "删除文档";
+    deleteBtn.setAttribute("data-id", doc.id);
+    deleteBtn.innerHTML = `
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="3 6 5 6 21 6"></polyline>
+        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+      </svg>
+    `;
+
+    const startRename = () => {
+      const inputEl = document.createElement("input");
+      inputEl.type = "text";
+      inputEl.className = "ty-file-rename-input";
+      inputEl.value = doc.title;
+
+      let finished = false;
+      const finishRename = (save: boolean) => {
+        if (finished) return;
+        finished = true;
+        if (save) {
+          let newTitle = inputEl.value.trim();
+          if (newTitle && newTitle !== doc.title) {
+            if (!/\.md$/i.test(newTitle)) {
+              newTitle = `${newTitle}.md`;
+            }
+            doc.title = newTitle;
+            doc.updatedAt = Date.now();
+            if (doc.id === activeDocId) {
+              syncTitle(doc.title);
+            }
+            scheduleSave();
+          }
+        }
+        renderFileList();
+      };
+
+      inputEl.addEventListener("keydown", (ke) => {
+        if (ke.key === "Enter") {
+          ke.preventDefault();
+          finishRename(true);
+        } else if (ke.key === "Escape") {
+          ke.preventDefault();
+          finishRename(false);
+        }
+      });
+      inputEl.addEventListener("blur", () => finishRename(true));
+      inputEl.addEventListener("click", (ce) => ce.stopPropagation());
+      inputEl.addEventListener("dblclick", (de) => de.stopPropagation());
+
+      itemEl.replaceChild(inputEl, titleSpan);
+      deleteBtn.style.display = "none";
+      inputEl.focus();
+      const dotIdx = doc.title.lastIndexOf(".");
+      if (dotIdx > 0) {
+        inputEl.setSelectionRange(0, dotIdx);
+      } else {
+        inputEl.select();
+      }
+    };
+
+    titleSpan.addEventListener("dblclick", (e) => {
+      e.stopPropagation();
+      startRename();
     });
+
+    itemEl.addEventListener("dblclick", (e) => {
+      if ((e.target as HTMLElement).closest(".ty-file-delete-btn")) return;
+      e.stopPropagation();
+      startRename();
+    });
+
+    deleteBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (documents.length <= 1) {
+        window.alert("工作区至少需要保留一篇文档");
+        return;
+      }
+      const confirmed = window.confirm(`确定要删除文档 "${doc.title}" 吗？`);
+      if (!confirmed) return;
+
+      const isDeletingActive = doc.id === activeDocId;
+      const deletedIndex = documents.findIndex((d) => d.id === doc.id);
+      documents = documents.filter((d) => d.id !== doc.id);
+
+      if (isDeletingActive) {
+        const nextIndex = Math.min(deletedIndex, documents.length - 1);
+        const nextDoc = documents[nextIndex];
+        activeDocId = nextDoc.id;
+        syncTitle(nextDoc.title);
+        editor.setMarkdown(nextDoc.content, { resetHistory: true });
+        if (isSourceMode) {
+          sourceEditor.value = nextDoc.content;
+        }
+      }
+
+      renderFileList();
+      scheduleSave();
+    });
+
+    itemEl.addEventListener("click", (e) => {
+      if (
+        (e.target as HTMLElement).closest(".ty-file-delete-btn") ||
+        (e.target as HTMLElement).closest(".ty-file-rename-input")
+      ) {
+        return;
+      }
+      switchDocument(doc.id);
+    });
+
+    itemEl.appendChild(iconSpan);
+    itemEl.appendChild(titleSpan);
+    itemEl.appendChild(deleteBtn);
+    fileListContainer.appendChild(itemEl);
   });
 }
 
@@ -298,27 +566,29 @@ function renderFileList() {
 function switchDocument(newDocId: string) {
   if (newDocId === activeDocId) return;
 
-  // 1. 保存当前文档最新编辑内容
-  const prevDoc = documents.find((d) => d.id === activeDocId);
-  if (prevDoc) {
-    prevDoc.content = editor.getMarkdown();
-  }
+  const result = applyDocumentSwitch({
+    documents,
+    activeDocId,
+    nextDocId: newDocId,
+    isSourceMode,
+    sourceBuffer: isSourceMode ? sourceEditor.value : null,
+    editorMarkdown: editor.getMarkdown(),
+  });
 
-  // 2. 切换至新文档
-  activeDocId = newDocId;
+  documents = result.documents;
+  activeDocId = result.activeDocId;
+
   const nextDoc = documents.find((d) => d.id === activeDocId)!;
-  docTitleEl.textContent = nextDoc.title;
+  syncTitle(nextDoc.title);
 
-  // 3. 加载新文档到编辑器
-  editor.setMarkdown(nextDoc.content);
+  editor.setMarkdown(result.contentForNextDoc, { resetHistory: true });
 
-  // 如果处于源码模式，同步更新 textarea
   if (isSourceMode) {
-    sourceEditor.value = nextDoc.content;
+    sourceEditor.value = result.contentForNextDoc;
   }
 
-  // 4. 更新文件列表高亮
   renderFileList();
+  scheduleSave();
 }
 
 // 初始渲染文件列表
@@ -353,18 +623,12 @@ function renderOutline(headings: HeadingItem[]) {
 
 // 新建文档按钮
 btnNewFile.addEventListener("click", () => {
-  const newId = `doc-${Date.now()}`;
-  const newTitle = `未命名文档_${documents.length + 1}.md`;
-  const newContent = "";
+  const newTitle = uniqueTitle(documents, "未命名文档.md");
+  const newDoc = createDocument(newTitle, "");
 
-  documents.push({
-    id: newId,
-    title: newTitle,
-    content: newContent,
-  });
-
+  documents.push(newDoc);
   renderFileList();
-  switchDocument(newId);
+  switchDocument(newDoc.id);
   editor.focus();
 });
 
@@ -381,14 +645,11 @@ localFileInput.addEventListener("change", (e) => {
   const reader = new FileReader();
   reader.onload = (event) => {
     const content = event.target?.result as string;
-    const newId = `doc-local-${Date.now()}`;
-    documents.push({
-      id: newId,
-      title: file.name,
-      content,
-    });
+    const title = uniqueTitle(documents, file.name);
+    const newDoc = createDocument(title, content);
+    documents.push(newDoc);
     renderFileList();
-    switchDocument(newId);
+    switchDocument(newDoc.id);
     target.value = "";
   };
   reader.readAsText(file);
@@ -426,6 +687,13 @@ function toggleSourceMode() {
     sourceEditor.focus();
   } else {
     editor.setMarkdown(sourceEditor.value);
+    const doc = documents.find((d) => d.id === activeDocId);
+    if (doc && doc.content !== sourceEditor.value) {
+      doc.content = sourceEditor.value;
+      doc.dirty = true;
+      doc.updatedAt = Date.now();
+      scheduleSave();
+    }
     sourceEditor.classList.remove("visible");
     btnToggleSource.classList.remove("active");
     editor.focus();
@@ -441,6 +709,15 @@ window.addEventListener("keydown", (e) => {
   // Ctrl+S 保存文件
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
+    if (isSourceMode) {
+      const doc = documents.find((d) => d.id === activeDocId);
+      if (doc && doc.content !== sourceEditor.value) {
+        doc.content = sourceEditor.value;
+        doc.dirty = true;
+        doc.updatedAt = Date.now();
+        scheduleSave();
+      }
+    }
     downloadMarkdown();
   }
 });

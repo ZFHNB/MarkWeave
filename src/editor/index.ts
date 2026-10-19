@@ -1,5 +1,6 @@
 import { EditorState, TextSelection, Selection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
+import type { Node as PMNode } from "prosemirror-model";
 import { history, undo, redo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, setBlockType, wrapIn } from "prosemirror-commands";
@@ -27,13 +28,7 @@ export class MarkWeaveEditor {
   private view: EditorView;
   private options: EditorOptions;
 
-  constructor(options: EditorOptions) {
-    this.options = options;
-
-    const initialDoc = options.initialMarkdown
-      ? markdownToDoc(options.initialMarkdown, schema)
-      : schema.node("doc", null, [schema.node("paragraph", null, [])]);
-
+  private createState(doc: PMNode): EditorState {
     const customKeymap = keymap({
       "Mod-z": undo,
       "Mod-y": redo,
@@ -54,8 +49,8 @@ export class MarkWeaveEditor {
       "Mod-]": sinkListItem(schema.nodes.list_item),
     });
 
-    const state = EditorState.create({
-      doc: initialDoc,
+    return EditorState.create({
+      doc,
       plugins: [
         history(),
         customKeymap,
@@ -64,6 +59,16 @@ export class MarkWeaveEditor {
         createSyntaxFoldingPlugin(),
       ],
     });
+  }
+
+  constructor(options: EditorOptions) {
+    this.options = options;
+
+    const initialDoc = options.initialMarkdown
+      ? markdownToDoc(options.initialMarkdown, schema)
+      : schema.node("doc", null, [schema.node("paragraph", null, [])]);
+
+    const state = this.createState(initialDoc);
 
     this.view = new EditorView(options.mountEl, {
       state,
@@ -96,11 +101,18 @@ export class MarkWeaveEditor {
     return docToMarkdown(this.view.state.doc);
   }
 
-  public setMarkdown(markdownText: string) {
+  public setMarkdown(markdownText: string, options?: { resetHistory?: boolean }) {
     const newDoc = markdownToDoc(markdownText, schema);
-    let tr = this.view.state.tr.replaceWith(0, this.view.state.doc.content.size, newDoc.content);
-    tr = tr.setSelection(Selection.atStart(tr.doc));
-    this.view.dispatch(tr);
+    if (options?.resetHistory) {
+      const newState = this.createState(newDoc);
+      this.view.updateState(newState);
+      this.options.onOutlineChange?.(this.getHeadings());
+      this.updateStats();
+    } else {
+      let tr = this.view.state.tr.replaceWith(0, this.view.state.doc.content.size, newDoc.content);
+      tr = tr.setSelection(Selection.atStart(tr.doc));
+      this.view.dispatch(tr);
+    }
   }
 
   public getHeadings(): HeadingItem[] {
