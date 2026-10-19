@@ -61,7 +61,7 @@
       "target": [
         "portable"
       ],
-      "icon": "build/icon.png"
+      "icon": "resources/icon.png"
     },
     "portable": {
       "artifactName": "MarkWeave-${version}-portable.exe"

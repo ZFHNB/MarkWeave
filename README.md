@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/ProseMirror-AST-orange?style=flat-square" alt="ProseMirror" />
   <img src="https://img.shields.io/badge/Mermaid-v11-green?style=flat-square" alt="Mermaid" />
   <img src="https://img.shields.io/badge/KaTeX-LaTeX-red?style=flat-square" alt="KaTeX" />
-  <img src="https://img.shields.io/badge/Tests-48%20Passed-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-88%20Passed-brightgreen?style=flat-square" alt="Tests" />
 </p>
 
 ---
@@ -110,7 +110,7 @@ npm run test:e2e
 MarkWeave/
 ├── public/                 # 静态资源与 Favicon
 ├── scripts/
-│   └── test-e2e.mjs        # 48 项自动化端到端测试套件 (Puppeteer)
+│   └── test-e2e.mjs        # 88 项自动化端到端测试套件 (Puppeteer)
 ├── src/
 │   ├── editor/             # 编辑器核心引擎
 │   │   ├── diagram/        # Mermaid 拓扑计算、格点吸附与正交线形路由
@@ -128,6 +128,46 @@ MarkWeave/
 ├── package.json            # 依赖与脚本声明
 └── tsconfig.json           # TypeScript 严格配置
 ```
+
+---
+
+## 🖥️ Windows Portable 桌面版
+
+MarkWeave 同时提供基于 Electron 的免安装 Portable 版本。
+
+### 构建 Portable 单文件
+
+```bash
+npm run package:portable
+```
+
+产物：`release/MarkWeave-<version>-portable.exe`（单文件，无需安装）。
+
+### 便携数据目录
+
+首次启动后，文档、设置与 Chromium 数据保存在 **exe 同级的 `MarkWeaveData/`** 目录中；把 exe 与 `MarkWeaveData/` 一起复制即可迁移全部数据。
+
+### 本地调试桌面版
+
+```bash
+# 终端 1：启动 Vite
+npm run dev
+
+# 终端 2：启动 Electron 并连接开发服务器
+npm run electron:dev
+
+# 或直接运行生产构建
+npm run electron:start
+```
+
+### 桌面版能力
+
+- 原生菜单与快捷键：`Ctrl+O` 打开、`Ctrl+S` 保存、`Ctrl+Shift+S` 另存为、`Ctrl+T` 插入表格、`Ctrl+/` 源码模式。
+- 原生打开/保存对话框，保存时写回原 `.md` 文件。
+- 支持通过命令行或“打开方式”传入 `.md` 文件，单实例运行。
+- `contextIsolation` + `sandbox` + preload 白名单桥，渲染层不暴露 Node API。
+
+> Portable exe 当前未做代码签名；Windows SmartScreen 可能提示未知发布者，选择“更多信息 → 仍要运行”即可。正式分发建议配置代码签名证书。
 
 ---
 
