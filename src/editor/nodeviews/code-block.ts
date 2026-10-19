@@ -3,6 +3,10 @@ import { EditorView, type NodeView } from "prosemirror-view";
 import mermaid from "mermaid";
 import { MermaidInteractor } from "../diagram/mermaid-interactor";
 import { LanguagePicker } from "../code/language-picker";
+import {
+  getMermaidThemePreference,
+  resolveMermaidTheme,
+} from "../../platform/mermaid-theme";
 
 // 初始化 Mermaid 全局配置
 mermaid.initialize({
@@ -176,11 +180,22 @@ export class CodeBlockView implements NodeView {
           this.isEditingMermaid = false;
           this.updateViewMode();
         }
+      } else if (e.key === "Escape") {
+        if (this.isMermaid()) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.isEditingMermaid = false;
+          this.updateViewMode();
+        }
       }
     });
 
     // 监听全局主题切换，实现 Mermaid 自适应明暗主题
     window.addEventListener("theme-change", this.themeListener);
+    window.addEventListener("markweave-mermaid-theme-change", this.mermaidThemeListener);
+
+    // 注册 document mousedown 监听，外部点击收起源码编辑模式
+    document.addEventListener("mousedown", this.onDocumentMouseDown);
 
     // 初始模式与 Mermaid 渲染判断
     this.updateViewMode();
@@ -197,6 +212,19 @@ export class CodeBlockView implements NodeView {
   private themeListener = () => {
     if (this.isMermaid()) {
       this.renderMermaid();
+    }
+  };
+
+  private mermaidThemeListener = () => {
+    if (this.isMermaid()) {
+      this.renderMermaid();
+    }
+  };
+
+  private onDocumentMouseDown = (e: MouseEvent) => {
+    if (this.isEditingMermaid && (!e.target || !this.dom.contains(e.target as Node))) {
+      this.isEditingMermaid = false;
+      this.updateViewMode();
     }
   };
 
@@ -477,13 +505,16 @@ export class CodeBlockView implements NodeView {
     }
 
     const uniqueId = `mermaid-svg-${++mermaidCounter}`;
-    const isDark = document.body.classList.contains("theme-night");
+    const theme = resolveMermaidTheme(
+      getMermaidThemePreference(),
+      document.body.classList.contains("theme-night")
+    );
 
     try {
       const curve = this.interactor.detectCurveStyle(codeText);
       mermaid.initialize({
         startOnLoad: false,
-        theme: isDark ? "dark" : "default",
+        theme,
         securityLevel: "loose",
         fontFamily: "var(--font-family)",
         flowchart: {
@@ -535,6 +566,8 @@ export class CodeBlockView implements NodeView {
     if (this.renderTimeout) clearTimeout(this.renderTimeout);
     this.interactor.destroy();
     window.removeEventListener("theme-change", this.themeListener);
+    window.removeEventListener("markweave-mermaid-theme-change", this.mermaidThemeListener);
+    document.removeEventListener("mousedown", this.onDocumentMouseDown);
     this.picker.destroy();
   }
 

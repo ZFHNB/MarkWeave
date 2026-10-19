@@ -22,6 +22,10 @@ import {
 } from "./platform/documents";
 import { resolveTheme, type ThemeSetting } from "./platform/theme";
 import { normalizeLanguage, type Language } from "./platform/i18n";
+import {
+  type MermaidThemePreference,
+  normalizeMermaidTheme,
+} from "./platform/mermaid-theme";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -1013,6 +1017,7 @@ function downloadMarkdown() {
 export interface MarkWeaveSettings {
   mermaidDefaultMode: "custom" | "standard";
   mermaidDefaultCurve: "step-round" | "step" | "basis" | "linear";
+  mermaidTheme: MermaidThemePreference;
   gridSnap: boolean;
   exportScale: number;
   fontSize: string;
@@ -1027,6 +1032,7 @@ function loadSettings(): MarkWeaveSettings {
   return {
     mermaidDefaultMode: (localStorage.getItem("markweave_mermaid_default_mode") as any) || "custom",
     mermaidDefaultCurve: (localStorage.getItem("markweave_mermaid_default_curve") as any) || "step-round",
+    mermaidTheme: normalizeMermaidTheme(localStorage.getItem("markweave_mermaid_theme")),
     gridSnap: localStorage.getItem("markweave_grid_snap") !== "false",
     exportScale: parseInt(localStorage.getItem("markweave_export_scale") || "2", 10) || 2,
     fontSize: localStorage.getItem("markweave_font_size") || "16px",
@@ -1041,6 +1047,7 @@ function loadSettings(): MarkWeaveSettings {
 function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_mermaid_default_mode", settings.mermaidDefaultMode);
   localStorage.setItem("markweave_mermaid_default_curve", settings.mermaidDefaultCurve);
+  localStorage.setItem("markweave_mermaid_theme", settings.mermaidTheme);
   localStorage.setItem("markweave_grid_snap", String(settings.gridSnap));
   localStorage.setItem("markweave_export_scale", String(settings.exportScale));
   localStorage.setItem("markweave_font_size", settings.fontSize);
@@ -1052,6 +1059,10 @@ function saveSettings(settings: MarkWeaveSettings) {
 
   applySettings(settings);
 }
+
+let currentMermaidThemePreference: MermaidThemePreference = normalizeMermaidTheme(
+  typeof localStorage !== "undefined" ? localStorage.getItem("markweave_mermaid_theme") : "auto"
+);
 
 function applySettings(settings: MarkWeaveSettings) {
   const root = document.documentElement;
@@ -1083,6 +1094,18 @@ function applySettings(settings: MarkWeaveSettings) {
   const api = getDesktopAPI();
   if (api && typeof api.setLanguage === "function") {
     void api.setLanguage(settings.language);
+  }
+
+  const previousMermaidTheme = currentMermaidThemePreference;
+  currentMermaidThemePreference = settings.mermaidTheme;
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem("markweave_mermaid_theme", settings.mermaidTheme);
+  }
+
+  if (previousMermaidTheme !== settings.mermaidTheme) {
+    window.dispatchEvent(
+      new CustomEvent("markweave-mermaid-theme-change", { detail: settings.mermaidTheme })
+    );
   }
 
   window.dispatchEvent(
@@ -1192,6 +1215,18 @@ function openSettingsModal() {
               <option value="1" ${currentSettings.exportScale === 1 ? "selected" : ""}>标准清晰度 (1x / 72 DPI)</option>
               <option value="2" ${currentSettings.exportScale === 2 ? "selected" : ""}>Retina 视网膜高清 (2x / 144 DPI, 推荐)</option>
               <option value="3" ${currentSettings.exportScale === 3 ? "selected" : ""}>出版印刷超清 (3x / 216 DPI)</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">Mermaid 主题</span>
+              <span class="ty-settings-desc">设置 Mermaid 图表渲染色彩模式</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-mermaid-theme">
+              <option value="auto" ${currentSettings.mermaidTheme === "auto" ? "selected" : ""}>跟随界面主题（默认）</option>
+              <option value="light" ${currentSettings.mermaidTheme === "light" ? "selected" : ""}>始终浅色（推荐夜间使用）</option>
+              <option value="dark" ${currentSettings.mermaidTheme === "dark" ? "selected" : ""}>始终深色</option>
             </select>
           </div>
         </div>
@@ -1353,10 +1388,12 @@ function openSettingsModal() {
     const selectExportPolicy = ((modalOverlay.querySelector("#setting-select-export-policy") as HTMLSelectElement)?.value as any) || "ask";
     const selectTheme = ((modalOverlay.querySelector("#setting-select-theme") as HTMLSelectElement)?.value as any) || "light";
     const selectLanguage = normalizeLanguage((modalOverlay.querySelector("#setting-select-language") as HTMLSelectElement)?.value);
+    const selectMermaidTheme = normalizeMermaidTheme((modalOverlay.querySelector("#setting-select-mermaid-theme") as HTMLSelectElement)?.value);
 
     const newSettings: MarkWeaveSettings = {
       mermaidDefaultMode: selectedMode,
       mermaidDefaultCurve: selectCurve,
+      mermaidTheme: selectMermaidTheme,
       gridSnap: toggleGrid,
       exportScale: selectScale,
       fontSize: selectFontSize,
