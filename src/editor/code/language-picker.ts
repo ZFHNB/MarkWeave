@@ -128,7 +128,8 @@ export class LanguagePicker {
     this.isOpen = true;
     this.popover.style.display = "block";
     this.triggerBtn.setAttribute("aria-expanded", "true");
-    this.renderList(this.searchInput.value);
+    this.searchInput.value = "";
+    this.renderList("");
     document.addEventListener("click", this.onDocumentEvent);
     document.addEventListener("mousedown", this.onDocumentEvent);
     try {
