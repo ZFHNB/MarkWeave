@@ -34,6 +34,25 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow = null;
+let currentLanguage = "zh";
+
+function normalizeLanguage(lang) {
+  if (typeof lang === "string" && lang.toLowerCase() === "en") {
+    return "en";
+  }
+  return "zh";
+}
+
+function applyApplicationMenu() {
+  const isDev = Boolean(process.env.MARKWEAVE_DEV_URL || !app.isPackaged);
+  const menuTemplate = buildMenuTemplate((action) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("menu:action", action);
+    }
+  }, { isDev, language: currentLanguage });
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  Menu.setApplicationMenu(menu);
+}
 
 function findTargetFilePath(args) {
   if (!Array.isArray(args)) return null;
@@ -144,14 +163,7 @@ function createWindow() {
     }
   });
 
-  const isDev = Boolean(process.env.MARKWEAVE_DEV_URL || !app.isPackaged);
-  const menuTemplate = buildMenuTemplate((action) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send("menu:action", action);
-    }
-  }, { isDev });
-  const menu = Menu.buildFromTemplate(menuTemplate);
-  Menu.setApplicationMenu(menu);
+  applyApplicationMenu();
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
@@ -273,6 +285,12 @@ ipcMain.handle("app:get-info", async () => {
     dataDir: app.getPath("userData"),
     portable: Boolean(process.env.PORTABLE_EXECUTABLE_DIR)
   };
+});
+
+ipcMain.handle("app:set-language", async (_event, lang) => {
+  currentLanguage = normalizeLanguage(lang);
+  applyApplicationMenu();
+  return true;
 });
 
 app.on("window-all-closed", () => {

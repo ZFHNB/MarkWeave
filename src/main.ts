@@ -21,6 +21,7 @@ import {
   type DesktopFile,
 } from "./platform/documents";
 import { resolveTheme, type ThemeSetting } from "./platform/theme";
+import { normalizeLanguage, type Language } from "./platform/i18n";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -1019,6 +1020,7 @@ export interface MarkWeaveSettings {
   fontFamily: string;
   exportPolicy: "ask" | "markweave" | "compatible";
   theme: ThemeSetting;
+  language: Language;
 }
 
 function loadSettings(): MarkWeaveSettings {
@@ -1032,6 +1034,7 @@ function loadSettings(): MarkWeaveSettings {
     fontFamily: localStorage.getItem("markweave_font_family") || "default",
     exportPolicy: (localStorage.getItem("markweave_default_export_policy") as any) || "ask",
     theme: (localStorage.getItem("markweave_theme") as any) || "light",
+    language: normalizeLanguage(localStorage.getItem("markweave_language")),
   };
 }
 
@@ -1045,6 +1048,7 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_font_family", settings.fontFamily);
   localStorage.setItem("markweave_default_export_policy", settings.exportPolicy);
   localStorage.setItem("markweave_theme", settings.theme);
+  localStorage.setItem("markweave_language", settings.language);
 
   applySettings(settings);
 }
@@ -1074,6 +1078,11 @@ function applySettings(settings: MarkWeaveSettings) {
 
   if (wasNight !== isNight) {
     window.dispatchEvent(new CustomEvent("theme-change"));
+  }
+
+  const api = getDesktopAPI();
+  if (api && typeof api.setLanguage === "function") {
+    void api.setLanguage(settings.language);
   }
 
   window.dispatchEvent(
@@ -1243,6 +1252,17 @@ function openSettingsModal() {
               <option value="system" ${currentSettings.theme === "system" ? "selected" : ""}>跟随系统自动切换</option>
             </select>
           </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">菜单栏语言 / Menu language</span>
+              <span class="ty-settings-desc">设置桌面原生菜单栏语言（Web 端不受影响）</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-language">
+              <option value="zh" ${currentSettings.language === "zh" ? "selected" : ""}>中文（默认）</option>
+              <option value="en" ${currentSettings.language === "en" ? "selected" : ""}>English</option>
+            </select>
+          </div>
         </div>
 
         <!-- Tab 4: 存储与导出 -->
@@ -1332,6 +1352,7 @@ function openSettingsModal() {
     const selectFontFamily = (modalOverlay.querySelector("#setting-select-font-family") as HTMLSelectElement)?.value || "default";
     const selectExportPolicy = ((modalOverlay.querySelector("#setting-select-export-policy") as HTMLSelectElement)?.value as any) || "ask";
     const selectTheme = ((modalOverlay.querySelector("#setting-select-theme") as HTMLSelectElement)?.value as any) || "light";
+    const selectLanguage = normalizeLanguage((modalOverlay.querySelector("#setting-select-language") as HTMLSelectElement)?.value);
 
     const newSettings: MarkWeaveSettings = {
       mermaidDefaultMode: selectedMode,
@@ -1343,6 +1364,7 @@ function openSettingsModal() {
       fontFamily: selectFontFamily,
       exportPolicy: selectExportPolicy,
       theme: selectTheme,
+      language: selectLanguage,
     };
 
     saveSettings(newSettings);

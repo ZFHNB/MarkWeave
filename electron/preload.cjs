@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("markweave", {
   readFile: (filePath) => ipcRenderer.invoke("file:read", filePath),
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
   getInfo: () => ipcRenderer.invoke("app:get-info"),
+  setLanguage: (language) => ipcRenderer.invoke("app:set-language", language),
   onMenuAction: (callback) => {
     if (typeof callback !== "function") return () => {};
     const subscription = (_event, action) => callback(action);

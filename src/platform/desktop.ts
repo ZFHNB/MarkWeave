@@ -26,6 +26,7 @@ export interface MarkWeaveDesktopAPI {
   readFile?: (filePath: string) => Promise<OpenFileResult | null>;
   openExternal?: (url: string) => Promise<boolean>;
   getInfo?: () => Promise<AppInfo>;
+  setLanguage?: (language: string) => Promise<boolean>;
   onMenuAction: (callback: (action: string) => void) => () => void;
   onOpenPath: (callback: (filePath: string) => void) => () => void;
 }
