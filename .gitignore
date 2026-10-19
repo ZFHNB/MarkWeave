@@ -12,6 +12,7 @@ dist/
 dist-ssr/
 build/
 out/
+release/
 
 # 3. 缓存目录 (Caches)
 .vite/

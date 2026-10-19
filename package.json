@@ -4,16 +4,24 @@
   "description": "MarkWeave - 现代即时渲染、支持可拖拽 Mermaid 图表可视化排版的 Markdown 编辑器",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run --reporter=default --reporter=junit --outputFile.junit=reports/junit.xml",
-    "test:e2e": "node scripts/test-e2e.mjs"
+    "test:e2e": "node scripts/test-e2e.mjs",
+    "electron:dev": "cross-env MARKWEAVE_DEV_URL=http://localhost:5173 electron .",
+    "electron:start": "npm run build && electron .",
+    "package:portable": "npm run build && electron-builder --win portable",
+    "package:dir": "npm run build && electron-builder --win dir"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",
     "@types/markdown-it": "^14.2.0",
+    "cross-env": "^7.0.3",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
     "jsdom": "^29.1.1",
     "puppeteer-core": "^25.14.0",
     "typescript": "~6.0.2",
@@ -35,5 +43,28 @@
     "prosemirror-tables": "^1.8.5",
     "prosemirror-transform": "^1.12.2",
     "prosemirror-view": "^1.42.6"
+  },
+  "build": {
+    "appId": "com.markweave.app",
+    "productName": "MarkWeave",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "MarkWeave-${version}-portable.exe"
+    }
   }
 }
