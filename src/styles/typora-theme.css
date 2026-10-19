@@ -220,7 +220,7 @@ html, body {
   padding: 40px 60px 140px;
   outline: none !important;
   border: none !important;
-  min-height: 100%;
+  min-height: calc(100vh - 160px);
   user-select: text;
   font-family: var(--editor-font-family, var(--font-family));
   font-size: var(--editor-font-size, 16px);
@@ -232,7 +232,7 @@ html, body {
   outline: none !important;
   border: none !important;
   box-shadow: none !important;
-  min-height: 100%;
+  min-height: calc(100vh - 160px);
   user-select: text;
 }
 
@@ -1363,9 +1363,21 @@ body.theme-night .md-inline-node-input {
 #write table {
   border-collapse: collapse;
   width: 100%;
-  table-layout: auto;
+  table-layout: fixed;
   margin: 1.2em 0;
 }
+
+#write table.md-table-auto-cols { table-layout: auto; }
+#write table.md-table-nowrap {
+  display: block;
+  overflow-x: auto;
+  white-space: nowrap;
+  table-layout: auto;
+  width: max-content;
+  min-width: 100%;
+}
+#write table.md-table-nowrap th,
+#write table.md-table-nowrap td { white-space: nowrap; }
 
 #write th,
 #write td {

@@ -68,6 +68,22 @@ class TableToolbarView {
         </button>
       </div>
       <div class="md-table-toolbar-group">
+        <button type="button" class="md-table-toolbar-btn" data-action="cols-auto" title="自适应列宽" contenteditable="false">
+          自适应列宽
+        </button>
+        <button type="button" class="md-table-toolbar-btn" data-action="cols-equal" title="等分列宽" contenteditable="false">
+          等分列宽
+        </button>
+      </div>
+      <div class="md-table-toolbar-group">
+        <button type="button" class="md-table-toolbar-btn" data-action="rows-wrap" title="自适应行高" contenteditable="false">
+          自适应行高
+        </button>
+        <button type="button" class="md-table-toolbar-btn" data-action="rows-nowrap" title="单行显示" contenteditable="false">
+          单行显示
+        </button>
+      </div>
+      <div class="md-table-toolbar-group">
         <button type="button" class="md-table-toolbar-btn danger" data-action="table-delete" title="删除整张表格" contenteditable="false">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           删表
@@ -137,6 +153,38 @@ class TableToolbarView {
       case "align-right":
         setColumnAlignment("right")(state, dispatch);
         break;
+      case "cols-auto": {
+        const table = this.getTableElement();
+        if (table) {
+          table.classList.add("md-table-auto-cols");
+          this.updateActiveState();
+        }
+        break;
+      }
+      case "cols-equal": {
+        const table = this.getTableElement();
+        if (table) {
+          table.classList.remove("md-table-auto-cols");
+          this.updateActiveState();
+        }
+        break;
+      }
+      case "rows-wrap": {
+        const table = this.getTableElement();
+        if (table) {
+          table.classList.remove("md-table-nowrap");
+          this.updateActiveState();
+        }
+        break;
+      }
+      case "rows-nowrap": {
+        const table = this.getTableElement();
+        if (table) {
+          table.classList.add("md-table-nowrap");
+          this.updateActiveState();
+        }
+        break;
+      }
       case "table-delete":
         deleteTable(state, dispatch);
         break;
@@ -174,7 +222,7 @@ class TableToolbarView {
     this.isVisible = false;
   }
 
-  private positionToolbar() {
+  private getTableElement(): HTMLElement | null {
     const $head = this.view.state.selection.$head;
     let tableDepth = -1;
     for (let d = $head.depth; d > 0; d--) {
@@ -208,6 +256,11 @@ class TableToolbarView {
       tableEl = el?.closest("table") ?? null;
     }
 
+    return tableEl;
+  }
+
+  private positionToolbar() {
+    const tableEl = this.getTableElement();
     if (!tableEl) {
       this.hide();
       return;
@@ -215,7 +268,7 @@ class TableToolbarView {
 
     const tableRect = tableEl.getBoundingClientRect();
     const toolbarHeight = this.dom.offsetHeight || 34;
-    const toolbarWidth = this.dom.offsetWidth || 380;
+    const toolbarWidth = this.dom.offsetWidth || 560;
 
     let top = tableRect.top - toolbarHeight - 8;
     if (top < 42) {
@@ -243,6 +296,22 @@ class TableToolbarView {
         });
     } catch {
       // not in cell
+    }
+
+    const table = this.getTableElement();
+    if (table) {
+      const hasAutoCols = table.classList.contains("md-table-auto-cols");
+      const hasNowrap = table.classList.contains("md-table-nowrap");
+
+      const btnColsAuto = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-auto']");
+      const btnColsEqual = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-equal']");
+      const btnRowsWrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-wrap']");
+      const btnRowsNowrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-nowrap']");
+
+      btnColsAuto?.classList.toggle("active", hasAutoCols);
+      btnColsEqual?.classList.toggle("active", !hasAutoCols);
+      btnRowsWrap?.classList.toggle("active", !hasNowrap);
+      btnRowsNowrap?.classList.toggle("active", hasNowrap);
     }
   }
 

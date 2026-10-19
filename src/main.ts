@@ -20,6 +20,7 @@ import {
   suggestedSaveName,
   type DesktopFile,
 } from "./platform/documents";
+import { resolveTheme, type ThemeSetting } from "./platform/theme";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -1017,7 +1018,7 @@ export interface MarkWeaveSettings {
   lineHeight: string;
   fontFamily: string;
   exportPolicy: "ask" | "markweave" | "compatible";
-  theme: "system" | "light" | "night";
+  theme: ThemeSetting;
 }
 
 function loadSettings(): MarkWeaveSettings {
@@ -1064,13 +1065,15 @@ function applySettings(settings: MarkWeaveSettings) {
   }
 
   // 主题应用
-  if (settings.theme === "night") {
-    document.body.classList.add("theme-night");
-  } else if (settings.theme === "light") {
-    document.body.classList.remove("theme-night");
-  } else if (settings.theme === "system") {
-    const isDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
-    document.body.classList.toggle("theme-night", isDark);
+  const wasNight = document.body.classList.contains("theme-night");
+  const prefersDark = Boolean(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const effectiveTheme = resolveTheme(settings.theme, prefersDark);
+  const isNight = effectiveTheme === "night";
+
+  document.body.classList.toggle("theme-night", isNight);
+
+  if (wasNight !== isNight) {
+    window.dispatchEvent(new CustomEvent("theme-change"));
   }
 
   window.dispatchEvent(
@@ -1367,13 +1370,49 @@ btnSaveMd.addEventListener("click", downloadMarkdown);
 
 // 主题切换 (明亮 / 暗色)
 function toggleTheme() {
-  document.body.classList.toggle("theme-night");
-  const isNight = document.body.classList.contains("theme-night");
-  localStorage.setItem("markweave_theme", isNight ? "night" : "light");
-  window.dispatchEvent(new CustomEvent("theme-change"));
+  const currentSettings = loadSettings();
+  const prefersDark = Boolean(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const currentResolved = resolveTheme(currentSettings.theme, prefersDark);
+  const nextTheme: "light" | "night" = currentResolved === "night" ? "light" : "night";
+  currentSettings.theme = nextTheme;
+  saveSettings(currentSettings);
 }
 
 btnToggleTheme.addEventListener("click", toggleTheme);
+
+// 监听 prefers-color-scheme 变化：当设置为 system 时重新应用设置并触发主题事件
+if (window.matchMedia) {
+  const colorSchemeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+  const handleColorSchemeChange = () => {
+    const currentSettings = loadSettings();
+    if (currentSettings.theme === "system") {
+      applySettings(currentSettings);
+    }
+  };
+  if (colorSchemeQuery.addEventListener) {
+    colorSchemeQuery.addEventListener("change", handleColorSchemeChange);
+  } else if ((colorSchemeQuery as any).addListener) {
+    (colorSchemeQuery as any).addListener(handleColorSchemeChange);
+  }
+}
+
+// 空文档下点击页面空白区域聚焦首行
+document.addEventListener("click", (e: MouseEvent) => {
+  if (isSourceMode) return;
+
+  const current = documents.find((d) => d.id === activeDocId);
+  if (!current || current.content.trim() !== "") return;
+
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+
+  const interactiveSelector =
+    'button, input, textarea, select, a, [role="button"], [contenteditable="true"], .ty-file-item, .ty-outline-item, .ty-sidebar-tab, .ty-icon-btn, .ty-footer-btn, .ty-settings-tab-btn, .ty-modal-overlay, .md-fences-toolbar, .md-table-toolbar, .md-diagram-toolbar-wrap';
+
+  if (target.closest(interactiveSelector)) return;
+
+  editor.focusStart();
+});
 
 // 初始化加载并应用设置
 applySettings(loadSettings());

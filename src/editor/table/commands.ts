@@ -1,6 +1,5 @@
-import type { Command } from "prosemirror-state";
-import { TextSelection } from "prosemirror-state";
-import type { Node as PMNode } from "prosemirror-model";
+import { Plugin, type Command, TextSelection } from "prosemirror-state";
+import { Fragment, type Node as PMNode } from "prosemirror-model";
 import {
   goToNextCell,
   isInTable,
@@ -9,6 +8,30 @@ import {
   moveCellForward,
 } from "prosemirror-tables";
 import { schema } from "../schema";
+
+export function ensureTrailingParagraphNode(doc: PMNode): PMNode {
+  if (doc.lastChild && doc.lastChild.type.name === "table") {
+    const paragraph = schema.nodes.paragraph.createAndFill() ?? schema.nodes.paragraph.create();
+    return doc.copy(doc.content.append(Fragment.from(paragraph)));
+  }
+  return doc;
+}
+
+export function createTrailingParagraphPlugin(): Plugin {
+  return new Plugin({
+    appendTransaction(transactions, _oldState, newState) {
+      const docChanged = transactions.some((tr) => tr.docChanged);
+      if (!docChanged) return null;
+
+      const { doc } = newState;
+      if (doc.lastChild && doc.lastChild.type.name === "table") {
+        const paragraph = schema.nodes.paragraph.createAndFill() ?? schema.nodes.paragraph.create();
+        return newState.tr.insert(doc.content.size, paragraph);
+      }
+      return null;
+    },
+  });
+}
 
 export function createTableNode(rows: number, cols: number): PMNode {
   const clampedRows = Math.max(1, Math.min(50, Number.isFinite(rows) ? Math.floor(rows) : 1));
@@ -38,6 +61,11 @@ export function insertTable(rows: number, cols: number): Command {
     tr.replaceSelectionWith(table);
 
     if (!tr.docChanged) return false;
+
+    if (tr.doc.lastChild?.type.name === "table") {
+      const paragraph = schema.nodes.paragraph.createAndFill() ?? schema.nodes.paragraph.create();
+      tr.insert(tr.doc.content.size, paragraph);
+    }
 
     if (dispatch) {
       let tablePos: number | null = null;

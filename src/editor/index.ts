@@ -16,7 +16,12 @@ import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
 import { computeStats } from "./stats";
 import { tableEditing, addRowAfter, deleteRow } from "prosemirror-tables";
-import { insertTable, goToNextCellOrAppendRow } from "./table/commands";
+import {
+  insertTable,
+  goToNextCellOrAppendRow,
+  ensureTrailingParagraphNode,
+  createTrailingParagraphPlugin,
+} from "./table/commands";
 import { createTableToolbarPlugin } from "./table/table-toolbar";
 
 export interface EditorOptions {
@@ -32,6 +37,7 @@ export class MarkWeaveEditor {
   private options: EditorOptions;
 
   private createState(doc: PMNode): EditorState {
+    const safeDoc = ensureTrailingParagraphNode(doc);
     const customKeymap = keymap({
       "Mod-z": undo,
       "Mod-y": redo,
@@ -59,7 +65,7 @@ export class MarkWeaveEditor {
     });
 
     return EditorState.create({
-      doc,
+      doc: safeDoc,
       plugins: [
         history(),
         customKeymap,
@@ -67,6 +73,7 @@ export class MarkWeaveEditor {
         buildInputRules(schema),
         createSyntaxFoldingPlugin(),
         tableEditing(),
+        createTrailingParagraphPlugin(),
         createTableToolbarPlugin(),
       ],
     });
@@ -163,6 +170,12 @@ export class MarkWeaveEditor {
   public insertTable(rows: number, cols: number) {
     const cmd = insertTable(rows, cols);
     cmd(this.view.state, this.view.dispatch);
+    this.view.focus();
+  }
+
+  public focusStart() {
+    const tr = this.view.state.tr.setSelection(Selection.atStart(this.view.state.doc));
+    this.view.dispatch(tr);
     this.view.focus();
   }
 
