@@ -13,6 +13,7 @@ import { MathBlockView } from "./nodeviews/math-block";
 import { TaskItemView } from "./nodeviews/task-item";
 import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
+import { computeStats } from "./stats";
 
 export interface EditorOptions {
   mountEl: HTMLElement;
@@ -132,11 +133,8 @@ export class MarkWeaveEditor {
   }
 
   private updateStats() {
-    const text = this.view.state.doc.textContent;
-    const words = (text.match(/[\u4e00-\u9fa5]|\b\w+\b/g) || []).length;
-    const chars = text.length;
-    const lines = text.split("\n").length;
-    this.options.onWordCountChange?.({ words, chars, lines });
+    const stats = computeStats(this.getMarkdown());
+    this.options.onWordCountChange?.(stats);
   }
 
   public focus() {

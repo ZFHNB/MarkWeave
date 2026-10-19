@@ -43,7 +43,7 @@ export function markdownToDoc(markdownText: string, schema: Schema): PMNode {
 export function docToMarkdown(doc: PMNode): string {
   const result: string[] = [];
 
-  function serializeNode(node: PMNode): string {
+  function serializeNode(node: PMNode, depth = 0): string {
     switch (node.type.name) {
       case "paragraph": {
         return serializeInlines(node);
@@ -55,7 +55,7 @@ export function docToMarkdown(doc: PMNode): string {
       }
 
       case "blockquote": {
-        const inner = node.content.content.map(serializeNode).join("\n\n");
+        const inner = node.content.content.map((child) => serializeNode(child, depth)).join("\n\n");
         return inner
           .split("\n")
           .map((line) => `> ${line}`)
@@ -76,23 +76,26 @@ export function docToMarkdown(doc: PMNode): string {
       }
 
       case "bullet_list": {
+        const indent = "  ".repeat(depth);
         return node.content.content
-          .map((item) => `- ${serializeListItem(item)}`)
+          .map((item) => `${indent}- ${serializeListItem(item, depth)}`)
           .join("\n");
       }
 
       case "ordered_list": {
         const start = node.attrs.order || 1;
+        const indent = "  ".repeat(depth);
         return node.content.content
-          .map((item, idx) => `${start + idx}. ${serializeListItem(item)}`)
+          .map((item, idx) => `${indent}${start + idx}. ${serializeListItem(item, depth)}`)
           .join("\n");
       }
 
       case "task_list": {
+        const indent = "  ".repeat(depth);
         return node.content.content
           .map((item) => {
             const checked = item.attrs.checked ? "[x]" : "[ ]";
-            return `- ${checked} ${serializeListItem(item)}`;
+            return `${indent}- ${checked} ${serializeListItem(item, depth)}`;
           })
           .join("\n");
       }
@@ -102,8 +105,19 @@ export function docToMarkdown(doc: PMNode): string {
     }
   }
 
-  function serializeListItem(item: PMNode): string {
-    return item.content.content.map(serializeNode).join("\n  ");
+  function serializeListItem(item: PMNode, depth: number): string {
+    return item.content.content
+      .map((block) => {
+        if (
+          block.type.name === "bullet_list" ||
+          block.type.name === "ordered_list" ||
+          block.type.name === "task_list"
+        ) {
+          return serializeNode(block, depth + 1);
+        }
+        return serializeNode(block, depth);
+      })
+      .join("\n");
   }
 
   function serializeInlines(node: PMNode): string {
@@ -126,9 +140,11 @@ export function docToMarkdown(doc: PMNode): string {
             case "code":
               piece = `\`${piece}\``;
               break;
-            case "link":
-              piece = `[${piece}](${mark.attrs.href})`;
+            case "link": {
+              const title = mark.attrs.title ? ` "${mark.attrs.title}"` : "";
+              piece = `[${piece}](${mark.attrs.href}${title})`;
               break;
+            }
             case "inline_math":
               piece = `$${mark.attrs.formula || piece}$`;
               break;
@@ -136,7 +152,8 @@ export function docToMarkdown(doc: PMNode): string {
         });
         text += piece;
       } else if (child.type.name === "image") {
-        text += `![${child.attrs.alt || ""}](${child.attrs.src})`;
+        const title = child.attrs.title ? ` "${child.attrs.title}"` : "";
+        text += `![${child.attrs.alt || ""}](${child.attrs.src}${title})`;
       } else if (child.type.name === "hard_break") {
         text += "  \n";
       }

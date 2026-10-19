@@ -1318,4 +1318,45 @@ body.theme-night .md-inline-node-input {
   transform: translateX(18px);
 }
 
+/* ================= 图片样式约束 ================= */
+.md-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: 3px;
+}
+
+.ProseMirror-selectednode.md-image {
+  outline: 2px solid var(--primary-color);
+}
+
+/* ================= 打印样式适配 ================= */
+@media print {
+  .ty-sidebar,
+  .ty-header-bar,
+  .ty-footer,
+  .md-fences-toolbar,
+  .md-diagram-toolbar-wrap,
+  .md-meta {
+    display: none !important;
+  }
+
+  .ty-editor-scroller {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  #write {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  table,
+  pre,
+  blockquote,
+  img {
+    break-inside: avoid;
+  }
+}
+
+
 

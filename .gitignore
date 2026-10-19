@@ -28,6 +28,7 @@ coverage/
 playwright-report/
 blob-report/
 test-results/
+reports/
 
 # 5. 运行时日志 (Logs & Debugging)
 logs/

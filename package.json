@@ -8,14 +8,17 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test": "vitest run --reporter=default --reporter=junit --outputFile.junit=reports/junit.xml",
     "test:e2e": "node scripts/test-e2e.mjs"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",
     "@types/markdown-it": "^14.2.0",
+    "jsdom": "^29.1.1",
     "puppeteer-core": "^25.14.0",
     "typescript": "~6.0.2",
-    "vite": "^8.3.0"
+    "vite": "^8.3.0",
+    "vitest": "^5.0.5"
   },
   "dependencies": {
     "katex": "^0.19.0",
