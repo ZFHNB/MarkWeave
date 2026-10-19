@@ -12,6 +12,14 @@ import {
   uniqueTitle,
 } from "./workspace/store";
 import { applyDocumentSwitch } from "./workspace/session";
+import { getDesktopAPI } from "./platform/desktop";
+import {
+  applyOpenedFile,
+  extractFileName,
+  markDocumentSaved,
+  suggestedSaveName,
+  type DesktopFile,
+} from "./platform/documents";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -331,8 +339,11 @@ window.addEventListener("beforeunload", () => {
 
 // 标题同步辅助函数
 function syncTitle(title: string) {
+  const currentDoc = documents.find((d) => d.id === activeDocId);
+  const isDirty = Boolean(currentDoc && currentDoc.filePath && currentDoc.dirty);
+  const displayTitle = isDirty ? `• ${title}` : title;
   docTitleEl.textContent = title;
-  document.title = title;
+  document.title = displayTitle;
 }
 
 // 实例化 MarkWeave 核心编辑器
@@ -350,6 +361,7 @@ const editor = new MarkWeaveEditor({
         doc.content = md;
         doc.dirty = true;
         doc.updatedAt = Date.now();
+        syncTitle(doc.title);
         scheduleSave();
       }
     }
@@ -375,6 +387,7 @@ sourceEditor.addEventListener("input", () => {
       doc.content = sourceEditor.value;
       doc.dirty = true;
       doc.updatedAt = Date.now();
+      syncTitle(doc.title);
       scheduleSave();
     }
   }
@@ -627,8 +640,8 @@ function renderOutline(headings: HeadingItem[]) {
   });
 }
 
-// 新建文档按钮
-btnNewFile.addEventListener("click", () => {
+// 新建文档按钮与操作
+function handleNewFile() {
   const newTitle = uniqueTitle(documents, "未命名文档.md");
   const newDoc = createDocument(newTitle, "");
 
@@ -636,11 +649,57 @@ btnNewFile.addEventListener("click", () => {
   renderFileList();
   switchDocument(newDoc.id);
   editor.focus();
-});
+}
+
+btnNewFile.addEventListener("click", handleNewFile);
+
+function handleFileOpened(file: DesktopFile) {
+  if (isSourceMode) {
+    const doc = documents.find((d) => d.id === activeDocId);
+    if (doc && doc.content !== sourceEditor.value) {
+      doc.content = sourceEditor.value;
+      doc.dirty = true;
+      doc.updatedAt = Date.now();
+    }
+  } else {
+    const doc = documents.find((d) => d.id === activeDocId);
+    const md = editor.getMarkdown();
+    if (doc && doc.content !== md) {
+      doc.content = md;
+      doc.dirty = true;
+      doc.updatedAt = Date.now();
+    }
+  }
+
+  const result = applyOpenedFile(documents, file, activeDocId);
+  documents = result.documents;
+  activeDocId = result.activeDocId;
+
+  const current = documents.find((d) => d.id === activeDocId)!;
+  syncTitle(current.title);
+  editor.setMarkdown(current.content, { resetHistory: true });
+  if (isSourceMode) {
+    sourceEditor.value = current.content;
+  }
+  renderFileList();
+  flushSave();
+}
+
+async function handleOpenFile() {
+  const api = getDesktopAPI();
+  if (api) {
+    const file = await api.openFile();
+    if (file) {
+      handleFileOpened(file);
+    }
+  } else {
+    localFileInput.click();
+  }
+}
 
 // 打开本地 Markdown 文件
 btnOpenFile.addEventListener("click", () => {
-  localFileInput.click();
+  void handleOpenFile();
 });
 
 localFileInput.addEventListener("change", (e) => {
@@ -719,6 +778,79 @@ function handleOpenInsertTable() {
 
 btnInsertTable.addEventListener("click", handleOpenInsertTable);
 
+async function handleSave() {
+  if (isSourceMode) {
+    const doc = documents.find((d) => d.id === activeDocId);
+    if (doc && doc.content !== sourceEditor.value) {
+      doc.content = sourceEditor.value;
+      doc.dirty = true;
+      doc.updatedAt = Date.now();
+      scheduleSave();
+    }
+  }
+
+  const api = getDesktopAPI();
+  if (api) {
+    const currentDoc = documents.find((d) => d.id === activeDocId);
+    if (!currentDoc) return;
+    const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+    let result: { path: string } | null = null;
+    if (currentDoc.filePath) {
+      result = await api.saveFile({ path: currentDoc.filePath, content });
+    } else {
+      const suggestedName = suggestedSaveName(documents, activeDocId);
+      result = await api.saveFile({ content, suggestedName });
+    }
+    if (result && result.path) {
+      documents = markDocumentSaved(documents, currentDoc.id, result.path);
+      const fileName = extractFileName(result.path);
+      const doc = documents.find((d) => d.id === currentDoc.id);
+      if (doc && (!currentDoc.filePath || doc.title !== fileName)) {
+        doc.title = fileName;
+      }
+      syncTitle(doc ? doc.title : currentDoc.title);
+      renderFileList();
+      flushSave();
+    }
+  } else {
+    downloadMarkdown();
+  }
+}
+
+async function handleSaveAs() {
+  if (isSourceMode) {
+    const doc = documents.find((d) => d.id === activeDocId);
+    if (doc && doc.content !== sourceEditor.value) {
+      doc.content = sourceEditor.value;
+      doc.dirty = true;
+      doc.updatedAt = Date.now();
+      scheduleSave();
+    }
+  }
+
+  const api = getDesktopAPI();
+  if (api) {
+    const currentDoc = documents.find((d) => d.id === activeDocId);
+    if (!currentDoc) return;
+    const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+    const suggestedName = suggestedSaveName(documents, activeDocId);
+    const result = await api.saveFile({ content, suggestedName });
+    if (result && result.path) {
+      documents = markDocumentSaved(documents, currentDoc.id, result.path);
+      const fileName = extractFileName(result.path);
+      const doc = documents.find((d) => d.id === currentDoc.id);
+      if (doc && doc.title !== fileName) {
+        doc.title = fileName;
+      }
+      syncTitle(doc ? doc.title : currentDoc.title);
+      renderFileList();
+      flushSave();
+    }
+  } else {
+    downloadMarkdown();
+  }
+}
+
 window.addEventListener("keydown", (e) => {
   // 插入表格快捷键 (Ctrl+Alt+T / Cmd+Alt+T)
   if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "t") {
@@ -729,20 +861,16 @@ window.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "/") {
     e.preventDefault();
     toggleSourceMode();
+    return;
   }
-  // Ctrl+S 保存文件
+  // Ctrl+S / Ctrl+Shift+S 保存文件
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
     e.preventDefault();
-    if (isSourceMode) {
-      const doc = documents.find((d) => d.id === activeDocId);
-      if (doc && doc.content !== sourceEditor.value) {
-        doc.content = sourceEditor.value;
-        doc.dirty = true;
-        doc.updatedAt = Date.now();
-        scheduleSave();
-      }
+    if (e.shiftKey) {
+      void handleSaveAs();
+    } else {
+      void handleSave();
     }
-    downloadMarkdown();
   }
 });
 
@@ -1238,12 +1366,14 @@ btnOpenSettings?.addEventListener("click", openSettingsModal);
 btnSaveMd.addEventListener("click", downloadMarkdown);
 
 // 主题切换 (明亮 / 暗色)
-btnToggleTheme.addEventListener("click", () => {
+function toggleTheme() {
   document.body.classList.toggle("theme-night");
   const isNight = document.body.classList.contains("theme-night");
   localStorage.setItem("markweave_theme", isNight ? "night" : "light");
   window.dispatchEvent(new CustomEvent("theme-change"));
-});
+}
+
+btnToggleTheme.addEventListener("click", toggleTheme);
 
 // 初始化加载并应用设置
 applySettings(loadSettings());
@@ -1296,3 +1426,51 @@ btnExportHtml.addEventListener("click", () => {
 btnExportPdf.addEventListener("click", () => {
   window.print();
 });
+
+// Electron 桌面菜单与文件打开集成
+const desktopAPI = getDesktopAPI();
+if (desktopAPI) {
+  desktopAPI.onMenuAction((action: string) => {
+    switch (action) {
+      case "new-file":
+        handleNewFile();
+        break;
+      case "open-file":
+        void handleOpenFile();
+        break;
+      case "save":
+        void handleSave();
+        break;
+      case "save-as":
+        void handleSaveAs();
+        break;
+      case "insert-table":
+        handleOpenInsertTable();
+        break;
+      case "toggle-source":
+        toggleSourceMode();
+        break;
+      case "toggle-sidebar":
+        sidebar.classList.toggle("collapsed");
+        break;
+      case "toggle-theme":
+        toggleTheme();
+        break;
+    }
+  });
+
+  desktopAPI.onOpenPath(async (filePath: string) => {
+    if (!filePath) return;
+    try {
+      if (desktopAPI.readFile) {
+        const file = await desktopAPI.readFile(filePath);
+        if (file) {
+          handleFileOpened(file);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to open path from desktop API:", filePath, err);
+    }
+  });
+}
+

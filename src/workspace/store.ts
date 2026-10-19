@@ -6,6 +6,7 @@ export interface StoredDocument {
   content: string;
   updatedAt: number;
   dirty: boolean;
+  filePath?: string;
 }
 
 export interface WorkspaceStateV1 {
@@ -25,7 +26,8 @@ function generateId(): string {
 export function createDocument(
   title?: string,
   content?: string,
-  now?: number
+  now?: number,
+  filePath?: string
 ): StoredDocument {
   return {
     id: generateId(),
@@ -33,6 +35,7 @@ export function createDocument(
     content: content ?? "",
     updatedAt: now ?? Date.now(),
     dirty: false,
+    ...(filePath !== undefined ? { filePath } : {}),
   };
 }
 
@@ -85,6 +88,9 @@ export function parseWorkspace(raw: string | null): WorkspaceStateV1 | null {
         typeof doc.updatedAt !== "number" ||
         typeof doc.dirty !== "boolean"
       ) {
+        return null;
+      }
+      if (doc.filePath !== undefined && typeof doc.filePath !== "string") {
         return null;
       }
     }
