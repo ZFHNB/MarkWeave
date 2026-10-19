@@ -1,6 +1,7 @@
 import puppeteer from "puppeteer-core";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -8,6 +9,8 @@ const __dirname = path.dirname(__filename);
 
 const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const artifactsDir = path.resolve(__dirname, "../test-artifacts");
+// 每轮使用全新 profile，避免上一轮持久化的 localStorage/工作区影响文档数量等断言。
+const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "markweave-e2e-"));
 
 if (!fs.existsSync(artifactsDir)) {
   fs.mkdirSync(artifactsDir, { recursive: true });
@@ -24,7 +27,7 @@ async function runTests() {
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--user-data-dir=C:\\Users\\27953\\AppData\\Local\\Temp\\puppeteer-chrome-test",
+      `--user-data-dir=${profileDir}`,
     ],
   });
 
@@ -1247,6 +1250,11 @@ async function runTests() {
     failCount++;
   } finally {
     await browser.close();
+    try {
+      fs.rmSync(profileDir, { recursive: true, force: true });
+    } catch {
+      // Windows 上 Chrome 可能短暂占用 profile 文件；残留目录位于系统临时目录，可忽略。
+    }
   }
 
   console.log("\n=================================");
