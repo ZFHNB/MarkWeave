@@ -421,7 +421,9 @@ body.theme-night .md-blockquote {
   font-family: var(--monospace);
   font-size: 12px;
   cursor: pointer;
-  user-select: none;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  caret-color: transparent !important;
   transition: all 0.15s ease;
   line-height: 1.4;
 }

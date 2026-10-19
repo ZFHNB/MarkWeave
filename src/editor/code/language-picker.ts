@@ -28,6 +28,10 @@ export class LanguagePicker {
     this.triggerBtn.className = "md-fences-lang-trigger";
     this.triggerBtn.setAttribute("aria-haspopup", "listbox");
     this.triggerBtn.setAttribute("aria-expanded", "false");
+    this.triggerBtn.setAttribute("contenteditable", "false");
+    this.triggerBtn.style.userSelect = "none";
+    this.triggerBtn.style.webkitUserSelect = "none";
+    this.triggerBtn.style.caretColor = "transparent";
 
     this.labelEl = document.createElement("span");
     this.labelEl.className = "md-fences-lang-name";
