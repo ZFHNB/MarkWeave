@@ -1138,7 +1138,7 @@ function openSettingsModal() {
               <input type="radio" name="mermaid-default-mode" value="custom" ${currentSettings.mermaidDefaultMode === "custom" ? "checked" : ""} />
               <div class="ty-export-option-content">
                 <div class="ty-export-option-title">
-                  🎨 自定义模式 (MarkWeave 样式) <span style="font-size: 11px; color: var(--primary-color); background: rgba(66, 133, 244, 0.1); padding: 1px 6px; border-radius: 4px; margin-left: 4px;">默认推荐</span>
+                  ✨ 增强模式 (MarkWeave 样式) <span style="font-size: 11px; color: var(--primary-color); background: rgba(66, 133, 244, 0.1); padding: 1px 6px; border-radius: 4px; margin-left: 4px;">默认推荐</span>
                 </div>
                 <div class="ty-export-option-desc">
                   展示 MarkWeave 独创样式与全部功能，支持拖拽排版、正交拐角圆弧/直角折线、箭头反转、行内修改连线文字等完整功能。
@@ -1150,10 +1150,10 @@ function openSettingsModal() {
               <input type="radio" name="mermaid-default-mode" value="standard" ${currentSettings.mermaidDefaultMode === "standard" ? "checked" : ""} />
               <div class="ty-export-option-content">
                 <div class="ty-export-option-title">
-                  🌐 普通模式 (主流兼容样式)
+                  🌐 兼容模式 (主流标准样式)
                 </div>
                 <div class="ty-export-option-desc">
-                  展示可兼容主流官方 Mermaid 的标准样式，仅支持纵向与横向排布转换功能，保证与 GitHub、Typora 等平台预览完全一致。
+                  展示主流标准 Mermaid 样式，仅保留纵横向排布转换功能，保证与 GitHub、Typora 等平台预览完全一致。
                 </div>
               </div>
             </label>

@@ -47,6 +47,14 @@ interface EdgeTopology {
 
 const GRID_SIZE = 20;
 
+export function resolvePreviewModeOnAttach(
+  currentMode: "custom" | "standard",
+  modeInitialized: boolean,
+  defaultMode: "custom" | "standard"
+): "custom" | "standard" {
+  return modeInitialized ? currentMode : defaultMode;
+}
+
 export class MermaidInteractor {
   private svg!: SVGSVGElement;
   private container!: HTMLElement;
@@ -58,6 +66,7 @@ export class MermaidInteractor {
   public isEditMode: boolean = false; // 原 isDragMode 更名为 isEditMode
   public activeCurveStyle: "basis" | "stepBefore" | "linear" | null = null;
   public previewMode: "custom" | "standard" = "custom";
+  private modeInitialized = false;
   private btnModeCustom: HTMLButtonElement | null = null;
   private btnModeStandard: HTMLButtonElement | null = null;
   private curveGroupEl: HTMLElement | null = null;
@@ -112,13 +121,21 @@ export class MermaidInteractor {
     this.getCurrentCode = getCurrentCode;
     this.onSourceChange = onSourceChange;
 
+    const defaultMode = MermaidInteractor.getDefaultPreviewMode();
+    const initialMode = resolvePreviewModeOnAttach(
+      this.previewMode,
+      this.modeInitialized,
+      defaultMode
+    );
+    this.previewMode = initialMode;
+
     this.initViewBox();
     this.buildTopology();
     this.createToolbar();
     this.bindEvents();
 
-    const initialMode = MermaidInteractor.getDefaultPreviewMode();
     this.switchPreviewMode(initialMode);
+    this.modeInitialized = true;
 
     if (initialMode === "custom") {
       // 状态保持：始终同步代码或已选线型，并应用实时路由，确保渲染后线型 100% 保持稳定
@@ -297,14 +314,14 @@ export class MermaidInteractor {
     bar.className = "md-diagram-toolbar";
     bar.setAttribute("contenteditable", "false");
 
-    // 0. 模式切换按钮组 (自定义模式 vs 普通模式)
+    // 0. 模式切换按钮组 (增强模式 vs 兼容模式)
     const modeGroup = document.createElement("div");
     modeGroup.className = "md-diagram-btn-group md-diagram-mode-group";
 
     this.btnModeCustom = document.createElement("button");
     this.btnModeCustom.className = `md-diagram-btn md-mode-btn-custom ${this.previewMode === "custom" ? "active" : ""}`;
-    this.btnModeCustom.innerHTML = `🎨 自定义`;
-    this.btnModeCustom.title = "MarkWeave 样式：支持拖拽排版、正交圆角/直角折线、箭头反转与说明文字编辑";
+    this.btnModeCustom.innerHTML = `✨ 增强`;
+    this.btnModeCustom.title = "增强模式支持拖拽排版、折线、箭头与文字编辑";
     this.btnModeCustom.addEventListener("click", (e) => {
       e.stopPropagation();
       this.switchPreviewMode("custom");
@@ -312,8 +329,8 @@ export class MermaidInteractor {
 
     this.btnModeStandard = document.createElement("button");
     this.btnModeStandard.className = `md-diagram-btn md-mode-btn-standard ${this.previewMode === "standard" ? "active" : ""}`;
-    this.btnModeStandard.innerHTML = `🌐 普通`;
-    this.btnModeStandard.title = "普通模式：主流官方兼容样式，仅支持纵横向切换";
+    this.btnModeStandard.innerHTML = `🌐 兼容`;
+    this.btnModeStandard.title = "兼容模式为主流标准 Mermaid 样式，仅保留纵横向切换";
     this.btnModeStandard.addEventListener("click", (e) => {
       e.stopPropagation();
       this.switchPreviewMode("standard");
@@ -472,10 +489,11 @@ export class MermaidInteractor {
   /**
    * 切换图表预览模式：
    * - "custom": MarkWeave 增强模式，展示拖拽排版、正交圆角/直角折线等全部特性
-   * - "standard": 普通模式，展示 100% 官方主流兼容排版，仅支持纵向与横向排布转换
+   * - "standard": 兼容模式，展示 100% 官方主流标准排版，仅保留纵向与横向排布转换
    */
   public switchPreviewMode(mode: "custom" | "standard") {
     this.previewMode = mode;
+    this.modeInitialized = true;
 
     // 1. 更新工具栏按钮高亮与各组件显示/隐藏
     if (this.btnModeCustom && this.btnModeStandard) {
