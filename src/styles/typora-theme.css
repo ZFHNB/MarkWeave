@@ -1336,6 +1336,7 @@ body.theme-night .md-inline-node-input {
   .ty-footer,
   .md-fences-toolbar,
   .md-diagram-toolbar-wrap,
+  .md-table-toolbar,
   .md-meta {
     display: none !important;
   }
@@ -1357,6 +1358,166 @@ body.theme-night .md-inline-node-input {
     break-inside: avoid;
   }
 }
+
+/* ================= 表格样式 (Tables) ================= */
+#write table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: auto;
+  margin: 1.2em 0;
+}
+
+#write th,
+#write td {
+  border: 1px solid var(--border-color);
+  padding: 6px 12px;
+  min-width: 32px;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+#write th {
+  background-color: var(--code-bg-color, #f8f8f8);
+  font-weight: 600;
+  color: var(--heading-color);
+}
+
+body.theme-night #write th {
+  background-color: var(--code-bg-color, #252525);
+  color: var(--heading-color);
+}
+
+/* 单元格选中态 (半透明主色背景) */
+#write .selectedCell,
+#write td.selectedCell,
+#write th.selectedCell {
+  background-color: rgba(66, 133, 244, 0.2) !important;
+}
+
+body.theme-night #write .selectedCell,
+body.theme-night #write td.selectedCell,
+body.theme-night #write th.selectedCell {
+  background-color: rgba(77, 170, 252, 0.28) !important;
+}
+
+/* ================= 表格浮动工具条 (Table Toolbar) ================= */
+.md-table-toolbar {
+  position: fixed;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 3px 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-family: var(--font-family);
+  font-size: 11px;
+  z-index: 100;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  pointer-events: auto;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+body.theme-night .md-table-toolbar {
+  background: rgba(40, 40, 40, 0.94);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.md-table-toolbar-group {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  padding: 2px;
+  gap: 2px;
+}
+
+body.theme-night .md-table-toolbar-group {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.md-table-toolbar-btn {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-color);
+  border-radius: 3px;
+  cursor: pointer !important;
+  transition: all 0.15s ease;
+  line-height: 1.4;
+  white-space: nowrap;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  caret-color: transparent !important;
+  outline: none !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.md-table-toolbar-btn:hover {
+  background-color: var(--item-hover-bg-color);
+  color: var(--primary-color);
+}
+
+.md-table-toolbar-btn.active {
+  background-color: var(--primary-color);
+  color: #fff !important;
+  font-weight: 500;
+}
+
+.md-table-toolbar-btn.danger:hover {
+  background-color: rgba(229, 57, 53, 0.12);
+  color: #e53935;
+}
+
+/* ================= 插入表格弹窗样式 ================= */
+.ty-table-dialog-card {
+  max-width: 380px;
+}
+
+.ty-table-dialog-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 6px 0;
+}
+
+.ty-table-dialog-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.ty-table-dialog-field label {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text-color);
+}
+
+.ty-table-dialog-field input[type="number"] {
+  width: 90px;
+  padding: 5px 8px;
+  font-size: 13px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--text-color);
+  outline: none;
+  text-align: right;
+  transition: border-color 0.15s;
+}
+
+.ty-table-dialog-field input[type="number"]:focus {
+  border-color: var(--primary-color);
+}
+
 
 
 

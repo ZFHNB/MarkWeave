@@ -1,6 +1,7 @@
 import "./styles/typora-theme.css";
 import { MarkWeaveEditor } from "./editor";
 import type { HeadingItem } from "./editor/outline";
+import { openTableInsertDialog } from "./editor/table/insert-dialog";
 import {
   type StoredDocument,
   type WorkspaceStateV1,
@@ -212,6 +213,10 @@ app.innerHTML = `
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
           源码模式
         </button>
+        <button class="ty-icon-btn" id="btn-insert-table" title="插入表格 (Ctrl+Alt+T)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
+          表格
+        </button>
         <button class="ty-icon-btn" id="btn-toggle-theme" title="切换明亮/暗色主题">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           主题
@@ -260,6 +265,7 @@ const sidebar = document.getElementById("sidebar")!;
 const docTitleEl = document.getElementById("doc-title")!;
 const btnToggleSidebar = document.getElementById("btn-toggle-sidebar")!;
 const btnToggleSource = document.getElementById("btn-toggle-source")!;
+const btnInsertTable = document.getElementById("btn-insert-table")!;
 const btnToggleTheme = document.getElementById("btn-toggle-theme")!;
 const btnFocusMode = document.getElementById("btn-focus-mode")!;
 const btnTypewriterMode = document.getElementById("btn-typewriter-mode")!;
@@ -701,7 +707,25 @@ function toggleSourceMode() {
 }
 
 btnToggleSource.addEventListener("click", toggleSourceMode);
+
+function handleOpenInsertTable() {
+  if (isSourceMode) {
+    toggleSourceMode();
+  }
+  openTableInsertDialog((rows, cols) => {
+    editor.insertTable(rows, cols);
+  });
+}
+
+btnInsertTable.addEventListener("click", handleOpenInsertTable);
+
 window.addEventListener("keydown", (e) => {
+  // 插入表格快捷键 (Ctrl+Alt+T / Cmd+Alt+T)
+  if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "t") {
+    e.preventDefault();
+    handleOpenInsertTable();
+    return;
+  }
   if ((e.ctrlKey || e.metaKey) && e.key === "/") {
     e.preventDefault();
     toggleSourceMode();

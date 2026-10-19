@@ -15,6 +15,9 @@ import { TaskItemView } from "./nodeviews/task-item";
 import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
 import { computeStats } from "./stats";
+import { tableEditing, addRowAfter, deleteRow } from "prosemirror-tables";
+import { insertTable, goToNextCellOrAppendRow } from "./table/commands";
+import { createTableToolbarPlugin } from "./table/table-toolbar";
 
 export interface EditorOptions {
   mountEl: HTMLElement;
@@ -47,6 +50,12 @@ export class MarkWeaveEditor {
       Enter: splitListItem(schema.nodes.list_item),
       "Mod-[": liftListItem(schema.nodes.list_item),
       "Mod-]": sinkListItem(schema.nodes.list_item),
+      Tab: goToNextCellOrAppendRow(1),
+      "Shift-Tab": goToNextCellOrAppendRow(-1),
+      "Ctrl-Enter": addRowAfter,
+      "Mod-Enter": addRowAfter,
+      "Ctrl-Shift-Backspace": deleteRow,
+      "Mod-Shift-Backspace": deleteRow,
     });
 
     return EditorState.create({
@@ -57,6 +66,8 @@ export class MarkWeaveEditor {
         keymap(baseKeymap),
         buildInputRules(schema),
         createSyntaxFoldingPlugin(),
+        tableEditing(),
+        createTableToolbarPlugin(),
       ],
     });
   }
@@ -147,6 +158,12 @@ export class MarkWeaveEditor {
   private updateStats() {
     const stats = computeStats(this.getMarkdown());
     this.options.onWordCountChange?.(stats);
+  }
+
+  public insertTable(rows: number, cols: number) {
+    const cmd = insertTable(rows, cols);
+    cmd(this.view.state, this.view.dispatch);
+    this.view.focus();
   }
 
   public focus() {
