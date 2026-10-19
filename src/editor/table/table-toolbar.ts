@@ -1,4 +1,9 @@
 import { setColumnAlignment } from "./commands";
+import {
+  setColumnLayout,
+  setRowLayout,
+  getTableLayoutState,
+} from "./table-layout";
 import { Plugin, type EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import {
@@ -156,7 +161,7 @@ class TableToolbarView {
       case "cols-auto": {
         const table = this.getTableElement();
         if (table) {
-          table.classList.add("md-table-auto-cols");
+          setColumnLayout(table, "auto");
           this.updateActiveState();
         }
         break;
@@ -164,7 +169,7 @@ class TableToolbarView {
       case "cols-equal": {
         const table = this.getTableElement();
         if (table) {
-          table.classList.remove("md-table-auto-cols");
+          setColumnLayout(table, "equal");
           this.updateActiveState();
         }
         break;
@@ -172,7 +177,7 @@ class TableToolbarView {
       case "rows-wrap": {
         const table = this.getTableElement();
         if (table) {
-          table.classList.remove("md-table-nowrap");
+          setRowLayout(table, "wrap");
           this.updateActiveState();
         }
         break;
@@ -180,7 +185,7 @@ class TableToolbarView {
       case "rows-nowrap": {
         const table = this.getTableElement();
         if (table) {
-          table.classList.add("md-table-nowrap");
+          setRowLayout(table, "nowrap");
           this.updateActiveState();
         }
         break;
@@ -300,18 +305,17 @@ class TableToolbarView {
 
     const table = this.getTableElement();
     if (table) {
-      const hasAutoCols = table.classList.contains("md-table-auto-cols");
-      const hasNowrap = table.classList.contains("md-table-nowrap");
+      const { columns, rows } = getTableLayoutState(table);
 
       const btnColsAuto = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-auto']");
       const btnColsEqual = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-equal']");
       const btnRowsWrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-wrap']");
       const btnRowsNowrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-nowrap']");
 
-      btnColsAuto?.classList.toggle("active", hasAutoCols);
-      btnColsEqual?.classList.toggle("active", !hasAutoCols);
-      btnRowsWrap?.classList.toggle("active", !hasNowrap);
-      btnRowsNowrap?.classList.toggle("active", hasNowrap);
+      btnColsAuto?.classList.toggle("active", columns === "auto");
+      btnColsEqual?.classList.toggle("active", columns === "equal");
+      btnRowsWrap?.classList.toggle("active", rows === "wrap");
+      btnRowsNowrap?.classList.toggle("active", rows === "nowrap");
     }
   }
 

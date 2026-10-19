@@ -1367,17 +1367,9 @@ body.theme-night .md-inline-node-input {
   margin: 1.2em 0;
 }
 
-#write table.md-table-auto-cols { table-layout: auto; }
-#write table.md-table-nowrap {
-  display: block;
-  overflow-x: auto;
-  white-space: nowrap;
-  table-layout: auto;
-  width: max-content;
-  min-width: 100%;
-}
-#write table.md-table-nowrap th,
-#write table.md-table-nowrap td { white-space: nowrap; }
+#write table[data-md-table-layout="auto"] { table-layout: auto; }
+#write table[data-md-table-nowrap="true"] { display: block; overflow-x: auto; white-space: nowrap; table-layout: auto; width: max-content; min-width: 100%; }
+#write table[data-md-table-nowrap="true"] th, #write table[data-md-table-nowrap="true"] td { white-space: nowrap; }
 
 #write th,
 #write td {
