@@ -11,6 +11,11 @@ const md = new MarkdownIt({
  * 将 Markdown 纯文本解析为 ProseMirror 文档对象模型 (AST)
  */
 export function markdownToDoc(markdownText: string, schema: Schema): PMNode {
+  // 处理空字符串或纯空白文档，确保返回纯净空段落
+  if (!markdownText || !markdownText.trim()) {
+    return schema.nodes.doc.createAndFill() || schema.node("doc", null, [schema.node("paragraph")]);
+  }
+
   // 1. 特殊块预处理 (如数学公式块 $$ ... $$)
   let processed = markdownText.replace(/\$\$([\s\S]*?)\$\$/g, (_match, formula) => {
     return `<div data-math-block="true" data-formula="${encodeURIComponent(formula.trim())}"></div>`;
@@ -143,5 +148,6 @@ export function docToMarkdown(doc: PMNode): string {
     result.push(serializeNode(child));
   });
 
-  return result.join("\n\n");
+  const joined = result.join("\n\n");
+  return joined.trim() === "" ? "" : joined;
 }

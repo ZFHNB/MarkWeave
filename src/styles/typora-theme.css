@@ -684,6 +684,24 @@ body.theme-night .md-diagram-preview.is-edit-mode {
   border-radius: 3px;
 }
 
+/* 确保连线说明文字拥有清晰且不透明的底色，彻底防止箭头线与文字重叠穿透 */
+.edgeLabel rect,
+.edge-label-bg {
+  opacity: 1 !important;
+  fill-opacity: 1 !important;
+}
+
+.edgeLabel span,
+.edgeLabel .labelBkg {
+  background-color: rgba(232, 232, 232, 0.95);
+  border-radius: 4px;
+}
+
+body.theme-night .edgeLabel span,
+body.theme-night .edgeLabel .labelBkg {
+  background-color: rgba(45, 45, 48, 0.95);
+}
+
 /* 改变箭头方向悬浮小工具栏 */
 .md-edge-popover {
   position: absolute;

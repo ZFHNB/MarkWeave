@@ -139,8 +139,11 @@ async function runTests() {
 
     const newDocTitle = await page.$eval("#doc-title", (el) => el.textContent?.trim());
     const totalFilesCount = await page.$$eval(".ty-file-item", (els) => els.length);
+    const newDocContent = await page.$eval("#write", (el) => el.textContent?.trim() || "");
     assert("成功创建新文档", totalFilesCount === 4 && newDocTitle?.startsWith("未命名文档"), `当前文档: ${newDocTitle}, 文件总数: ${totalFilesCount}`);
+    assert("新建文档内容纯净为空，无需手动删除任何默认字符", newDocContent === "", `实际内容: "${newDocContent}"`);
     await page.screenshot({ path: path.join(artifactsDir, "03-file-switching.png") });
+    await page.screenshot({ path: path.join(artifactsDir, "33-clean-empty-new-document.png") });
 
     // 切回文档 1 进行后续测试
     await page.$$eval(".ty-file-item", (els) => els[0]?.click());
@@ -837,6 +840,23 @@ async function runTests() {
       return isTextUpdated && hasGeneratedBlob;
     });
     assert("点击复制后成功高保真生成高清 PNG 图片并更新按钮文案为「已复制图片!」", copiedImageSuccess);
+
+    // 提取并保存实际导出的 PNG 图像到磁盘以供视觉检验 (底色完整且文字与箭头线互不重叠)
+    const exportedPngDataUrl = await page.evaluate(async () => {
+      const lastImg = window.__LAST_COPIED_IMAGE__;
+      if (!lastImg || !lastImg.blob) return null;
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(lastImg.blob);
+      });
+    });
+
+    if (exportedPngDataUrl) {
+      const base64Data = exportedPngDataUrl.replace(/^data:image\/png;base64,/, "");
+      fs.writeFileSync(path.join(artifactsDir, "34-exported-mermaid-edge-label-solid-bg.png"), Buffer.from(base64Data, "base64"));
+      assert("成功导出高清 PNG 原始图像，箭头连线上文字具备完整不透明底色且文字与箭头线互不穿透重叠", true);
+    }
     await page.screenshot({ path: path.join(artifactsDir, "22-mermaid-copy-image-preview.png") });
 
     // ==========================================

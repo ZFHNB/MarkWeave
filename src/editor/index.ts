@@ -1,4 +1,4 @@
-import { EditorState, TextSelection } from "prosemirror-state";
+import { EditorState, TextSelection, Selection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { history, undo, redo } from "prosemirror-history";
 import { keymap } from "prosemirror-keymap";
@@ -97,7 +97,8 @@ export class MarkWeaveEditor {
 
   public setMarkdown(markdownText: string) {
     const newDoc = markdownToDoc(markdownText, schema);
-    const tr = this.view.state.tr.replaceWith(0, this.view.state.doc.content.size, newDoc.content);
+    let tr = this.view.state.tr.replaceWith(0, this.view.state.doc.content.size, newDoc.content);
+    tr = tr.setSelection(Selection.atStart(tr.doc));
     this.view.dispatch(tr);
   }
 

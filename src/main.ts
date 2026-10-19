@@ -355,7 +355,7 @@ function renderOutline(headings: HeadingItem[]) {
 btnNewFile.addEventListener("click", () => {
   const newId = `doc-${Date.now()}`;
   const newTitle = `未命名文档_${documents.length + 1}.md`;
-  const newContent = `# ${newTitle.replace(".md", "")}\n\n开始撰写您的精彩内容...`;
+  const newContent = "";
 
   documents.push({
     id: newId,
@@ -365,6 +365,7 @@ btnNewFile.addEventListener("click", () => {
 
   renderFileList();
   switchDocument(newId);
+  editor.focus();
 });
 
 // 打开本地 Markdown 文件

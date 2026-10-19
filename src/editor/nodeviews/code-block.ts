@@ -268,17 +268,48 @@ export class CodeBlockView implements NodeView {
       const textColor = isNight ? "#dddddd" : "#333333";
 
       // 彻底消除 foreignObject 导致 HTMLCanvasElement 处于 Tainted 状态的安全限制
-      clone.querySelectorAll("foreignObject").forEach((fo) => {
-        const w = parseFloat(fo.getAttribute("width") || "100");
-        const h = parseFloat(fo.getAttribute("height") || "40");
+      const liveFos = Array.from(svgEl.querySelectorAll("foreignObject"));
+      clone.querySelectorAll("foreignObject").forEach((fo, idx) => {
+        const liveFo = liveFos[idx];
+        const isEdgeLabel = Boolean(
+          fo.closest(".edgeLabel") ||
+          fo.closest(".edgeLabels") ||
+          liveFo?.closest(".edgeLabel") ||
+          liveFo?.closest(".edgeLabels")
+        );
+
+        let w = parseFloat(fo.getAttribute("width") || "0");
+        let h = parseFloat(fo.getAttribute("height") || "0");
         const textContent = fo.textContent?.trim() || "";
+
+        if (!w || !h || isNaN(w) || isNaN(h)) {
+          const textLen = textContent.length || 2;
+          w = Math.max(w || 0, textLen * 16 + 8);
+          h = Math.max(h || 0, 24);
+        }
+
+        // 提取 live DOM 中对应的计算样式与底色
+        const liveTarget = liveFo?.querySelector("span.edgeLabel, span, .labelBkg, div, p") || liveFo;
+        const liveComp = liveTarget ? window.getComputedStyle(liveTarget) : null;
+        let labelBg = isNight ? "#2d2d30" : "#e8e8e8";
+        if (
+          liveComp &&
+          liveComp.backgroundColor &&
+          liveComp.backgroundColor !== "transparent" &&
+          liveComp.backgroundColor !== "rgba(0, 0, 0, 0)"
+        ) {
+          labelBg = liveComp.backgroundColor.replace(
+            /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*[\d.]+)?\)/,
+            "rgba($1, $2, $3, 1)"
+          );
+        }
 
         const textEl = document.createElementNS("http://www.w3.org/2000/svg", "text");
         textEl.setAttribute("text-anchor", "middle");
         textEl.setAttribute("dominant-baseline", "central");
         textEl.setAttribute("x", String(w / 2));
         textEl.setAttribute("y", String(h / 2));
-        textEl.setAttribute("fill", textColor);
+        textEl.setAttribute("fill", (liveComp?.color && liveComp.color !== "transparent") ? liveComp.color : textColor);
         textEl.setAttribute("font-family", "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif");
         textEl.setAttribute("font-size", "14px");
         textEl.setAttribute("font-weight", "500");
@@ -298,7 +329,62 @@ export class CodeBlockView implements NodeView {
           textEl.textContent = textContent;
         }
 
+        // 如果是连线箭头上的说明文字 (edgeLabel)，必须插入实体背景矩形，彻底阻止下方的箭头线穿透文字
+        if (isEdgeLabel) {
+          const padX = 4;
+          const padY = 2;
+          const rectEl = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+          rectEl.setAttribute("class", "edge-label-bg");
+          rectEl.setAttribute("x", String(-padX));
+          rectEl.setAttribute("y", String(-padY));
+          rectEl.setAttribute("width", String(w + padX * 2));
+          rectEl.setAttribute("height", String(h + padY * 2));
+          rectEl.setAttribute("rx", "4");
+          rectEl.setAttribute("ry", "4");
+          rectEl.setAttribute("fill", labelBg);
+          rectEl.setAttribute("fill-opacity", "1");
+          rectEl.style.setProperty("opacity", "1", "important");
+          rectEl.style.setProperty("fill-opacity", "1", "important");
+          rectEl.style.setProperty("fill", labelBg, "important");
+
+          fo.parentElement?.insertBefore(rectEl, fo);
+        }
+
         fo.replaceWith(textEl);
+      });
+
+      // 确保样式表中覆盖任何可能将 edgeLabel rect 透明度置为半透明的旧规则
+      clone.querySelectorAll("style").forEach((styleEl) => {
+        styleEl.textContent = (styleEl.textContent || "").replace(
+          /\.edgeLabel\s+rect\s*\{[^}]*\}/g,
+          ".edgeLabel rect { opacity: 1 !important; fill-opacity: 1 !important; }"
+        );
+      });
+
+      // 容错兜底：确保所有 edgeLabel 下都包含遮挡连线的实体背景 rect
+      clone.querySelectorAll(".edgeLabel").forEach((edgeLabelEl) => {
+        if (!edgeLabelEl.querySelector("rect")) {
+          const textNode = edgeLabelEl.querySelector("text");
+          if (textNode) {
+            const txt = textNode.textContent || "";
+            const tw = Math.max(32, txt.length * 15 + 8);
+            const th = 24;
+            const bg = isNight ? "#2d2d30" : "#e8e8e8";
+            const rectEl = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+            rectEl.setAttribute("class", "edge-label-bg");
+            rectEl.setAttribute("x", String(-tw / 2));
+            rectEl.setAttribute("y", String(-th / 2));
+            rectEl.setAttribute("width", String(tw));
+            rectEl.setAttribute("height", String(th));
+            rectEl.setAttribute("rx", "4");
+            rectEl.setAttribute("ry", "4");
+            rectEl.setAttribute("fill", bg);
+            rectEl.style.setProperty("opacity", "1", "important");
+            rectEl.style.setProperty("fill-opacity", "1", "important");
+            rectEl.style.setProperty("fill", bg, "important");
+            textNode.parentElement?.insertBefore(rectEl, textNode);
+          }
+        }
       });
 
       // 导出图片时彻底清除实线连线上的伪虚线间隙
