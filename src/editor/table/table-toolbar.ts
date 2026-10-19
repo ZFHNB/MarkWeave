@@ -1,9 +1,5 @@
 import { setColumnAlignment } from "./commands";
-import {
-  setColumnLayout,
-  setRowLayout,
-  getTableLayoutState,
-} from "./table-layout";
+import type { Node as PMNode } from "prosemirror-model";
 import { Plugin, type EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import {
@@ -159,34 +155,54 @@ class TableToolbarView {
         setColumnAlignment("right")(state, dispatch);
         break;
       case "cols-auto": {
-        const table = this.getTableElement();
-        if (table) {
-          setColumnLayout(table, "auto");
-          this.updateActiveState();
+        const info = this.getTableNodeInfo();
+        if (info) {
+          const { pos, node } = info;
+          this.view.dispatch(
+            this.view.state.tr.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              layout: "auto",
+            })
+          );
         }
         break;
       }
       case "cols-equal": {
-        const table = this.getTableElement();
-        if (table) {
-          setColumnLayout(table, "equal");
-          this.updateActiveState();
+        const info = this.getTableNodeInfo();
+        if (info) {
+          const { pos, node } = info;
+          this.view.dispatch(
+            this.view.state.tr.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              layout: "equal",
+            })
+          );
         }
         break;
       }
       case "rows-wrap": {
-        const table = this.getTableElement();
-        if (table) {
-          setRowLayout(table, "wrap");
-          this.updateActiveState();
+        const info = this.getTableNodeInfo();
+        if (info) {
+          const { pos, node } = info;
+          this.view.dispatch(
+            this.view.state.tr.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              rowLayout: "wrap",
+            })
+          );
         }
         break;
       }
       case "rows-nowrap": {
-        const table = this.getTableElement();
-        if (table) {
-          setRowLayout(table, "nowrap");
-          this.updateActiveState();
+        const info = this.getTableNodeInfo();
+        if (info) {
+          const { pos, node } = info;
+          this.view.dispatch(
+            this.view.state.tr.setNodeMarkup(pos, undefined, {
+              ...node.attrs,
+              rowLayout: "nowrap",
+            })
+          );
         }
         break;
       }
@@ -227,20 +243,16 @@ class TableToolbarView {
     this.isVisible = false;
   }
 
-  private getTableElement(): HTMLElement | null {
-    const $head = this.view.state.selection.$head;
-    let tableDepth = -1;
-    for (let d = $head.depth; d > 0; d--) {
-      if ($head.node(d).type.spec.tableRole === "table") {
-        tableDepth = d;
-        break;
-      }
-    }
+  private getTableNodeInfo(): { pos: number; node: PMNode } | null {
+    return getTableNodeInfo(this.view);
+  }
 
+  private getTableElement(): HTMLElement | null {
+    const info = this.getTableNodeInfo();
     let tableEl: HTMLElement | null = null;
-    if (tableDepth > 0) {
+    if (info) {
       try {
-        const nodeDom = this.view.nodeDOM($head.before(tableDepth));
+        const nodeDom = this.view.nodeDOM(info.pos);
         if (nodeDom instanceof HTMLElement) {
           tableEl =
             nodeDom.tagName.toLowerCase() === "table"
@@ -303,20 +315,19 @@ class TableToolbarView {
       // not in cell
     }
 
-    const table = this.getTableElement();
-    if (table) {
-      const { columns, rows } = getTableLayoutState(table);
+    const info = this.getTableNodeInfo();
+    const layout = info?.node.attrs.layout || "equal";
+    const rowLayout = info?.node.attrs.rowLayout || "wrap";
 
-      const btnColsAuto = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-auto']");
-      const btnColsEqual = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-equal']");
-      const btnRowsWrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-wrap']");
-      const btnRowsNowrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-nowrap']");
+    const btnColsAuto = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-auto']");
+    const btnColsEqual = this.dom.querySelector<HTMLButtonElement>("[data-action='cols-equal']");
+    const btnRowsWrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-wrap']");
+    const btnRowsNowrap = this.dom.querySelector<HTMLButtonElement>("[data-action='rows-nowrap']");
 
-      btnColsAuto?.classList.toggle("active", columns === "auto");
-      btnColsEqual?.classList.toggle("active", columns === "equal");
-      btnRowsWrap?.classList.toggle("active", rows === "wrap");
-      btnRowsNowrap?.classList.toggle("active", rows === "nowrap");
-    }
+    btnColsAuto?.classList.toggle("active", layout === "auto");
+    btnColsEqual?.classList.toggle("active", layout === "equal");
+    btnRowsWrap?.classList.toggle("active", rowLayout === "wrap");
+    btnRowsNowrap?.classList.toggle("active", rowLayout === "nowrap");
   }
 
   public destroy() {
@@ -324,6 +335,21 @@ class TableToolbarView {
     window.removeEventListener("resize", this.onScrollOrResize, true);
     this.dom.remove();
   }
+}
+
+export function getTableNodeInfo(view: EditorView): { pos: number; node: PMNode } | null {
+  const $head = view.state.selection?.$head;
+  if (!$head) return null;
+  for (let d = $head.depth; d > 0; d--) {
+    const node = $head.node(d);
+    if (node.type.spec.tableRole === "table") {
+      return {
+        pos: $head.before(d),
+        node,
+      };
+    }
+  }
+  return null;
 }
 
 export function createTableToolbarPlugin(): Plugin {

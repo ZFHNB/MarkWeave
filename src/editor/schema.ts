@@ -33,6 +33,37 @@ const nodes: Record<string, NodeSpec> = {
 
   ...tableSpecs,
 
+  table: {
+    ...tableSpecs.table,
+    attrs: {
+      ...(tableSpecs.table.attrs || {}),
+      layout: { default: "equal" },
+      rowLayout: { default: "wrap" },
+    },
+    parseDOM: [
+      {
+        tag: "table",
+        getAttrs(dom) {
+          const el = dom as HTMLElement;
+          return {
+            layout: el.getAttribute?.("data-md-table-layout") === "auto" ? "auto" : "equal",
+            rowLayout: el.getAttribute?.("data-md-table-nowrap") === "true" ? "nowrap" : "wrap",
+          };
+        },
+      },
+    ],
+    toDOM(node) {
+      const attrs: Record<string, string> = {};
+      if (node.attrs.layout === "auto") {
+        attrs["data-md-table-layout"] = "auto";
+      }
+      if (node.attrs.rowLayout === "nowrap") {
+        attrs["data-md-table-nowrap"] = "true";
+      }
+      return ["table", attrs, ["tbody", 0]];
+    },
+  },
+
   blockquote: {
     content: "block+",
     group: "block",
