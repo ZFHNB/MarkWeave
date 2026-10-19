@@ -24,6 +24,7 @@ import {
   createTrailingParagraphPlugin,
 } from "./table/commands";
 import { createTableToolbarPlugin } from "./table/table-toolbar";
+import { createTablePastePlugin } from "./plugins/paste-table";
 
 export interface EditorOptions {
   mountEl: HTMLElement;
@@ -77,6 +78,7 @@ export class MarkWeaveEditor {
         tableEditing(),
         createTrailingParagraphPlugin(),
         createTableToolbarPlugin(),
+        createTablePastePlugin(),
       ],
     });
   }
