@@ -1286,7 +1286,7 @@ function applySettings(settings: MarkWeaveSettings) {
     window.dispatchEvent(new CustomEvent("theme-change"));
   }
 
-  void applyBuiltInTheme(settings.editorTheme);
+  applyBuiltInTheme(settings.editorTheme);
 
   const api = getDesktopAPI();
   if (api && typeof api.setLanguage === "function") {

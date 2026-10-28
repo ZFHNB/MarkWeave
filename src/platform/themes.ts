@@ -59,30 +59,46 @@ export function normalizeThemeId(value: unknown): string {
   return BUILT_IN_THEMES.some((theme) => theme.id === value) ? value : "default";
 }
 
+/**
+ * 显式写出每个主题的 URL：Vite 只能静态分析字面量形式的 `new URL(...)`，
+ * 动态拼接路径会导致样式表不被打包。
+ */
+const THEME_URLS: Record<string, string> = {
+  github: new URL("../styles/themes/github.css", import.meta.url).href,
+  newsprint: new URL("../styles/themes/newsprint.css", import.meta.url).href,
+  pixyll: new URL("../styles/themes/pixyll.css", import.meta.url).href,
+  whitey: new URL("../styles/themes/whitey.css", import.meta.url).href,
+  night: new URL("../styles/themes/night.css", import.meta.url).href,
+};
+
 /** 动态加载主题样式表；切换时移除旧表，避免样式叠加 */
 const THEME_LINK_ID = "markweave-theme";
 
-export async function applyBuiltInTheme(id: string): Promise<void> {
+export function getThemeUrl(id: string): string | null {
+  return THEME_URLS[id] ?? null;
+}
+
+export function applyBuiltInTheme(id: string): void {
   const theme = getTheme(normalizeThemeId(id));
   const existing = document.getElementById(THEME_LINK_ID) as HTMLLinkElement | null;
+  const href = THEME_URLS[theme.id];
 
-  if (theme.id === "default") {
+  if (!href) {
     existing?.remove();
+    delete document.body.dataset.markweaveTheme;
     return;
   }
 
-  const href = new URL(`./themes/${theme.id}.css`, import.meta.url).href;
-
-  if (existing && existing.getAttribute("href") === href) return;
+  if (existing && existing.getAttribute("href") === href) {
+    document.body.dataset.markweaveTheme = theme.id;
+    return;
+  }
 
   const link = existing ?? document.createElement("link");
   link.id = THEME_LINK_ID;
   link.rel = "stylesheet";
   link.setAttribute("href", href);
   if (!existing) {
-    link.addEventListener("load", () => {
-      document.body.dataset.markweaveTheme = theme.id;
-    });
     document.head.appendChild(link);
   }
   document.body.dataset.markweaveTheme = theme.id;
