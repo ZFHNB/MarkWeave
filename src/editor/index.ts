@@ -19,6 +19,18 @@ import { createFootnoteHoverPlugin } from "./plugins/footnote-hover";
 import { createEmojiAutocompletePlugin } from "./plugins/emoji-autocomplete";
 import { createSearchPlugin } from "./search/search-plugin";
 import { SearchPanel } from "./search/search-panel";
+import { ContextMenu } from "./context-menu";
+import {
+  jumpToTop,
+  jumpToBottom,
+  selectBlock,
+  deleteBlock,
+  selectLine,
+  increaseHeadingLevel,
+  decreaseHeadingLevel,
+  clearFormatting,
+  toggleTaskStatus,
+} from "./commands/editing";
 import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
 import { computeStats } from "./stats";
@@ -69,7 +81,17 @@ export class MarkWeaveEditor {
       "Ctrl-Enter": addRowAfter,
       "Mod-Enter": addRowAfter,
       "Ctrl-Shift-Backspace": deleteRow,
+      "Mod-shift-Backspace": deleteRow,
       "Mod-Shift-Backspace": deleteRow,
+      "Mod-Alt-1": increaseHeadingLevel,
+      "Mod-Alt-2": decreaseHeadingLevel,
+      "Mod-Shift-k": deleteBlock,
+      "Mod-Shift-l": selectLine,
+      "Mod-Shift-b": selectBlock,
+      "Mod-Shift-\\": clearFormatting,
+      "Mod-Shift-x": toggleTaskStatus,
+      "Ctrl-Home": jumpToTop,
+      "Ctrl-End": jumpToBottom,
     });
 
     return EditorState.create({
@@ -123,6 +145,8 @@ export class MarkWeaveEditor {
         }
       },
     });
+
+    this.contextMenu = new ContextMenu(this, this.view);
 
     // 初始通知
     setTimeout(() => {
@@ -200,6 +224,7 @@ export class MarkWeaveEditor {
   }
 
   private searchPanel: SearchPanel | null = null;
+  private contextMenu: ContextMenu | null = null;
 
   /** 打开查找/替换面板（对标 Typora 的 Ctrl+F / Ctrl+H） */
   public openSearch(replaceMode = false) {
@@ -226,6 +251,7 @@ export class MarkWeaveEditor {
   }
 
   public destroy() {
+    this.contextMenu?.destroy();
     this.searchPanel?.destroy();
     this.view.destroy();
   }

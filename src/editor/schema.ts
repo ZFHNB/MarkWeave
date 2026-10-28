@@ -305,8 +305,13 @@ const nodes: Record<string, NodeSpec> = {
       {
         tag: "li.md-task-item",
         getAttrs(dom) {
-          const checkbox = (dom as HTMLElement).querySelector("input[type=checkbox]") as HTMLInputElement | null;
-          return { checked: checkbox?.checked || false };
+          const el = dom as HTMLElement;
+          const checkbox = el.querySelector("input[type=checkbox]") as HTMLInputElement | null;
+          const checked =
+            checkbox?.hasAttribute("checked") ||
+            checkbox?.checked === true ||
+            el.classList.contains("task-done");
+          return { checked: Boolean(checked) };
         },
       },
     ],
