@@ -20,6 +20,7 @@ import { createEmojiAutocompletePlugin } from "./plugins/emoji-autocomplete";
 import { createSearchPlugin } from "./search/search-plugin";
 import { SearchPanel } from "./search/search-panel";
 import { ContextMenu } from "./context-menu";
+import { createTypewriterPlugin } from "./plugins/typewriter";
 import {
   jumpToTop,
   jumpToBottom,
@@ -50,6 +51,7 @@ export interface EditorOptions {
   onDocChange?: (markdown: string) => void;
   onOutlineChange?: (headings: HeadingItem[]) => void;
   onWordCountChange?: (stats: { words: number; chars: number; lines: number }) => void;
+  isTypewriterEnabled?: () => boolean;
 }
 
 export class MarkWeaveEditor {
@@ -111,6 +113,9 @@ export class MarkWeaveEditor {
         createTablePastePlugin(),
         createFootnoteHoverPlugin(),
         createSearchPlugin(),
+        createTypewriterPlugin({
+          isEnabled: () => this.options.isTypewriterEnabled?.() ?? false,
+        }),
       ],
     });
   }

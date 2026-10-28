@@ -87,9 +87,32 @@ export function createSyntaxFoldingPlugin() {
                 prefix = "`";
                 suffix = "`";
                 break;
+              case "highlight":
+                prefix = "==";
+                suffix = "==";
+                break;
+              case "superscript":
+                prefix = "^";
+                suffix = "^";
+                break;
+              case "subscript":
+                prefix = "~";
+                suffix = "~";
+                break;
+              case "inline_math":
+                prefix = "$";
+                suffix = "$";
+                break;
               case "link":
-                prefix = "[";
-                suffix = `](${mark.attrs.href})`;
+                if (mark.attrs.reference) {
+                  prefix = "[";
+                  suffix = mark.attrs.referenceCollapsed
+                    ? "][]"
+                    : `][${mark.attrs.reference}]`;
+                } else {
+                  prefix = "[";
+                  suffix = `](${mark.attrs.href})`;
+                }
                 break;
             }
 

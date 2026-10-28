@@ -390,6 +390,7 @@ syncTitle(currentDoc.title);
 const editor = new MarkWeaveEditor({
   mountEl,
   initialMarkdown: currentDoc.content,
+  isTypewriterEnabled: () => document.body.classList.contains("mode-typewriter"),
   onDocChange: (md) => {
     // 自动将修改同步回当前文档内存对象并调度持久化
     const doc = documents.find((d) => d.id === activeDocId);

@@ -251,16 +251,23 @@ html, body {
   outline: none !important;
 }
 
-/* 专注模式 (Focus Mode): 高亮当前行，其余半透明 */
+/* 专注模式 (Focus Mode): 高亮当前块，其余淡出 */
 body.mode-focus .md-block:not(.md-focus-block) {
-  opacity: 0.3;
-  filter: blur(0.2px);
-  transition: opacity 0.2s;
+  opacity: 0.26;
+  filter: blur(0.35px);
+  transition: opacity 0.18s ease, filter 0.18s ease;
 }
 
-/* 打字机模式 (Typewriter Mode): 保持当前光标垂直居中 */
+body.mode-focus .md-focus-block {
+  opacity: 1;
+  filter: none;
+}
+
+/* 打字机模式 (Typewriter Mode): 上下留白使光标可停在视口中央 */
 body.mode-typewriter .ty-editor-scroller {
+  padding-top: 40vh;
   padding-bottom: 50vh;
+  scroll-behavior: smooth;
 }
 
 /* ================= 语法折叠机制 (Inline Syntax Folding) ================= */
