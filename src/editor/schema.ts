@@ -156,6 +156,67 @@ const nodes: Record<string, NodeSpec> = {
     },
   },
 
+  yaml_frontmatter: {
+    attrs: { content: { default: "" } },
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div.md-yaml-frontmatter",
+        getAttrs: (dom) => ({
+          content: decodeURIComponent((dom as HTMLElement).getAttribute("data-yaml") || ""),
+        }),
+      },
+    ],
+    toDOM(node) {
+      return [
+        "div",
+        {
+          class: "md-yaml-frontmatter md-block",
+          "data-yaml": encodeURIComponent(node.attrs.content || ""),
+          "data-yaml-frontmatter": "true",
+        },
+      ];
+    },
+  },
+
+  toc_block: {
+    group: "block",
+    defining: true,
+    parseDOM: [{ tag: "div.md-toc-block" }],
+    toDOM() {
+      return ["div", { class: "md-toc-block md-block", "data-toc": "true" }];
+    },
+  },
+
+  footnote_definition: {
+    attrs: { id: { default: "" }, content: { default: "" } },
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div.md-footnote-def",
+        getAttrs: (dom) => {
+          const el = dom as HTMLElement;
+          return {
+            id: el.getAttribute("data-footnote-id") || "",
+            content: decodeURIComponent(el.getAttribute("data-content") || ""),
+          };
+        },
+      },
+    ],
+    toDOM(node) {
+      return [
+        "div",
+        {
+          class: "md-footnote-def md-block",
+          "data-footnote-id": node.attrs.id || "",
+          "data-content": encodeURIComponent(node.attrs.content || ""),
+        },
+      ];
+    },
+  },
+
   ordered_list: {
     content: "list_item+",
     group: "block",
@@ -240,6 +301,25 @@ const nodes: Record<string, NodeSpec> = {
     },
   },
 
+  footnote_ref: {
+    inline: true,
+    group: "inline",
+    attrs: { id: { default: "" } },
+    atom: true,
+    selectable: true,
+    parseDOM: [
+      {
+        tag: "sup.md-footnote-ref",
+        getAttrs: (dom) => ({
+          id: (dom as HTMLElement).getAttribute("data-footnote-id") || "",
+        }),
+      },
+    ],
+    toDOM(node) {
+      return ["sup", { class: "md-footnote-ref", "data-footnote-id": node.attrs.id }, 0];
+    },
+  },
+
   image: {
     inline: true,
     attrs: {
@@ -303,7 +383,7 @@ const marks: Record<string, MarkSpec> = {
   },
 
   superscript: {
-    parseDOM: [{ tag: "sup" }],
+    parseDOM: [{ tag: "sup:not(.md-footnote-ref)" }],
     toDOM() {
       return ["sup", { class: "md-superscript" }, 0];
     },

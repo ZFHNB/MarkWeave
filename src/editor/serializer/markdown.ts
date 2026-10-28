@@ -1,6 +1,8 @@
 import { Node as PMNode, Schema, DOMParser } from "prosemirror-model";
 import MarkdownIt from "markdown-it";
 import { applyTyporaInlineRules } from "./typora-inline-rules";
+import { applyTyporaBlockRules } from "./typora-block-rules";
+import { applyEmojiToDom } from "./emoji";
 
 const md = new MarkdownIt({
   html: true,
@@ -9,6 +11,7 @@ const md = new MarkdownIt({
 });
 
 applyTyporaInlineRules(md);
+applyTyporaBlockRules(md);
 
 /**
  * 将 Markdown 纯文本解析为 ProseMirror 文档对象模型 (AST)
@@ -35,7 +38,10 @@ export function markdownToDoc(markdownText: string, schema: Schema): PMNode {
     el.setAttribute("data-formula", decodeURIComponent(raw));
   });
 
-  // 3. 使用 ProseMirror DOMParser 生成强类型 Document AST
+  // 3. Typora 风格 Emoji 短代码（跳过 code/pre）
+  applyEmojiToDom(tempDiv);
+
+  // 4. 使用 ProseMirror DOMParser 生成强类型 Document AST
   const pmParser = DOMParser.fromSchema(schema);
   return pmParser.parse(tempDiv);
 }
@@ -76,6 +82,20 @@ export function docToMarkdown(doc: PMNode): string {
 
       case "math_block": {
         return `$$\n${node.attrs.formula || ""}\n$$`;
+      }
+
+      case "yaml_frontmatter": {
+        return `---\n${node.attrs.content || ""}\n---`;
+      }
+
+      case "toc_block": {
+        return "[toc]";
+      }
+
+      case "footnote_definition": {
+        const id = node.attrs.id || "";
+        const content = (node.attrs.content || "").split("\n").join("\n  ");
+        return `[^${id}]: ${content}`;
       }
 
       case "bullet_list": {
@@ -266,6 +286,8 @@ export function docToMarkdown(doc: PMNode): string {
         text += `![${child.attrs.alt || ""}](${child.attrs.src}${title})`;
       } else if (child.type.name === "hard_break") {
         text += inTable ? "<br>" : "  \n";
+      } else if (child.type.name === "footnote_ref") {
+        text += `[^${child.attrs.id || ""}]`;
       }
     });
     return text;
