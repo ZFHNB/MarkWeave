@@ -295,6 +295,27 @@ const marks: Record<string, MarkSpec> = {
     },
   },
 
+  highlight: {
+    parseDOM: [{ tag: "mark" }, { tag: "mark.md-highlight" }],
+    toDOM() {
+      return ["mark", { class: "md-highlight" }, 0];
+    },
+  },
+
+  superscript: {
+    parseDOM: [{ tag: "sup" }],
+    toDOM() {
+      return ["sup", { class: "md-superscript" }, 0];
+    },
+  },
+
+  subscript: {
+    parseDOM: [{ tag: "sub" }],
+    toDOM() {
+      return ["sub", { class: "md-subscript" }, 0];
+    },
+  },
+
   code: {
     parseDOM: [{ tag: "code" }],
     toDOM() {

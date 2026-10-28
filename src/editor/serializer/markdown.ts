@@ -1,11 +1,14 @@
 import { Node as PMNode, Schema, DOMParser } from "prosemirror-model";
 import MarkdownIt from "markdown-it";
+import { applyTyporaInlineRules } from "./typora-inline-rules";
 
 const md = new MarkdownIt({
   html: true,
   breaks: false,
   linkify: true,
 });
+
+applyTyporaInlineRules(md);
 
 /**
  * 将 Markdown 纯文本解析为 ProseMirror 文档对象模型 (AST)
@@ -232,6 +235,15 @@ export function docToMarkdown(doc: PMNode): string {
               break;
             case "strike":
               piece = `~~${piece}~~`;
+              break;
+            case "highlight":
+              piece = `==${piece}==`;
+              break;
+            case "superscript":
+              piece = `^${piece}^`;
+              break;
+            case "subscript":
+              piece = `~${piece}~`;
               break;
             case "code":
               piece = `\`${piece}\``;

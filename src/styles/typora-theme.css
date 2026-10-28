@@ -372,6 +372,31 @@ body.theme-night .md-blockquote {
   text-decoration: underline;
 }
 
+/* Typora 扩展行内样式 */
+.md-highlight {
+  background-color: rgba(255, 213, 0, 0.4);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+body.theme-night .md-highlight {
+  background-color: rgba(255, 213, 0, 0.28);
+  color: #f5f5f5;
+}
+
+.md-superscript,
+.md-subscript {
+  font-size: 0.75em;
+  line-height: 0;
+}
+
+.md-inline-math {
+  font-family: "Latin Modern Math", "Cambria Math", serif;
+  font-style: italic;
+  padding: 0 1px;
+}
+
 /* 分割线 */
 .md-hr hr {
   border: 0;
