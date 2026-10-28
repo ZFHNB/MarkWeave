@@ -21,6 +21,9 @@ import { createSearchPlugin } from "./search/search-plugin";
 import { SearchPanel } from "./search/search-panel";
 import { ContextMenu } from "./context-menu";
 import { createTypewriterPlugin } from "./plugins/typewriter";
+import { createImagePlugin } from "./plugins/images";
+import { createImageResolvePlugin } from "./plugins/image-resolve";
+import { ImageView } from "./nodeviews/image";
 import {
   jumpToTop,
   jumpToBottom,
@@ -52,6 +55,8 @@ export interface EditorOptions {
   onOutlineChange?: (headings: HeadingItem[]) => void;
   onWordCountChange?: (stats: { words: number; chars: number; lines: number }) => void;
   isTypewriterEnabled?: () => boolean;
+  getDocumentPath?: () => string | null;
+  isDesktop?: () => boolean;
 }
 
 export class MarkWeaveEditor {
@@ -113,6 +118,12 @@ export class MarkWeaveEditor {
         createTablePastePlugin(),
         createFootnoteHoverPlugin(),
         createSearchPlugin(),
+        createImagePlugin(),
+        createImageResolvePlugin({
+          getDocumentPath: () => this.options.getDocumentPath?.() ?? null,
+          getRootUrl: () => null,
+          isDesktop: () => this.options.isDesktop?.() ?? false,
+        }),
         createTypewriterPlugin({
           isEnabled: () => this.options.isTypewriterEnabled?.() ?? false,
         }),
@@ -137,6 +148,7 @@ export class MarkWeaveEditor {
         task_item: (node, view, getPos) => new TaskItemView(node, view, getPos),
         toc_block: (node, view, getPos) => new TocView(node, view, getPos),
         yaml_frontmatter: (node, view, getPos) => new YamlFrontmatterView(node, view, getPos),
+        image: (node, view, getPos) => new ImageView(node, view, getPos),
       },
       dispatchTransaction: (tr) => {
         const newState = this.view.state.apply(tr);
