@@ -26,6 +26,16 @@ import {
   type MermaidThemePreference,
   normalizeMermaidTheme,
 } from "./platform/mermaid-theme";
+import type { FlatFile } from "./workspace/file-tree";
+import {
+  type FolderWorkspace,
+  loadLastFolder,
+  openFolderWorkspace,
+  refreshFolderWorkspace,
+  rememberLastFolder,
+  rememberRecentFile,
+} from "./workspace/folder-workspace";
+import { QuickOpen } from "./workspace/quick-open";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -196,6 +206,21 @@ app.innerHTML = `
           </button>
           <input type="file" id="local-file-input" accept=".md,.markdown,.txt" style="display: none;" />
         </div>
+        <div class="ty-files-actions" style="display: flex; gap: 6px; margin-bottom: 12px; padding: 0 4px;">
+          <button class="ty-icon-btn" id="btn-open-folder" style="flex: 1; justify-content: center; border: 1px dashed var(--border-color); padding: 5px;" title="打开文件夹 (Ctrl+Shift+O)">
+            🗂 打开文件夹
+          </button>
+          <button class="ty-icon-btn" id="btn-quick-open" style="flex: 1; justify-content: center; border: 1px dashed var(--border-color); padding: 5px;" title="快速打开 (Ctrl+P)">
+            🔍 快速打开
+          </button>
+        </div>
+        <div class="ty-workspace-bar" id="workspace-bar" style="display: none;">
+          <span class="ty-workspace-path" id="workspace-path"></span>
+          <div class="ty-workspace-actions">
+            <button class="ty-workspace-btn" id="btn-refresh-folder" title="刷新文件夹">↻</button>
+            <button class="ty-workspace-btn" id="btn-close-folder" title="关闭文件夹">×</button>
+          </div>
+        </div>
         <div id="file-list-items"></div>
       </div>
     </div>
@@ -289,6 +314,12 @@ const btnExportPdf = document.getElementById("btn-export-pdf")!;
 const btnNewFile = document.getElementById("btn-new-file")!;
 const btnOpenFile = document.getElementById("btn-open-file")!;
 const localFileInput = document.getElementById("local-file-input") as HTMLInputElement;
+const btnOpenFolder = document.getElementById("btn-open-folder") as HTMLButtonElement;
+const btnQuickOpen = document.getElementById("btn-quick-open") as HTMLButtonElement;
+const btnRefreshFolder = document.getElementById("btn-refresh-folder") as HTMLButtonElement;
+const btnCloseFolder = document.getElementById("btn-close-folder") as HTMLButtonElement;
+const workspaceBar = document.getElementById("workspace-bar") as HTMLElement;
+const workspacePathEl = document.getElementById("workspace-path") as HTMLElement;
 
 const statWords = document.getElementById("stat-words")!;
 const statChars = document.getElementById("stat-chars")!;
@@ -453,8 +484,55 @@ fileItemStyle.textContent = `
 document.head.appendChild(fileItemStyle);
 
 // 渲染文件列表
+let workspaceRoot: string | null = loadLastFolder();
+let workspaceFiles: FlatFile[] = [];
+let activeFilePath: string | null = null;
+
 function renderFileList() {
   fileListContainer.innerHTML = "";
+
+  // 已打开的文件夹：展示工作区文件（点击直接读盘）
+  if (workspaceRoot && workspaceFiles.length > 0) {
+    const header = document.createElement("div");
+    header.className = "ty-file-group-title";
+    header.textContent = `工作区文件 (${workspaceFiles.length})`;
+    fileListContainer.appendChild(header);
+
+    workspaceFiles.slice(0, 300).forEach((file) => {
+      const row = document.createElement("div");
+      row.className = `ty-file-item ty-workspace-file${
+        file.path === activeFilePath ? " active" : ""
+      }`;
+      row.setAttribute("data-workspace-path", file.path);
+      row.title = file.relativePath;
+
+      const icon = document.createElement("span");
+      icon.className = "ty-file-icon";
+      icon.textContent = "📄";
+
+      const label = document.createElement("span");
+      label.className = "ty-file-title";
+      label.textContent = file.relativePath;
+
+      row.appendChild(icon);
+      row.appendChild(label);
+      row.addEventListener("click", () => void openWorkspaceFile(file.path));
+      fileListContainer.appendChild(row);
+    });
+
+    if (workspaceFiles.length > 300) {
+      const more = document.createElement("div");
+      more.className = "ty-file-group-title";
+      more.textContent = `…另有 ${workspaceFiles.length - 300} 个文件，请使用快速打开`;
+      fileListContainer.appendChild(more);
+    }
+
+    const divider = document.createElement("div");
+    divider.className = "ty-file-group-title";
+    divider.textContent = "已打开文档";
+    fileListContainer.appendChild(divider);
+  }
+
   documents.forEach((doc) => {
     const itemEl = document.createElement("div");
     itemEl.className = `ty-file-item ${doc.id === activeDocId ? "active" : ""}`;
@@ -689,6 +767,10 @@ function handleFileOpened(file: DesktopFile) {
   }
   renderFileList();
   flushSave();
+
+  if (current.filePath) {
+    rememberRecentFile(current.filePath, current.title);
+  }
 }
 
 async function handleOpenFile() {
@@ -702,6 +784,88 @@ async function handleOpenFile() {
     localFileInput.click();
   }
 }
+
+/* ================= 文件夹工作区 / 快速打开 ================= */
+let quickOpenPanel: QuickOpen | null = null;
+
+function ensureQuickOpen(): QuickOpen {
+  if (!quickOpenPanel) {
+    quickOpenPanel = new QuickOpen((file) => {
+      void openWorkspaceFile(file.path);
+    });
+    document.body.appendChild(quickOpenPanel.dom);
+  }
+  return quickOpenPanel;
+}
+
+function updateWorkspaceBar(): void {
+  if (workspaceRoot) {
+    workspaceBar.style.display = "flex";
+    workspacePathEl.textContent = workspaceRoot;
+    workspacePathEl.title = workspaceRoot;
+  } else {
+    workspaceBar.style.display = "none";
+  }
+}
+
+function applyWorkspace(workspace: FolderWorkspace | null): void {
+  if (!workspace) return;
+  workspaceRoot = workspace.root;
+  workspaceFiles = workspace.files;
+  updateWorkspaceBar();
+  ensureQuickOpen().setFiles(workspaceFiles);
+  renderFileList();
+  rememberLastFolder(workspace.root);
+}
+
+async function handleOpenFolder(): Promise<void> {
+  const api = getDesktopAPI();
+  if (!api?.openFolder) {
+    window.alert("「打开文件夹」仅桌面版可用，Web 版请使用「打开本地」。");
+    return;
+  }
+  const workspace = await openFolderWorkspace();
+  if (workspace) {
+    applyWorkspace(workspace);
+  }
+}
+
+async function openWorkspaceFile(path: string): Promise<void> {
+  const api = getDesktopAPI();
+  if (!api?.readFile) return;
+  const file = await api.readFile(path);
+  if (file) {
+    activeFilePath = path;
+    handleFileOpened(file);
+    renderFileList();
+    rememberRecentFile(file.path, extractFileName(file.path));
+  }
+}
+
+async function refreshWorkspace(): Promise<void> {
+  if (!workspaceRoot) return;
+  const workspace = await refreshFolderWorkspace(workspaceRoot);
+  if (workspace) {
+    applyWorkspace(workspace);
+  }
+}
+
+btnOpenFolder.addEventListener("click", () => void handleOpenFolder());
+btnQuickOpen.addEventListener("click", () => {
+  const panel = ensureQuickOpen();
+  if (panel.isOpen()) panel.close();
+  else panel.open();
+});
+btnRefreshFolder.addEventListener("click", () => void refreshWorkspace());
+btnCloseFolder.addEventListener("click", () => {
+  workspaceRoot = null;
+  workspaceFiles = [];
+  ensureQuickOpen().setFiles([]);
+  rememberLastFolder(null);
+  updateWorkspaceBar();
+  renderFileList();
+});
+updateWorkspaceBar();
 
 // 打开本地 Markdown 文件
 btnOpenFile.addEventListener("click", () => {
@@ -858,6 +1022,20 @@ async function handleSaveAs() {
 }
 
 window.addEventListener("keydown", (e) => {
+  // 快速打开 (Ctrl+P)
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "p") {
+    e.preventDefault();
+    const panel = ensureQuickOpen();
+    if (panel.isOpen()) panel.close();
+    else panel.open();
+    return;
+  }
+  // 打开文件夹 (Ctrl+Shift+O)
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "o") {
+    e.preventDefault();
+    void handleOpenFolder();
+    return;
+  }
   // 查找 / 替换 (Ctrl+F / Ctrl+H)
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
     e.preventDefault();

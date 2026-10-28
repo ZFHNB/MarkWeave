@@ -265,6 +265,86 @@ ipcMain.handle("file:read", async (_event, targetPath) => {
   }
 });
 
+const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdown", ".mkd", ".txt"]);
+
+async function listMarkdownFiles(rootDir, currentDir = rootDir, depth = 0, out = []) {
+  if (depth > 12 || out.length > 2000) return out;
+  let entries;
+  try {
+    entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+
+  for (const entry of entries) {
+    if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+    const fullPath = path.join(currentDir, entry.name);
+    if (entry.isDirectory()) {
+      await listMarkdownFiles(rootDir, fullPath, depth + 1, out);
+    } else if (MARKDOWN_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      const relative = path.relative(rootDir, fullPath).replace(/\\/g, "/");
+      let stat = null;
+      try {
+        stat = await fs.promises.stat(fullPath);
+      } catch {
+        // ignore
+      }
+      out.push({
+        name: entry.name,
+        path: fullPath,
+        relativePath: relative,
+        size: stat?.size,
+        mtime: stat?.mtimeMs,
+      });
+    }
+  }
+  return out;
+}
+
+ipcMain.handle("workspace:open-folder", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "Open Folder",
+    properties: ["openDirectory"],
+  });
+  if (result.canceled || !result.filePaths?.length) return null;
+  const root = result.filePaths[0];
+  const files = await listMarkdownFiles(root);
+  return { root, files };
+});
+
+ipcMain.handle("workspace:list-files", async (_event, rootDir) => {
+  if (!rootDir || typeof rootDir !== "string") return null;
+  const files = await listMarkdownFiles(rootDir);
+  return { root: rootDir, files };
+});
+
+ipcMain.handle("file:write", async (_event, payload) => {
+  if (!payload || typeof payload.path !== "string") return null;
+  try {
+    await fs.promises.writeFile(payload.path, payload.content ?? "", "utf8");
+    return { path: payload.path };
+  } catch (err) {
+    console.error("Failed to write file:", err);
+    return null;
+  }
+});
+
+ipcMain.handle("file:stat", async (_event, targetPath) => {
+  if (!targetPath || typeof targetPath !== "string") return null;
+  try {
+    const stat = await fs.promises.stat(targetPath);
+    return { path: targetPath, mtime: stat.mtimeMs, size: stat.size };
+  } catch {
+    return null;
+  }
+});
+
+ipcMain.handle("file:reveal", async (_event, targetPath) => {
+  if (!targetPath || typeof targetPath !== "string") return false;
+  shell.showItemInFolder(targetPath);
+  return true;
+});
+
 ipcMain.handle("shell:open-external", async (_event, targetUrl) => {
   if (typeof targetUrl !== "string") return false;
   try {

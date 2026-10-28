@@ -787,6 +787,138 @@ body.theme-night .md-context-submenu {
   display: block;
 }
 
+/* ================= 文件夹工作区 / 快速打开 ================= */
+.ty-workspace-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin: 0 4px 8px;
+  border-radius: 5px;
+  background: var(--code-bg-color);
+  font-size: 11.5px;
+  color: var(--meta-mark-color);
+}
+
+.ty-workspace-path {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.ty-workspace-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.ty-workspace-btn {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-color);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 13px;
+  user-select: none;
+  caret-color: transparent;
+}
+
+.ty-workspace-btn:hover {
+  background: var(--item-hover-bg-color);
+}
+
+.ty-file-group-title {
+  padding: 6px 10px 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--meta-mark-color);
+}
+
+.md-quick-open-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2400;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.md-quick-open-card {
+  width: min(620px, 88vw);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+}
+
+body.theme-night .md-quick-open-card {
+  background: #252526;
+  border-color: #3e3e42;
+}
+
+.md-quick-open-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-color);
+  font-size: 15px;
+  padding: 14px 16px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.md-quick-open-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.md-quick-open-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.md-quick-open-item.is-active {
+  background: var(--item-hover-bg-color);
+}
+
+.md-quick-open-name {
+  color: var(--text-color);
+  font-weight: 500;
+}
+
+.md-quick-open-path {
+  color: var(--meta-mark-color);
+  font-size: 11.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.md-quick-open-empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--meta-mark-color);
+  font-size: 12.5px;
+}
+
 /* 分割线 */
 .md-hr hr {
   border: 0;
