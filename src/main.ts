@@ -858,6 +858,17 @@ async function handleSaveAs() {
 }
 
 window.addEventListener("keydown", (e) => {
+  // 查找 / 替换 (Ctrl+F / Ctrl+H)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+    e.preventDefault();
+    editor.toggleSearch(false);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "h") {
+    e.preventDefault();
+    editor.openSearch(true);
+    return;
+  }
   // 插入表格快捷键 (Ctrl+Alt+T / Cmd+Alt+T)
   if ((e.ctrlKey || e.metaKey) && e.altKey && e.key.toLowerCase() === "t") {
     e.preventDefault();

@@ -17,6 +17,8 @@ import { TocView } from "./nodeviews/toc";
 import { YamlFrontmatterView } from "./nodeviews/yaml-frontmatter";
 import { createFootnoteHoverPlugin } from "./plugins/footnote-hover";
 import { createEmojiAutocompletePlugin } from "./plugins/emoji-autocomplete";
+import { createSearchPlugin } from "./search/search-plugin";
+import { SearchPanel } from "./search/search-panel";
 import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
 import { computeStats } from "./stats";
@@ -86,6 +88,7 @@ export class MarkWeaveEditor {
         createTableToolbarPlugin(),
         createTablePastePlugin(),
         createFootnoteHoverPlugin(),
+        createSearchPlugin(),
       ],
     });
   }
@@ -196,7 +199,34 @@ export class MarkWeaveEditor {
     this.view.focus();
   }
 
+  private searchPanel: SearchPanel | null = null;
+
+  /** 打开查找/替换面板（对标 Typora 的 Ctrl+F / Ctrl+H） */
+  public openSearch(replaceMode = false) {
+    if (!this.searchPanel) {
+      this.searchPanel = new SearchPanel(this.view);
+    }
+    this.searchPanel.open(replaceMode);
+  }
+
+  public closeSearch() {
+    this.searchPanel?.close();
+  }
+
+  public toggleSearch(replaceMode = false) {
+    if (this.searchPanel?.isOpen()) {
+      this.searchPanel.close();
+    } else {
+      this.openSearch(replaceMode);
+    }
+  }
+
+  public getSearchPanel(): SearchPanel | null {
+    return this.searchPanel;
+  }
+
   public destroy() {
+    this.searchPanel?.destroy();
     this.view.destroy();
   }
 }

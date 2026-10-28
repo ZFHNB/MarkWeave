@@ -608,6 +608,106 @@ body.theme-night .md-emoji-popup {
   color: var(--meta-mark-color);
 }
 
+/* ================= 查找 / 替换 ================= */
+.md-search-panel {
+  position: fixed;
+  top: 56px;
+  right: 24px;
+  z-index: 1800;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+  font-size: 12.5px;
+}
+
+body.theme-night .md-search-panel {
+  background: #252526;
+  border-color: #3e3e42;
+}
+
+.md-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.md-search-input {
+  width: 210px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-color);
+  color: var(--text-color);
+  font-size: 12.5px;
+  outline: none;
+}
+
+.md-search-input:focus {
+  border-color: var(--primary-color);
+}
+
+.md-search-counter {
+  min-width: 42px;
+  text-align: center;
+  color: var(--meta-mark-color);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.md-search-counter.is-empty {
+  color: #e53935;
+}
+
+.md-search-btn {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+  caret-color: transparent;
+}
+
+.md-search-btn:hover {
+  background: var(--item-hover-bg-color);
+}
+
+.md-search-toggle.active {
+  background: var(--primary-color);
+  color: #fff;
+}
+
+.md-search-replace-row {
+  margin-top: 2px;
+}
+
+.md-search-match {
+  background-color: rgba(255, 213, 0, 0.45);
+  border-radius: 2px;
+}
+
+.md-search-match.is-current {
+  background-color: rgba(255, 152, 0, 0.75);
+  outline: 1px solid rgba(230, 120, 0, 0.9);
+}
+
+body.theme-night .md-search-match {
+  background-color: rgba(255, 213, 0, 0.3);
+}
+
+body.theme-night .md-search-match.is-current {
+  background-color: rgba(255, 167, 38, 0.65);
+}
+
 /* 分割线 */
 .md-hr hr {
   border: 0;
