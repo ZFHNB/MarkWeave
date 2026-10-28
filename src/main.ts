@@ -37,6 +37,7 @@ import {
 } from "./workspace/folder-workspace";
 import { QuickOpen } from "./workspace/quick-open";
 import { toHtml } from "./editor/commands/clipboard-formats";
+import { BUILT_IN_THEMES, applyBuiltInTheme, normalizeThemeId } from "./platform/themes";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -1217,6 +1218,7 @@ export interface MarkWeaveSettings {
   exportPolicy: "ask" | "markweave" | "compatible";
   theme: ThemeSetting;
   language: Language;
+  editorTheme: string;
 }
 
 function loadSettings(): MarkWeaveSettings {
@@ -1232,6 +1234,7 @@ function loadSettings(): MarkWeaveSettings {
     exportPolicy: (localStorage.getItem("markweave_default_export_policy") as any) || "ask",
     theme: (localStorage.getItem("markweave_theme") as any) || "light",
     language: normalizeLanguage(localStorage.getItem("markweave_language")),
+    editorTheme: normalizeThemeId(localStorage.getItem("markweave_editor_theme")),
   };
 }
 
@@ -1247,6 +1250,7 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_default_export_policy", settings.exportPolicy);
   localStorage.setItem("markweave_theme", settings.theme);
   localStorage.setItem("markweave_language", settings.language);
+  localStorage.setItem("markweave_editor_theme", settings.editorTheme);
 
   applySettings(settings);
 }
@@ -1281,6 +1285,8 @@ function applySettings(settings: MarkWeaveSettings) {
   if (wasNight !== isNight) {
     window.dispatchEvent(new CustomEvent("theme-change"));
   }
+
+  void applyBuiltInTheme(settings.editorTheme);
 
   const api = getDesktopAPI();
   if (api && typeof api.setLanguage === "function") {
@@ -1481,6 +1487,21 @@ function openSettingsModal() {
 
           <div class="ty-settings-row">
             <div class="ty-settings-info">
+              <span class="ty-settings-label">排版主题</span>
+              <span class="ty-settings-desc">选择正文字体与排版风格（移植自 Typora 内置主题）</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-editor-theme">
+              ${BUILT_IN_THEMES.map(
+                (theme) =>
+                  `<option value="${theme.id}" ${
+                    currentSettings.editorTheme === theme.id ? "selected" : ""
+                  }>${theme.label}</option>`
+              ).join("")}
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
               <span class="ty-settings-label">菜单栏语言 / Menu language</span>
               <span class="ty-settings-desc">设置桌面原生菜单栏语言（Web 端不受影响）</span>
             </div>
@@ -1580,6 +1601,7 @@ function openSettingsModal() {
     const selectTheme = ((modalOverlay.querySelector("#setting-select-theme") as HTMLSelectElement)?.value as any) || "light";
     const selectLanguage = normalizeLanguage((modalOverlay.querySelector("#setting-select-language") as HTMLSelectElement)?.value);
     const selectMermaidTheme = normalizeMermaidTheme((modalOverlay.querySelector("#setting-select-mermaid-theme") as HTMLSelectElement)?.value);
+    const selectEditorTheme = normalizeThemeId((modalOverlay.querySelector("#setting-select-editor-theme") as HTMLSelectElement)?.value);
 
     const newSettings: MarkWeaveSettings = {
       mermaidDefaultMode: selectedMode,
@@ -1593,6 +1615,7 @@ function openSettingsModal() {
       exportPolicy: selectExportPolicy,
       theme: selectTheme,
       language: selectLanguage,
+      editorTheme: selectEditorTheme,
     };
 
     saveSettings(newSettings);
