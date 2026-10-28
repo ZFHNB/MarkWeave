@@ -13,6 +13,9 @@ import { buildInputRules } from "./plugins/input-rules";
 import { CodeBlockView } from "./nodeviews/code-block";
 import { MathBlockView } from "./nodeviews/math-block";
 import { TaskItemView } from "./nodeviews/task-item";
+import { TocView } from "./nodeviews/toc";
+import { YamlFrontmatterView } from "./nodeviews/yaml-frontmatter";
+import { createFootnoteHoverPlugin } from "./plugins/footnote-hover";
 import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
 import { computeStats } from "./stats";
@@ -79,6 +82,7 @@ export class MarkWeaveEditor {
         createTrailingParagraphPlugin(),
         createTableToolbarPlugin(),
         createTablePastePlugin(),
+        createFootnoteHoverPlugin(),
       ],
     });
   }
@@ -98,6 +102,8 @@ export class MarkWeaveEditor {
         code_block: (node, view, getPos) => new CodeBlockView(node, view, getPos),
         math_block: (node, view, getPos) => new MathBlockView(node, view, getPos),
         task_item: (node, view, getPos) => new TaskItemView(node, view, getPos),
+        toc_block: (node, view, getPos) => new TocView(node, view, getPos),
+        yaml_frontmatter: (node, view, getPos) => new YamlFrontmatterView(node, view, getPos),
       },
       dispatchTransaction: (tr) => {
         const newState = this.view.state.apply(tr);

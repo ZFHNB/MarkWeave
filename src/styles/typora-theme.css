@@ -397,6 +397,169 @@ body.theme-night .md-highlight {
   padding: 0 1px;
 }
 
+/* ================= Front Matter / TOC / 脚注 ================= */
+.md-yaml-card {
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--primary-color);
+  border-radius: 6px;
+  background-color: var(--code-bg-color);
+  margin: 1em 0;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.md-yaml-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.md-yaml-icon {
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
+.md-yaml-label {
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.md-yaml-preview {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--meta-mark-color);
+  font-family: var(--monospace);
+  font-size: 12px;
+}
+
+.md-yaml-toggle {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  color: var(--text-color);
+  cursor: pointer;
+  user-select: none;
+  caret-color: transparent;
+}
+
+.md-yaml-toggle:hover {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.md-yaml-input {
+  width: 100%;
+  margin-top: 8px;
+  min-height: 110px;
+  font-family: var(--monospace);
+  font-size: 12.5px;
+  line-height: 1.55;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 8px;
+  resize: vertical;
+  background: var(--bg-color);
+  color: var(--text-color);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.md-yaml-input:focus {
+  border-color: var(--primary-color);
+}
+
+.md-toc {
+  border-left: 3px solid var(--border-color);
+  padding: 6px 0 6px 14px;
+  margin: 1.2em 0;
+}
+
+.md-toc-title {
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--meta-mark-color);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+}
+
+.md-toc-item {
+  display: block;
+  padding: 3px 0;
+  font-size: 0.94em;
+  color: var(--link-color, var(--primary-color));
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.md-toc-item:hover {
+  text-decoration: underline;
+}
+
+.md-toc-empty {
+  font-size: 12px;
+  color: var(--meta-mark-color);
+}
+
+.md-footnote-ref {
+  cursor: help;
+  color: var(--primary-color);
+  font-size: 0.75em;
+  padding: 0 1px;
+  vertical-align: super;
+  line-height: 0;
+}
+
+.md-footnote-ref:hover {
+  text-decoration: underline;
+}
+
+.md-footnote-def {
+  border-left: 2px solid var(--border-color);
+  padding: 4px 0 4px 12px;
+  margin: 0.6em 0;
+  font-size: 0.9em;
+  color: var(--meta-mark-color);
+}
+
+.md-footnote-def::before {
+  content: attr(data-footnote-id);
+  font-size: 11px;
+  margin-right: 6px;
+  color: var(--meta-mark-color);
+}
+
+.md-footnote-tooltip {
+  position: fixed;
+  z-index: 2000;
+  max-width: 320px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-color);
+  display: none;
+}
+
+.md-footnote-tooltip-id {
+  font-family: var(--monospace);
+  font-size: 11px;
+  color: var(--primary-color);
+  margin-bottom: 4px;
+}
+
+body.theme-night .md-footnote-tooltip {
+  background: #252526;
+  border-color: #3e3e42;
+}
+
 /* 分割线 */
 .md-hr hr {
   border: 0;
