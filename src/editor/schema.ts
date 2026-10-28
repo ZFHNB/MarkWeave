@@ -279,7 +279,6 @@ const nodes: Record<string, NodeSpec> = {
       return ["ul", { class: "md-ul-list md-block" }, 0];
     },
   },
-
   list_item: {
     content: "paragraph block*",
     defining: true,

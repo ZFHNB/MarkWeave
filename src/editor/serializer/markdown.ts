@@ -2,6 +2,7 @@ import { Node as PMNode, Schema, DOMParser } from "prosemirror-model";
 import MarkdownIt from "markdown-it";
 import { applyTyporaInlineRules } from "./typora-inline-rules";
 import { applyTyporaBlockRules } from "./typora-block-rules";
+import { applyTaskListToDom } from "./task-list-rules";
 import { applyEmojiToDom } from "./emoji";
 import {
   annotateReferenceLinks,
@@ -67,6 +68,9 @@ export function markdownToDoc(markdownText: string, schema: Schema): PMNode {
     const raw = el.getAttribute("data-formula") || "";
     el.setAttribute("data-formula", decodeURIComponent(raw));
   });
+
+  // 2.3 GFM 任务列表（在 DOM 上转换 `- [ ]` 列表项）
+  applyTaskListToDom(tempDiv);
 
   // 3. Typora 风格 Emoji 短代码（跳过 code/pre）
   applyEmojiToDom(tempDiv);
