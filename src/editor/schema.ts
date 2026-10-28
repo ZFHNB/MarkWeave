@@ -189,6 +189,40 @@ const nodes: Record<string, NodeSpec> = {
     },
   },
 
+  link_reference_definition: {
+    attrs: {
+      id: { default: "" },
+      href: { default: "" },
+      title: { default: null },
+    },
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div.md-link-def",
+        getAttrs: (dom) => {
+          const el = dom as HTMLElement;
+          return {
+            id: el.getAttribute("data-ref-id") || "",
+            href: el.getAttribute("data-ref-href") || "",
+            title: el.getAttribute("data-ref-title"),
+          };
+        },
+      },
+    ],
+    toDOM(node) {
+      return [
+        "div",
+        {
+          class: "md-link-def md-block",
+          "data-ref-id": node.attrs.id || "",
+          "data-ref-href": node.attrs.href || "",
+          "data-ref-title": node.attrs.title || "",
+        },
+      ];
+    },
+  },
+
   footnote_definition: {
     attrs: { id: { default: "" }, content: { default: "" } },
     group: "block",
@@ -407,6 +441,9 @@ const marks: Record<string, MarkSpec> = {
     attrs: {
       href: {},
       title: { default: null },
+      reference: { default: null },
+      referenceCollapsed: { default: false },
+      anchor: { default: null },
     },
     inclusive: false,
     parseDOM: [
@@ -414,13 +451,28 @@ const marks: Record<string, MarkSpec> = {
         tag: "a[href]",
         getAttrs(dom) {
           const el = dom as HTMLElement;
-          return { href: el.getAttribute("href"), title: el.getAttribute("title") };
+          return {
+            href: el.getAttribute("href"),
+            title: el.getAttribute("title"),
+            reference: el.getAttribute("data-link-reference"),
+            referenceCollapsed: el.getAttribute("data-link-reference-collapsed") === "true",
+            anchor: el.getAttribute("data-anchor"),
+          };
         },
       },
     ],
     toDOM(node) {
-      const { href, title } = node.attrs;
-      return ["a", { href, title, class: "md-link", target: "_blank", rel: "noopener noreferrer" }, 0];
+      const { href, title, reference, anchor } = node.attrs;
+      const attrs: Record<string, string> = {
+        href,
+        class: "md-link",
+        target: "_blank",
+        rel: "noopener noreferrer",
+      };
+      if (title) attrs.title = title;
+      if (reference) attrs["data-link-reference"] = reference;
+      if (anchor) attrs["data-anchor"] = anchor;
+      return ["a", attrs, 0];
     },
   },
 

@@ -3,6 +3,12 @@ import MarkdownIt from "markdown-it";
 import { applyTyporaInlineRules } from "./typora-inline-rules";
 import { applyTyporaBlockRules } from "./typora-block-rules";
 import { applyEmojiToDom } from "./emoji";
+import {
+  annotateReferenceLinks,
+  extractLinkReferences,
+  insertDefinitionPlaceholders,
+  slugifyHeading,
+} from "./link-references";
 
 const md = new MarkdownIt({
   html: true,
@@ -27,10 +33,34 @@ export function markdownToDoc(markdownText: string, schema: Schema): PMNode {
     return `<div data-math-block="true" data-formula="${encodeURIComponent(formula.trim())}"></div>`;
   });
 
+  // 1.1 引用式链接：提取定义，并插入占位块以保留定义节点
+  const { references, definitions } = extractLinkReferences(processed);
+  if (definitions.length > 0) {
+    processed = insertDefinitionPlaceholders(processed, definitions);
+  }
+
   // 2. 将 Markdown 转为标准 HTML DOM
   const renderedHTML = md.render(processed);
   const tempDiv = document.createElement("div");
   tempDiv.innerHTML = renderedHTML;
+
+  // 2.1 标记引用式链接，便于序列化时写回 [text][id]
+  annotateReferenceLinks(tempDiv, references, processed);
+
+  // 2.2 内部锚点链接：为标题生成 id，并给 #heading 链接打标
+  const headingSlugs = new Map<string, string>();
+  tempDiv.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((heading) => {
+    const slug = slugifyHeading(heading.textContent || "");
+    heading.setAttribute("data-anchor", slug);
+    headingSlugs.set(slug, heading.textContent || "");
+  });
+  tempDiv.querySelectorAll('a[href^="#"]').forEach((anchor) => {
+    const href = anchor.getAttribute("href") || "";
+    const slug = href.slice(1);
+    if (headingSlugs.has(slug)) {
+      anchor.setAttribute("data-anchor", slug);
+    }
+  });
 
   // 将数学公式占位节点还原
   tempDiv.querySelectorAll("div[data-math-block]").forEach((el) => {
@@ -96,6 +126,11 @@ export function docToMarkdown(doc: PMNode): string {
         const id = node.attrs.id || "";
         const content = (node.attrs.content || "").split("\n").join("\n  ");
         return `[^${id}]: ${content}`;
+      }
+
+      case "link_reference_definition": {
+        const title = node.attrs.title ? ` "${node.attrs.title}"` : "";
+        return `[${node.attrs.id}]: ${node.attrs.href}${title}`;
       }
 
       case "bullet_list": {
@@ -269,8 +304,14 @@ export function docToMarkdown(doc: PMNode): string {
               piece = `\`${piece}\``;
               break;
             case "link": {
-              const title = mark.attrs.title ? ` "${mark.attrs.title}"` : "";
-              piece = `[${piece}](${mark.attrs.href}${title})`;
+              if (mark.attrs.reference) {
+                piece = mark.attrs.referenceCollapsed
+                  ? `[${piece}][]`
+                  : `[${piece}][${mark.attrs.reference}]`;
+              } else {
+                const title = mark.attrs.title ? ` "${mark.attrs.title}"` : "";
+                piece = `[${piece}](${mark.attrs.href}${title})`;
+              }
               break;
             }
             case "inline_math": {
