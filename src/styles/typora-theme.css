@@ -2239,25 +2239,85 @@ body.theme-night .md-image-toolbar {
   .md-fences-toolbar,
   .md-diagram-toolbar-wrap,
   .md-table-toolbar,
-  .md-meta {
+  .md-meta,
+  .md-image-toolbar,
+  .md-search-panel,
+  .md-context-menu,
+  .md-emoji-popup,
+  .md-quick-open-overlay,
+  .md-footnote-tooltip,
+  .md-toc-title,
+  .md-yaml-toggle {
     display: none !important;
   }
 
   .ty-editor-scroller {
     overflow: visible !important;
     height: auto !important;
+    padding: 0 !important;
+  }
+
+  body,
+  .ty-main-container {
+    background: #fff !important;
+    color: #000 !important;
   }
 
   #write {
     margin: 0 !important;
     padding: 0 !important;
+    min-height: 0 !important;
+    max-width: none !important;
+  }
+
+  /* 打印时展开折叠内容，避免卡片被裁切 */
+  .md-yaml-card {
+    border: 1px solid #ddd !important;
+    background: transparent !important;
+  }
+
+  .md-yaml-input {
+    display: block !important;
+    border: none !important;
+    min-height: 0 !important;
+    height: auto !important;
+  }
+
+  .md-toc {
+    border-left: 2px solid #ccc !important;
+  }
+
+  .md-meta.md-hidden {
+    display: inline !important;
+  }
+
+  .md-inline-math {
+    font-style: normal;
   }
 
   table,
   pre,
   blockquote,
-  img {
+  img,
+  .md-diagram-preview,
+  .md-math-block-container {
     break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    break-after: avoid;
+    page-break-after: avoid;
+    orphans: 4;
+  }
+
+  @page {
+    margin: 18mm 16mm;
   }
 }
 

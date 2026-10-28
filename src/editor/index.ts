@@ -176,6 +176,11 @@ export class MarkWeaveEditor {
     return docToMarkdown(this.view.state.doc);
   }
 
+  /** 只读文档快照，供导出/复制等多格式序列化使用 */
+  public getDocument(): PMNode {
+    return this.view.state.doc;
+  }
+
   public setMarkdown(markdownText: string, options?: { resetHistory?: boolean }) {
     const newDoc = markdownToDoc(markdownText, schema);
     if (options?.resetHistory) {

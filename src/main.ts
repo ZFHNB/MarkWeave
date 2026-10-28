@@ -36,6 +36,7 @@ import {
   rememberRecentFile,
 } from "./workspace/folder-workspace";
 import { QuickOpen } from "./workspace/quick-open";
+import { toHtml } from "./editor/commands/clipboard-formats";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -1682,26 +1683,8 @@ btnTypewriterMode.addEventListener("click", () => {
 btnExportHtml.addEventListener("click", () => {
   const currentDoc = documents.find((d) => d.id === activeDocId);
   const title = currentDoc ? currentDoc.title : "Typemark 导出文档";
-  const htmlContent = `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <title>${title}</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-  <style>
-    body { max-width: 860px; margin: 40px auto; padding: 0 20px; font-family: -apple-system, sans-serif; line-height: 1.65; color: #333; }
-    h1, h2, h3 { color: #111; margin-top: 1.2em; font-weight: 600; }
-    blockquote { border-left: 4px solid #428bca; padding: 6px 16px; background: #f9f9f9; color: #666; margin: 1em 0; }
-    pre { background: #f4f4f4; padding: 12px; border-radius: 4px; overflow-x: auto; font-family: monospace; }
-    code { font-family: monospace; background: #f0f0f0; padding: 2px 4px; border-radius: 3px; }
-  </style>
-</head>
-<body>
-  ${mountEl.innerHTML}
-</body>
-</html>`;
-
-  const blob = new Blob([htmlContent], { type: "text/html" });
+  const htmlContent = toHtml(editor.getDocument(), true);
+  const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
