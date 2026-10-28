@@ -16,6 +16,7 @@ import { TaskItemView } from "./nodeviews/task-item";
 import { TocView } from "./nodeviews/toc";
 import { YamlFrontmatterView } from "./nodeviews/yaml-frontmatter";
 import { createFootnoteHoverPlugin } from "./plugins/footnote-hover";
+import { createEmojiAutocompletePlugin } from "./plugins/emoji-autocomplete";
 import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
 import { computeStats } from "./stats";
@@ -73,6 +74,8 @@ export class MarkWeaveEditor {
       doc: safeDoc,
       plugins: [
         history(),
+        // Emoji 补全必须先于基础 keymap，否则 Enter/Escape 会被默认命令先消费
+        createEmojiAutocompletePlugin(),
         customKeymap,
         keymap(baseKeymap),
         buildInputRules(schema),
