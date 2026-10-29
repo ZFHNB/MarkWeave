@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("markweave", {
   readFile: (filePath) => ipcRenderer.invoke("file:read", filePath),
   writeFile: (payload) => ipcRenderer.invoke("file:write", payload),
   statFile: (filePath) => ipcRenderer.invoke("file:stat", filePath),
+  printToPdf: (payload) => ipcRenderer.invoke("print:pdf", payload),
   createFile: (payload) => ipcRenderer.invoke("file:create", payload),
   createFolder: (folderPath) => ipcRenderer.invoke("file:create-folder", folderPath),
   renamePath: (payload) => ipcRenderer.invoke("file:rename", payload),

@@ -68,6 +68,13 @@ import {
 } from "./workspace/external-change";
 import { toHtml } from "./editor/commands/clipboard-formats";
 import { BUILT_IN_THEMES, applyBuiltInTheme, normalizeThemeId } from "./platform/themes";
+import {
+  DEFAULT_PDF_OPTIONS,
+  normalizePdfOptions,
+  toElectronPdfOptions,
+  type PdfOptions,
+  type PaperSize,
+} from "./platform/pdf-options";
 
 // 预设文档 1: 欢迎与特性演示
 const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
@@ -1659,6 +1666,17 @@ export interface MarkWeaveSettings {
   theme: ThemeSetting;
   language: Language;
   editorTheme: string;
+  pdf: PdfOptions;
+}
+
+function loadPdfOptions(): PdfOptions {
+  try {
+    const raw = localStorage.getItem("markweave_pdf_options");
+    if (!raw) return DEFAULT_PDF_OPTIONS;
+    return normalizePdfOptions(JSON.parse(raw));
+  } catch {
+    return DEFAULT_PDF_OPTIONS;
+  }
 }
 
 function loadSettings(): MarkWeaveSettings {
@@ -1675,6 +1693,7 @@ function loadSettings(): MarkWeaveSettings {
     theme: (localStorage.getItem("markweave_theme") as any) || "light",
     language: normalizeLanguage(localStorage.getItem("markweave_language")),
     editorTheme: normalizeThemeId(localStorage.getItem("markweave_editor_theme")),
+    pdf: normalizePdfOptions(loadPdfOptions()),
   };
 }
 
@@ -1691,6 +1710,7 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_theme", settings.theme);
   localStorage.setItem("markweave_language", settings.language);
   localStorage.setItem("markweave_editor_theme", settings.editorTheme);
+  localStorage.setItem("markweave_pdf_options", JSON.stringify(settings.pdf));
 
   applySettings(settings);
 }
@@ -1965,6 +1985,50 @@ function openSettingsModal() {
               <option value="compatible" ${currentSettings.exportPolicy === "compatible" ? "selected" : ""}>始终清洗为通用兼容 Mermaid</option>
             </select>
           </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">PDF 导出</div>
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">纸张尺寸</span>
+              <span class="ty-settings-desc">导出 PDF 时使用的页面大小</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-paper">
+              ${(["A4", "A3", "Letter", "Legal", "Tabloid"] as const)
+                .map(
+                  (size) =>
+                    `<option value="${size}" ${
+                      currentSettings.pdf.paper === size ? "selected" : ""
+                    }>${size}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">横向排版</span>
+              <span class="ty-settings-desc">以横向纸张导出</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-pdf-landscape" ${
+                currentSettings.pdf.landscape ? "checked" : ""
+              } />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">打印背景色</span>
+              <span class="ty-settings-desc">保留代码块、表头与高亮的底色</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-pdf-background" ${
+                currentSettings.pdf.printBackground ? "checked" : ""
+              } />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         <!-- Tab 5: 关于系统 -->
@@ -2042,6 +2106,9 @@ function openSettingsModal() {
     const selectLanguage = normalizeLanguage((modalOverlay.querySelector("#setting-select-language") as HTMLSelectElement)?.value);
     const selectMermaidTheme = normalizeMermaidTheme((modalOverlay.querySelector("#setting-select-mermaid-theme") as HTMLSelectElement)?.value);
     const selectEditorTheme = normalizeThemeId((modalOverlay.querySelector("#setting-select-editor-theme") as HTMLSelectElement)?.value);
+    const selectPaper = ((modalOverlay.querySelector("#setting-select-paper") as HTMLSelectElement)?.value as PaperSize) || "A4";
+    const pdfLandscape = (modalOverlay.querySelector("#setting-pdf-landscape") as HTMLInputElement)?.checked ?? false;
+    const pdfBackground = (modalOverlay.querySelector("#setting-pdf-background") as HTMLInputElement)?.checked ?? true;
 
     const newSettings: MarkWeaveSettings = {
       mermaidDefaultMode: selectedMode,
@@ -2056,6 +2123,7 @@ function openSettingsModal() {
       theme: selectTheme,
       language: selectLanguage,
       editorTheme: selectEditorTheme,
+      pdf: normalizePdfOptions({ ...loadPdfOptions(), paper: selectPaper, landscape: pdfLandscape, printBackground: pdfBackground }),
     };
 
     saveSettings(newSettings);
@@ -2177,10 +2245,35 @@ btnExportHtml.addEventListener("click", () => {
   URL.revokeObjectURL(url);
 });
 
-// 导出/打印 PDF
+// 导出 PDF：桌面版走 printToPDF（支持纸张/边距），Web 版回退到系统打印
 btnExportPdf.addEventListener("click", () => {
-  window.print();
+  void exportPdf();
 });
+
+async function exportPdf(): Promise<void> {
+  const api = getDesktopAPI();
+  const currentDoc = documents.find((d) => d.id === activeDocId);
+  const title = currentDoc ? currentDoc.title.replace(/\.md$/, "") : "document";
+
+  if (!api?.printToPdf) {
+    window.print();
+    return;
+  }
+
+  const options = loadSettings().pdf;
+  const suggestedName = currentDoc?.filePath
+    ? joinPath(currentDoc.filePath.replace(/[\/][^\/]+$/, ""), `${title}.pdf`)
+    : `${title}.pdf`;
+
+  const result = await api.printToPdf({
+    path: suggestedName,
+    options: toElectronPdfOptions(options),
+  });
+
+  if (!result) {
+    window.alert("PDF 导出失败");
+  }
+}
 
 // Electron 桌面菜单与文件打开集成
 const desktopAPI = getDesktopAPI();

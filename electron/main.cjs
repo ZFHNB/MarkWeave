@@ -379,6 +379,34 @@ ipcMain.handle("file:trash", async (_event, targetPath) => {
   }
 });
 
+/**
+ * 使用 Electron 的 printToPDF 导出 PDF：不会弹出打印对话框，
+ * 支持纸张、方向、页边距与背景色。
+ */
+ipcMain.handle("print:pdf", async (_event, payload) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return null;
+  const options = payload?.options || {};
+  try {
+    const data = await mainWindow.webContents.printToPDF({
+      landscape: Boolean(options.landscape),
+      printBackground: options.printBackground !== false,
+      scale: typeof options.scale === "number" ? options.scale : 1,
+      displayHeaderFooter: Boolean(options.displayHeaderFooter),
+      pageSize: options.pageSize,
+      margins: options.margins,
+    });
+
+    if (payload?.path) {
+      await fs.promises.writeFile(payload.path, data);
+      return { path: payload.path, bytes: data.length };
+    }
+    return { data: data.toString("base64"), bytes: data.length };
+  } catch (err) {
+    console.error("Failed to export PDF:", err);
+    return null;
+  }
+});
+
 ipcMain.handle("file:stat", async (_event, targetPath) => {
   if (!targetPath || typeof targetPath !== "string") return null;
   try {
