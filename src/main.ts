@@ -1,6 +1,12 @@
 import "./styles/typora-theme.css";
 import { MarkWeaveEditor } from "./editor";
 import type { HeadingItem } from "./editor/outline";
+import {
+  buildOutlineTree,
+  filterOutline,
+  findActiveHeading,
+  type OutlineNode,
+} from "./editor/outline-tree";
 import { openTableInsertDialog } from "./editor/table/insert-dialog";
 import {
   type StoredDocument,
@@ -196,7 +202,14 @@ app.innerHTML = `
     </div>
     <div class="ty-sidebar-content" id="sidebar-content">
       <!-- 大纲目录容器 -->
-      <div id="outline-container"></div>
+      <div id="outline-container">
+        <div class="ty-outline-toolbar">
+          <input type="search" id="outline-filter" class="ty-outline-filter" placeholder="过滤标题…" />
+          <button class="ty-outline-tool-btn" id="btn-outline-collapse" title="全部折叠">⊟</button>
+          <button class="ty-outline-tool-btn" id="btn-outline-expand" title="全部展开">⊞</button>
+        </div>
+        <div id="outline-list"></div>
+      </div>
       <!-- 文件列表容器 -->
       <div id="files-container" style="display: none;">
         <div class="ty-files-actions" style="display: flex; gap: 6px; margin-bottom: 12px; padding: 0 4px;">
@@ -393,6 +406,7 @@ const editor = new MarkWeaveEditor({
   mountEl,
   initialMarkdown: currentDoc.content,
   isTypewriterEnabled: () => document.body.classList.contains("mode-typewriter"),
+  onSelectionChange: (cursorPos) => syncActiveOutline(cursorPos),
   onDocChange: (md) => {
     // 自动将修改同步回当前文档内存对象并调度持久化
     const doc = documents.find((d) => d.id === activeDocId);
@@ -701,30 +715,157 @@ function switchDocument(newDocId: string) {
 renderFileList();
 
 // 渲染实时大纲目录
+let outlineHeadings: HeadingItem[] = [];
+let outlineQuery = "";
+let outlineFilterBound = false;
+let outlineCollapseBound = false;
+const collapsedOutline = new Set<string>();
+
+function outlineFilterInput(): HTMLInputElement | null {
+  return document.getElementById("outline-filter") as HTMLInputElement | null;
+}
+
+function bindOutlineToolbar(): void {
+  const input = outlineFilterInput();
+  if (input && !outlineFilterBound) {
+    outlineFilterBound = true;
+    input.addEventListener("input", () => {
+      outlineQuery = input.value;
+      renderOutline(outlineHeadings);
+    });
+  }
+
+  const collapse = document.getElementById("btn-outline-collapse");
+  const expand = document.getElementById("btn-outline-expand");
+  if (collapse && expand && !outlineCollapseBound) {
+    outlineCollapseBound = true;
+    collapse.addEventListener("click", () => {
+      outlineHeadings
+        .filter((h) => h.level < 4)
+        .forEach((h) => collapsedOutline.add(h.id));
+      renderOutline(outlineHeadings);
+    });
+    expand.addEventListener("click", () => {
+      collapsedOutline.clear();
+      renderOutline(outlineHeadings);
+    });
+  }
+}
+
+function scrollToOutlineItem(item: HTMLElement): void {
+  const pos = parseInt(item.getAttribute("data-pos") || "-1", 10);
+  if (pos >= 0) editor.scrollToHeading(pos);
+}
+
+function highlightOutlineItem(id: string | null): void {
+  outlineListEl?.querySelectorAll(".ty-outline-item").forEach((el) => {
+    el.classList.toggle("active", el.getAttribute("data-id") === id);
+  });
+}
+
+let outlineListEl: HTMLElement | null = null;
+
 function renderOutline(headings: HeadingItem[]) {
+  outlineHeadings = headings;
+  bindOutlineToolbar();
+  if (!outlineListEl) outlineListEl = document.getElementById("outline-list");
+  const list = outlineListEl;
+  if (!list) return;
+
+  list.innerHTML = "";
+
   if (headings.length === 0) {
-    outlineContainer.innerHTML = `<div style="color: #999; font-size: 12px; padding: 12px;">大纲为空</div>`;
+    list.innerHTML = `<div class="ty-outline-empty">大纲为空</div>`;
     return;
   }
 
-  outlineContainer.innerHTML = headings
-    .map(
-      (h) => `
-    <a class="ty-outline-item level-${h.level}" data-pos="${h.pos}">
-      ${h.text}
-    </a>
-  `
-    )
-    .join("");
+  const items = headings.map((h, index) => ({
+    id: h.id || `heading-${index + 1}`,
+    level: h.level,
+    text: h.text,
+    pos: h.pos,
+  }));
 
-  outlineContainer.querySelectorAll(".ty-outline-item").forEach((el) => {
-    el.addEventListener("click", () => {
-      outlineContainer.querySelectorAll(".ty-outline-item").forEach((item) => item.classList.remove("active"));
-      el.classList.add("active");
-      const pos = parseInt(el.getAttribute("data-pos")!, 10);
-      editor.scrollToHeading(pos);
-    });
-  });
+  const visible = filterOutline(items, outlineQuery);
+  const visibleIds = new Set(visible.map((item) => item.id));
+
+  const renderLevel = (nodes: OutlineNode[], depth: number) => {
+    for (const node of nodes) {
+      if (!visibleIds.has(node.id)) continue;
+
+      const hasChildren = node.children.some((child) => visibleIds.has(child.id));
+      const isCollapsed = collapsedOutline.has(node.id);
+
+      const row = document.createElement("div");
+      row.className = `ty-outline-row level-${node.level}`;
+      row.setAttribute("data-id", node.id);
+      row.setAttribute("data-pos", String(node.pos));
+
+      if (hasChildren) {
+        const toggle = document.createElement("span");
+        toggle.className = `ty-outline-toggle${isCollapsed ? " is-collapsed" : ""}`;
+        toggle.textContent = "▸";
+        toggle.addEventListener("click", (event) => {
+          event.stopPropagation();
+          if (collapsedOutline.has(node.id)) collapsedOutline.delete(node.id);
+          else collapsedOutline.add(node.id);
+          renderOutline(outlineHeadings);
+        });
+        row.appendChild(toggle);
+      } else {
+        const spacer = document.createElement("span");
+        spacer.className = "ty-outline-toggle-spacer";
+        row.appendChild(spacer);
+      }
+
+      const label = document.createElement("a");
+      label.className = "ty-outline-item";
+      label.setAttribute("data-id", node.id);
+      label.setAttribute("data-pos", String(node.pos));
+      label.setAttribute("data-level", String(node.level));
+      label.textContent = node.text;
+      label.title = node.text;
+      label.addEventListener("click", () => {
+        highlightOutlineItem(node.id);
+        scrollToOutlineItem(row);
+      });
+      row.appendChild(label);
+
+      list.appendChild(row);
+
+      if (hasChildren && !isCollapsed) {
+        renderLevel(node.children, depth + 1);
+      }
+    }
+  };
+
+  const tree = buildOutlineTree(items);
+  renderLevel(tree, 0);
+
+  if (outlineActiveId) highlightOutlineItem(outlineActiveId);
+}
+
+/** 根据光标位置高亮当前标题 */
+function syncActiveOutline(cursorPos: number): void {
+  if (outlineHeadings.length === 0) return;
+  const active = findActiveHeading(
+    outlineHeadings.map((h, index) => ({
+      id: h.id || `heading-${index + 1}`,
+      level: h.level,
+      text: h.text,
+      pos: h.pos,
+    })),
+    cursorPos
+  );
+  setActiveOutlineById(active ? active.id : null);
+}
+
+let outlineActiveId: string | null = null;
+
+function setActiveOutlineById(id: string | null): void {
+  if (outlineActiveId === id) return;
+  outlineActiveId = id;
+  highlightOutlineItem(id);
 }
 
 // 新建文档按钮与操作
@@ -1668,6 +1809,20 @@ if (window.matchMedia) {
     (colorSchemeQuery as any).addListener(handleColorSchemeChange);
   }
 }
+
+// 点击正文左右两侧空白：编辑器失焦，当前块回到解析后的排版形态（与 Typora 一致）
+document.addEventListener("mousedown", (e: MouseEvent) => {
+  if (isSourceMode) return;
+  const target = e.target as HTMLElement | null;
+  if (!target) return;
+
+  const scroller = target.closest(".ty-editor-scroller");
+  const inProseMirror = target.closest(".ProseMirror");
+  if (scroller && !inProseMirror) {
+    // 点击的是正文区域内的空白（左右留白或块与块之间的空隙）
+    editor.blur();
+  }
+});
 
 // 空文档下点击页面空白区域聚焦首行
 document.addEventListener("click", (e: MouseEvent) => {

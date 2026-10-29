@@ -55,6 +55,7 @@ export interface EditorOptions {
   onOutlineChange?: (headings: HeadingItem[]) => void;
   onWordCountChange?: (stats: { words: number; chars: number; lines: number }) => void;
   isTypewriterEnabled?: () => boolean;
+  onSelectionChange?: (cursorPos: number) => void;
   getDocumentPath?: () => string | null;
   isDesktop?: () => boolean;
 }
@@ -160,6 +161,9 @@ export class MarkWeaveEditor {
           this.options.onOutlineChange?.(this.getHeadings());
           this.updateStats();
         }
+        if (tr.docChanged || tr.selectionSet) {
+          this.options.onSelectionChange?.(this.view.state.selection.from);
+        }
       },
     });
 
@@ -179,6 +183,11 @@ export class MarkWeaveEditor {
   /** 只读文档快照，供导出/复制等多格式序列化使用 */
   public getDocument(): PMNode {
     return this.view.state.doc;
+  }
+
+  /** 当前光标位置（用于大纲同步高亮） */
+  public getCursorPosition(): number {
+    return this.view.state.selection.from;
   }
 
   public setMarkdown(markdownText: string, options?: { resetHistory?: boolean }) {
@@ -243,6 +252,11 @@ export class MarkWeaveEditor {
 
   public focus() {
     this.view.focus();
+  }
+
+  /** 让编辑器失焦：语法符号随之折叠为解析后的纯净排版 */
+  public blur() {
+    (this.view.dom as HTMLElement).blur();
   }
 
   private searchPanel: SearchPanel | null = null;
