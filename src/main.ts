@@ -75,7 +75,12 @@ import {
 } from "./workspace/external-change";
 import { toStandaloneHtml } from "./export/html-export";
 import { renderMermaidForExport } from "./export/mermaid-render";
-import { BUILT_IN_THEMES, applyBuiltInTheme, normalizeThemeId } from "./platform/themes";
+import {
+  applyBuiltInTheme,
+  getAllThemes,
+  normalizeThemeId,
+  registerCustomThemes,
+} from "./platform/themes";
 import {
   DEFAULT_PDF_OPTIONS,
   normalizePdfOptions,
@@ -2043,12 +2048,14 @@ function openSettingsModal() {
               <span class="ty-settings-desc">选择正文字体与排版风格（移植自 Typora 内置主题）</span>
             </div>
             <select class="ty-settings-select" id="setting-select-editor-theme">
-              ${BUILT_IN_THEMES.map(
-                (theme) =>
-                  `<option value="${theme.id}" ${
-                    currentSettings.editorTheme === theme.id ? "selected" : ""
-                  }>${theme.label}</option>`
-              ).join("")}
+              ${getAllThemes()
+                .map(
+                  (theme) =>
+                    `<option value="${theme.id}" ${
+                      currentSettings.editorTheme === theme.id ? "selected" : ""
+                    }>${theme.label}${theme.custom ? "（自定义）" : ""}</option>`
+                )
+                .join("")}
             </select>
           </div>
 
@@ -2061,6 +2068,16 @@ function openSettingsModal() {
               <option value="zh" ${currentSettings.language === "zh" ? "selected" : ""}>中文（默认）</option>
               <option value="en" ${currentSettings.language === "en" ? "selected" : ""}>English</option>
             </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自定义主题文件夹</span>
+              <span class="ty-settings-desc">将 .css 主题文件放入该目录后，会出现在上方的“排版主题”列表中</span>
+            </div>
+            <button class="ty-settings-action" id="setting-btn-themes-folder" ${getDesktopAPI()?.openThemesFolder ? "" : "disabled"}>
+              打开主题目录
+            </button>
           </div>
         </div>
 
@@ -2180,6 +2197,26 @@ function openSettingsModal() {
   const closeModal = () => modalOverlay.remove();
 
   modalOverlay.querySelector("#btn-close-settings-x")?.addEventListener("click", closeModal);
+
+  // 打开自定义主题目录，并在用户回到窗口后刷新主题列表
+  modalOverlay.querySelector("#setting-btn-themes-folder")?.addEventListener("click", async () => {
+    const api = getDesktopAPI();
+    if (!api?.openThemesFolder) return;
+    await api.openThemesFolder();
+    await refreshCustomThemes();
+    const select = modalOverlay.querySelector<HTMLSelectElement>("#setting-select-editor-theme");
+    if (select) {
+      const selected = normalizeThemeId(select.value);
+      select.innerHTML = getAllThemes()
+        .map(
+          (theme) =>
+            `<option value="${theme.id}" ${selected === theme.id ? "selected" : ""}>${theme.label}${
+              theme.custom ? "（自定义）" : ""
+            }</option>`
+        )
+        .join("");
+    }
+  });
   modalOverlay.querySelector("#btn-cancel-settings")?.addEventListener("click", closeModal);
   modalOverlay.addEventListener("click", (e) => {
     if (e.target === modalOverlay) closeModal();
@@ -2314,6 +2351,35 @@ document.addEventListener("click", (e: MouseEvent) => {
 // 初始化加载并应用设置
 applySettings(loadSettings());
 
+/**
+ * 载入自定义主题（桌面版读取 %userData%/themes/*.css）。
+ * 失败时静默降级为内置主题，不影响启动。
+ */
+async function refreshCustomThemes(): Promise<void> {
+  const api = getDesktopAPI();
+  if (!api?.listCustomThemes) return;
+  try {
+    const themes = await api.listCustomThemes();
+    if (!Array.isArray(themes)) return;
+    registerCustomThemes(
+      themes.map((theme) => ({
+        id: theme.id,
+        label: theme.label,
+        dark: false,
+        description: `自定义主题：${theme.label}`,
+        css: theme.css,
+      }))
+    );
+    const settings = loadSettings();
+    // 之前选中的自定义主题现在可以真正生效
+    applyBuiltInTheme(normalizeThemeId(settings.editorTheme));
+  } catch (err) {
+    console.warn("加载自定义主题失败", err);
+  }
+}
+
+void refreshCustomThemes();
+
 // 外部修改轮询（仅桌面版有 statFile 时生效）
 if (getDesktopAPI()?.statFile) {
   const active = documents.find((d) => d.id === activeDocId);
@@ -2358,11 +2424,21 @@ async function exportHtml(): Promise<void> {
     console.warn("Mermaid 预渲染失败，导出将保留源代码块", err);
   }
 
+  // KaTeX 字体体积较大，仅在导出时按需载入并内联
+  let katexFontCss = "";
+  try {
+    const { buildKatexFontCss } = await import("./export/katex-fonts");
+    katexFontCss = buildKatexFontCss();
+  } catch (err) {
+    console.warn("KaTeX 字体内联失败，公式将回退到系统字体", err);
+  }
+
   const htmlContent = toStandaloneHtml(doc, {
     title,
     themeId: settings.editorTheme,
     dark: document.body.classList.contains("theme-night"),
     mermaidSvgs,
+    katexFontCss,
   });
 
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
@@ -2420,6 +2496,15 @@ if (desktopAPI) {
         break;
       case "save-as":
         void handleSaveAs();
+        break;
+      case "export-html":
+        void exportHtml();
+        break;
+      case "export-pdf":
+        void exportPdf();
+        break;
+      case "preferences":
+        openSettingsModal();
         break;
       case "insert-table":
         handleOpenInsertTable();

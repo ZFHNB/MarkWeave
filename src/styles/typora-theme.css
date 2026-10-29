@@ -2280,6 +2280,27 @@ body.theme-night .md-inline-node-input {
   border-color: var(--primary-color);
 }
 
+.ty-settings-action {
+  padding: 5px 14px;
+  font-size: 13px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--text-color);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ty-settings-action:hover:not(:disabled) {
+  border-color: var(--primary-color);
+  color: var(--primary-color);
+}
+
+.ty-settings-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ty-settings-toggle {
   position: relative;
   display: inline-block;

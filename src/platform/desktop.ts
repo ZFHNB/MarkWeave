@@ -30,6 +30,13 @@ export interface WorkspaceFolder {
   }[];
 }
 
+export interface CustomThemePayload {
+  id: string;
+  label: string;
+  css: string;
+  path: string;
+}
+
 export interface MarkWeaveDesktopAPI {
   isDesktop?: boolean;
   openFile: () => Promise<OpenFileResult | null>;
@@ -51,6 +58,8 @@ export interface MarkWeaveDesktopAPI {
   openExternal?: (url: string) => Promise<boolean>;
   getInfo?: () => Promise<AppInfo>;
   setLanguage?: (language: string) => Promise<boolean>;
+  listCustomThemes?: () => Promise<CustomThemePayload[]>;
+  openThemesFolder?: () => Promise<{ path: string | null }>;
   onMenuAction: (callback: (action: string) => void) => () => void;
   onOpenPath: (callback: (filePath: string) => void) => () => void;
 }

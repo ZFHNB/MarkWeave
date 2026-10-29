@@ -445,6 +445,59 @@ ipcMain.handle("app:get-info", async () => {
   };
 });
 
+/**
+ * 自定义主题目录：%userData%/themes/*.css
+ * 仅读取文件名与内容，不执行其中任何脚本。
+ */
+const MAX_THEME_BYTES = 512 * 1024;
+
+function customThemesDir() {
+  return path.join(app.getPath("userData"), "themes");
+}
+
+async function listCustomThemes() {
+  const dir = customThemesDir();
+  let entries;
+  try {
+    entries = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const themes = [];
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith(".css")) continue;
+    const fullPath = path.join(dir, entry.name);
+    try {
+      const stat = await fs.promises.stat(fullPath);
+      if (stat.size > MAX_THEME_BYTES) continue;
+      const css = await fs.promises.readFile(fullPath, "utf8");
+      themes.push({
+        id: `custom:${entry.name.replace(/\.css$/i, "")}`,
+        label: entry.name.replace(/\.css$/i, ""),
+        css,
+        path: fullPath,
+      });
+    } catch {
+      // 跳过不可读文件
+    }
+  }
+  return themes;
+}
+
+ipcMain.handle("themes:list-custom", async () => listCustomThemes());
+
+ipcMain.handle("themes:open-folder", async () => {
+  const dir = customThemesDir();
+  try {
+    await fs.promises.mkdir(dir, { recursive: true });
+  } catch {
+    return { path: null };
+  }
+  shell.openPath(dir);
+  return { path: dir };
+});
+
 ipcMain.handle("app:set-language", async (_event, lang) => {
   currentLanguage = normalizeLanguage(lang);
   applyApplicationMenu();

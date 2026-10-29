@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld("markweave", {
   openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
   getInfo: () => ipcRenderer.invoke("app:get-info"),
   setLanguage: (language) => ipcRenderer.invoke("app:set-language", language),
+  listCustomThemes: () => ipcRenderer.invoke("themes:list-custom"),
+  openThemesFolder: () => ipcRenderer.invoke("themes:open-folder"),
   onMenuAction: (callback) => {
     if (typeof callback !== "function") return () => {};
     const subscription = (_event, action) => callback(action);

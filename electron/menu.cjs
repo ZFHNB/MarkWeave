@@ -10,6 +10,10 @@ const DICTIONARIES = {
     "open-file": "打开文件",
     save: "保存",
     "save-as": "另存为",
+    export: "导出",
+    "export-html": "导出为 HTML...",
+    "export-pdf": "导出为 PDF...",
+    preferences: "偏好设置...",
     quit: "退出",
     edit: "编辑",
     undo: "撤销",
@@ -41,6 +45,10 @@ const DICTIONARIES = {
     "open-file": "Open File...",
     save: "Save",
     "save-as": "Save As...",
+    export: "Export",
+    "export-html": "Export as HTML...",
+    "export-pdf": "Export as PDF...",
+    preferences: "Preferences...",
     quit: "Quit",
     edit: "&Edit",
     undo: "Undo",
@@ -109,6 +117,29 @@ function buildMenuTemplate(sendAction, options = {}) {
           label: dict["save-as"],
           accelerator: "CmdOrCtrl+Shift+S",
           click: () => action("save-as")
+        },
+        {
+          id: "export",
+          label: dict.export,
+          submenu: [
+            {
+              id: "export-html",
+              label: dict["export-html"],
+              click: () => action("export-html")
+            },
+            {
+              id: "export-pdf",
+              label: dict["export-pdf"],
+              click: () => action("export-pdf")
+            }
+          ]
+        },
+        { type: "separator" },
+        {
+          id: "preferences",
+          label: dict.preferences,
+          accelerator: "CmdOrCtrl+,",
+          click: () => action("preferences")
         },
         { type: "separator" },
         {

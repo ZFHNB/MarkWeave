@@ -77,3 +77,19 @@ describe("mermaid block discovery", () => {
     expect(collectMermaidBlocks(doc("```mermaid\n\n```"))).toEqual([]);
   });
 });
+
+describe("katex font embedding", () => {
+  it("inlines woff2 data urls so formulas render offline", async () => {
+    const { buildKatexFontCss } = await import("../src/export/katex-fonts");
+    const css = buildKatexFontCss();
+    expect(css).toContain("KaTeX_Main");
+    expect(css).toContain("data:font/woff2;base64");
+    expect(css.split("@font-face").length - 1).toBeGreaterThanOrEqual(19);
+  });
+
+  it("uses the provided font css in the exported document", async () => {
+    const { buildKatexFontCss } = await import("../src/export/katex-fonts");
+    const html = toStandaloneHtml(doc("x"), { katexFontCss: buildKatexFontCss() });
+    expect(html).toContain("data:font/woff2;base64");
+  });
+});
