@@ -51,6 +51,14 @@ import {
 } from "./workspace/file-ops-desktop";
 import { isValidFileName, joinPath, normalizeMarkdownFileName } from "./workspace/file-ops";
 import {
+  computeSelectionStats,
+  createTabState,
+  openTab,
+  closeTab,
+  reopenClosedTab,
+  type TabState,
+} from "./workspace/tabs";
+import {
   POLL_INTERVAL_MS,
   applyReload,
   createTrackedFile,
@@ -304,6 +312,9 @@ app.innerHTML = `
       </div>
     </header>
 
+    <!-- 文档标签页 -->
+    <div class="ty-tab-strip" id="tab-strip" style="display: none;"></div>
+
     <!-- 滚动容器与 ProseMirror 挂载点 -->
     <div class="ty-editor-scroller">
       <div id="write"></div>
@@ -318,6 +329,7 @@ app.innerHTML = `
         <span id="stat-words">0 词</span>
         <span id="stat-chars">0 字符</span>
         <span id="stat-lines">0 行</span>
+        <span id="stat-selection" class="ty-stat-selection" style="display: none;"></span>
       </div>
       <div class="ty-footer-right">
         <button class="ty-footer-btn" id="btn-focus-mode">专注模式</button>
@@ -357,6 +369,8 @@ const workspacePathEl = document.getElementById("workspace-path") as HTMLElement
 const statWords = document.getElementById("stat-words")!;
 const statChars = document.getElementById("stat-chars")!;
 const statLines = document.getElementById("stat-lines")!;
+const statSelection = document.getElementById("stat-selection") as HTMLElement;
+const tabStrip = document.getElementById("tab-strip") as HTMLElement;
 
 // 保存工作区防抖与即时落盘
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -424,7 +438,10 @@ const editor = new MarkWeaveEditor({
   mountEl,
   initialMarkdown: currentDoc.content,
   isTypewriterEnabled: () => document.body.classList.contains("mode-typewriter"),
-  onSelectionChange: (cursorPos) => syncActiveOutline(cursorPos),
+  onSelectionChange: (cursorPos) => {
+    syncActiveOutline(cursorPos);
+    updateSelectionStats();
+  },
   onDocChange: (md) => {
     // 自动将修改同步回当前文档内存对象并调度持久化
     const doc = documents.find((d) => d.id === activeDocId);
@@ -522,6 +539,99 @@ document.head.appendChild(fileItemStyle);
 let workspaceRoot: string | null = loadLastFolder();
 let workspaceFiles: FlatFile[] = [];
 let activeFilePath: string | null = null;
+
+function updateSelectionStats(): void {
+  const selection = editor.getSelectionText();
+  if (!selection) {
+    statSelection.style.display = "none";
+    return;
+  }
+  const stats = computeSelectionStats(selection, true);
+  statSelection.style.display = "inline";
+  statSelection.textContent = `选区 ${stats.words} 词 · ${stats.chars} 字符`;
+}
+
+/* ================= 文档标签页 ================= */
+let tabState: TabState = createTabState();
+
+function syncTabsFromDocuments(): void {
+  const current = documents.find((d) => d.id === activeDocId);
+  if (!current) return;
+  tabState = openTab(tabState, {
+    docId: current.id,
+    title: current.title,
+    dirty: current.dirty,
+    pinned: false,
+  });
+  renderTabs();
+}
+
+function renderTabs(): void {
+  if (tabState.tabs.length === 0) {
+    tabStrip.style.display = "none";
+    return;
+  }
+  tabStrip.style.display = "flex";
+  tabStrip.innerHTML = "";
+
+  tabState.tabs.forEach((tab) => {
+    const el = document.createElement("div");
+    el.className = `ty-tab${tab.docId === tabState.activeTabId ? " active" : ""}${
+      tab.dirty ? " is-dirty" : ""
+    }`;
+    el.setAttribute("data-doc-id", tab.docId);
+
+    const label = document.createElement("span");
+    label.className = "ty-tab-title";
+    label.textContent = tab.title;
+    label.title = tab.title;
+
+    const close = document.createElement("button");
+    close.className = "ty-tab-close";
+    close.textContent = "×";
+    close.title = "关闭标签";
+    close.addEventListener("mousedown", (e) => e.preventDefault());
+    close.addEventListener("click", (e) => {
+      e.stopPropagation();
+      tabState = closeTab(tabState, tab.docId);
+      renderTabs();
+      if (tabState.activeTabId) {
+        switchDocument(tabState.activeTabId);
+      }
+    });
+
+    el.appendChild(label);
+    el.appendChild(close);
+    el.addEventListener("click", () => switchDocument(tab.docId));
+    el.addEventListener("auxclick", (e) => {
+      if (e.button === 1) {
+        tabState = closeTab(tabState, tab.docId);
+        renderTabs();
+      }
+    });
+    tabStrip.appendChild(el);
+  });
+}
+
+/** 重新打开最近关闭的标签 */
+function reopenLastTab(): void {
+  const next = reopenClosedTab(
+    tabState,
+    documents.map((d) => d.id)
+  );
+  if (next === tabState) return;
+  tabState = next;
+  renderTabs();
+  if (tabState.activeTabId) switchDocument(tabState.activeTabId);
+}
+
+document.addEventListener("keydown", (event) => {
+  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) return;
+  if (event.key.toLowerCase() === "t") {
+    event.preventDefault();
+    reopenLastTab();
+  }
+});
 
 function renderFileList() {
   fileListContainer.innerHTML = "";
@@ -749,6 +859,7 @@ function switchDocument(newDocId: string) {
   syncTitle(nextDoc.title);
 
   editor.setMarkdown(result.contentForNextDoc, { resetHistory: true });
+  syncTabsFromDocuments();
 
   if (isSourceMode) {
     sourceEditor.value = result.contentForNextDoc;
@@ -760,6 +871,7 @@ function switchDocument(newDocId: string) {
 
 // 初始渲染文件列表
 renderFileList();
+syncTabsFromDocuments();
 
 // 渲染实时大纲目录
 let outlineHeadings: HeadingItem[] = [];

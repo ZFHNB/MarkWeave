@@ -219,6 +219,80 @@ html, body {
   color: var(--meta-mark-color);
 }
 
+/* 文档标签页 */
+.ty-tab-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 1px;
+  padding: 0 8px;
+  background: var(--sidebar-bg-color);
+  border-bottom: 1px solid var(--border-color);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  flex: 0 0 auto;
+}
+
+.ty-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 6px 8px 6px 12px;
+  font-size: 12.5px;
+  color: var(--meta-mark-color);
+  background: transparent;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ty-tab:hover {
+  background: var(--item-hover-bg-color);
+}
+
+.ty-tab.active {
+  color: var(--text-color);
+  background: var(--bg-color);
+  border-bottom-color: var(--primary-color);
+}
+
+.ty-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ty-tab.is-dirty .ty-tab-title::after {
+  content: " •";
+  color: var(--primary-color);
+}
+
+.ty-tab-close {
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--meta-mark-color);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+  caret-color: transparent;
+  padding: 0;
+}
+
+.ty-tab-close:hover {
+  background: var(--item-hover-bg-color);
+  color: var(--text-color);
+}
+
+.ty-stat-selection {
+  color: var(--primary-color);
+  margin-left: 6px;
+}
+
 /* 文件树 */
 .ty-file-item {
   display: flex;

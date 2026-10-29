@@ -197,6 +197,13 @@ export class MarkWeaveEditor {
     return this.view.state.selection.from;
   }
 
+  /** 当前选区文本；无选区时返回空串 */
+  public getSelectionText(): string {
+    const { from, to, empty } = this.view.state.selection;
+    if (empty) return "";
+    return this.view.state.doc.textBetween(from, to, "\n");
+  }
+
   public setMarkdown(markdownText: string, options?: { resetHistory?: boolean }) {
     const newDoc = markdownToDoc(markdownText, schema);
     if (options?.resetHistory) {
