@@ -94,8 +94,15 @@ export async function refreshFolderWorkspace(root: string): Promise<FolderWorksp
 
 /** 检测文件是否被外部修改（用于 Typora 的外部修改重载提示） */
 export async function getFileMtime(path: string): Promise<number | null> {
+  const stat = await getFileStat(path);
+  return stat ? stat.mtime : null;
+}
+
+/** 读取文件 mtime 与大小；Web 版返回 null */
+export async function getFileStat(
+  path: string
+): Promise<{ path: string; mtime: number; size: number } | null> {
   const api = getDesktopAPI();
   if (!api?.statFile) return null;
-  const stat = await api.statFile(path);
-  return stat ? stat.mtime : null;
+  return api.statFile(path);
 }

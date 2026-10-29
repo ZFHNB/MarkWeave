@@ -40,6 +40,7 @@ import {
   refreshFolderWorkspace,
   rememberLastFolder,
   rememberRecentFile,
+  getFileStat,
 } from "./workspace/folder-workspace";
 import { QuickOpen } from "./workspace/quick-open";
 import {
@@ -49,6 +50,14 @@ import {
   trashPath,
 } from "./workspace/file-ops-desktop";
 import { isValidFileName, joinPath, normalizeMarkdownFileName } from "./workspace/file-ops";
+import {
+  POLL_INTERVAL_MS,
+  applyReload,
+  createTrackedFile,
+  hasExternalChange,
+  markLocalWrite,
+  type TrackedFile,
+} from "./workspace/external-change";
 import { toHtml } from "./editor/commands/clipboard-formats";
 import { BUILT_IN_THEMES, applyBuiltInTheme, normalizeThemeId } from "./platform/themes";
 
@@ -1024,6 +1033,66 @@ async function openWorkspaceFile(path: string): Promise<void> {
   }
 }
 
+/* ================= 外部修改检测 ================= */
+const trackedFiles = new Map<string, TrackedFile>();
+
+async function refreshTrackedFile(docId: string, path: string): Promise<void> {
+  const stat = await getFileStat(path);
+  if (!stat) {
+    trackedFiles.delete(docId);
+    return;
+  }
+  const existing = trackedFiles.get(docId);
+  trackedFiles.set(
+    docId,
+    existing && existing.path === path
+      ? markLocalWrite(existing, stat)
+      : createTrackedFile(docId, stat)
+  );
+}
+
+async function pollExternalChanges(): Promise<void> {
+  if (isSourceMode) return;
+  const api = getDesktopAPI();
+  if (!api?.statFile) return;
+
+  for (const [docId, tracked] of Array.from(trackedFiles.entries())) {
+    const stat = await getFileStat(tracked.path);
+    if (!stat) continue;
+    if (!hasExternalChange(tracked, stat)) continue;
+
+    const doc = documents.find((d) => d.id === docId);
+    if (!doc) {
+      trackedFiles.delete(docId);
+      continue;
+    }
+
+    const reload = window.confirm(
+      `「${doc.title}」已在外部被修改。是否重新载入磁盘内容？（选择取消则保留当前编辑）`
+    );
+    if (!reload) {
+      trackedFiles.set(docId, markLocalWrite(tracked, stat));
+      continue;
+    }
+
+    const file = await api.readFile?.(tracked.path);
+    if (!file) {
+      trackedFiles.set(docId, markLocalWrite(tracked, stat));
+      continue;
+    }
+
+    documents = applyReload(documents, docId, file.content);
+    if (docId === activeDocId) {
+      editor.setMarkdown(file.content, { resetHistory: true });
+      if (isSourceMode) sourceEditor.value = file.content;
+      syncTitle(doc.title);
+    }
+    renderFileList();
+    flushSave();
+    trackedFiles.set(docId, markLocalWrite(tracked, stat));
+  }
+}
+
 async function handleCreateWorkspaceFile(): Promise<void> {
   if (!workspaceRoot) return;
   const name = window.prompt("新建文档名称", "未命名.md");
@@ -1241,6 +1310,7 @@ async function handleSave() {
       syncTitle(doc ? doc.title : currentDoc.title);
       renderFileList();
       flushSave();
+      void refreshTrackedFile(currentDoc.id, result.path);
     }
   } else {
     downloadMarkdown();
@@ -1275,6 +1345,7 @@ async function handleSaveAs() {
       syncTitle(doc ? doc.title : currentDoc.title);
       renderFileList();
       flushSave();
+      void refreshTrackedFile(currentDoc.id, result.path);
     }
   } else {
     downloadMarkdown();
@@ -1960,6 +2031,13 @@ document.addEventListener("click", (e: MouseEvent) => {
 
 // 初始化加载并应用设置
 applySettings(loadSettings());
+
+// 外部修改轮询（仅桌面版有 statFile 时生效）
+if (getDesktopAPI()?.statFile) {
+  const active = documents.find((d) => d.id === activeDocId);
+  if (active?.filePath) void refreshTrackedFile(active.id, active.filePath);
+  setInterval(() => void pollExternalChanges(), POLL_INTERVAL_MS);
+}
 
 // 专注模式
 btnFocusMode.addEventListener("click", () => {
