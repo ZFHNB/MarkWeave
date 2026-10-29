@@ -42,6 +42,13 @@ import {
   rememberRecentFile,
 } from "./workspace/folder-workspace";
 import { QuickOpen } from "./workspace/quick-open";
+import {
+  createMarkdownFile,
+  renamePath,
+  revealPath,
+  trashPath,
+} from "./workspace/file-ops-desktop";
+import { isValidFileName, joinPath, normalizeMarkdownFileName } from "./workspace/file-ops";
 import { toHtml } from "./editor/commands/clipboard-formats";
 import { BUILT_IN_THEMES, applyBuiltInTheme, normalizeThemeId } from "./platform/themes";
 
@@ -232,6 +239,7 @@ app.innerHTML = `
         <div class="ty-workspace-bar" id="workspace-bar" style="display: none;">
           <span class="ty-workspace-path" id="workspace-path"></span>
           <div class="ty-workspace-actions">
+            <button class="ty-workspace-btn" id="btn-new-workspace-file" title="在文件夹中新建文档">＋</button>
             <button class="ty-workspace-btn" id="btn-refresh-folder" title="刷新文件夹">↻</button>
             <button class="ty-workspace-btn" id="btn-close-folder" title="关闭文件夹">×</button>
           </div>
@@ -332,6 +340,7 @@ const localFileInput = document.getElementById("local-file-input") as HTMLInputE
 const btnOpenFolder = document.getElementById("btn-open-folder") as HTMLButtonElement;
 const btnQuickOpen = document.getElementById("btn-quick-open") as HTMLButtonElement;
 const btnRefreshFolder = document.getElementById("btn-refresh-folder") as HTMLButtonElement;
+const btnNewWorkspaceFile = document.getElementById("btn-new-workspace-file") as HTMLButtonElement;
 const btnCloseFolder = document.getElementById("btn-close-folder") as HTMLButtonElement;
 const workspaceBar = document.getElementById("workspace-bar") as HTMLElement;
 const workspacePathEl = document.getElementById("workspace-path") as HTMLElement;
@@ -531,9 +540,38 @@ function renderFileList() {
       label.className = "ty-file-title";
       label.textContent = file.relativePath;
 
+      const actions = document.createElement("span");
+      actions.className = "ty-file-row-actions";
+
+      const renameBtn = document.createElement("button");
+      renameBtn.className = "ty-file-delete-btn";
+      renameBtn.textContent = "✎";
+      renameBtn.title = "重命名";
+      renameBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void renameWorkspaceFile(file);
+      });
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.className = "ty-file-delete-btn";
+      deleteBtn.textContent = "🗑";
+      deleteBtn.title = "删除（移入回收站）";
+      deleteBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        void deleteWorkspaceFile(file);
+      });
+
+      actions.appendChild(renameBtn);
+      actions.appendChild(deleteBtn);
+
       row.appendChild(icon);
       row.appendChild(label);
+      row.appendChild(actions);
       row.addEventListener("click", () => void openWorkspaceFile(file.path));
+      row.addEventListener("contextmenu", (event) => {
+        event.preventDefault();
+        void revealPath(file.path);
+      });
       fileListContainer.appendChild(row);
     });
 
@@ -986,6 +1024,83 @@ async function openWorkspaceFile(path: string): Promise<void> {
   }
 }
 
+async function handleCreateWorkspaceFile(): Promise<void> {
+  if (!workspaceRoot) return;
+  const name = window.prompt("新建文档名称", "未命名.md");
+  if (name === null) return;
+  const existing = workspaceFiles.map((f) => f.name);
+  const result = await createMarkdownFile(workspaceRoot, name, existing);
+  if (!result.ok || !result.path) {
+    window.alert(`新建失败：${result.error ?? "未知错误"}`);
+    return;
+  }
+  await refreshWorkspace();
+  await openWorkspaceFile(result.path);
+}
+
+async function renameWorkspaceFile(file: FlatFile): Promise<void> {
+  if (!workspaceRoot) return;
+  const next = window.prompt("重命名文件", file.name);
+  if (next === null) return;
+  const trimmed = next.trim();
+  if (!trimmed || trimmed === file.name) return;
+  if (!isValidFileName(trimmed)) {
+    window.alert("文件名包含非法字符");
+    return;
+  }
+
+  const target = normalizeMarkdownFileName(trimmed);
+  if (workspaceFiles.some((f) => f.path !== file.path && f.name === target)) {
+    window.alert("同名文件已存在");
+    return;
+  }
+
+  const toPath = joinPath(workspaceRoot, target);
+  const result = await renamePath(file.path, toPath);
+  if (!result.ok) {
+    window.alert(`重命名失败：${result.error ?? "未知错误"}`);
+    return;
+  }
+
+  const doc = documents.find((d) => d.filePath === file.path);
+  if (doc) {
+    documents = markDocumentSaved(documents, doc.id, toPath);
+    doc.title = target;
+    if (doc.id === activeDocId) syncTitle(target);
+  }
+  if (activeFilePath === file.path) activeFilePath = toPath;
+
+  await refreshWorkspace();
+  renderFileList();
+  flushSave();
+}
+
+async function deleteWorkspaceFile(file: FlatFile): Promise<void> {
+  const confirmed = window.confirm(`确定要将「${file.relativePath}」移入回收站吗？`);
+  if (!confirmed) return;
+
+  const result = await trashPath(file.path);
+  if (!result.ok) {
+    window.alert(`删除失败：${result.error ?? "未知错误"}`);
+    return;
+  }
+
+  const doc = documents.find((d) => d.filePath === file.path);
+  if (doc) {
+    documents = documents.filter((d) => d.id !== doc.id);
+    if (activeDocId === doc.id && documents.length > 0) {
+      activeDocId = documents[0].id;
+      syncTitle(documents[0].title);
+      editor.setMarkdown(documents[0].content, { resetHistory: true });
+    }
+  }
+  if (activeFilePath === file.path) activeFilePath = null;
+
+  await refreshWorkspace();
+  renderFileList();
+  flushSave();
+}
+
 async function refreshWorkspace(): Promise<void> {
   if (!workspaceRoot) return;
   const workspace = await refreshFolderWorkspace(workspaceRoot);
@@ -1001,6 +1116,7 @@ btnQuickOpen.addEventListener("click", () => {
   else panel.open();
 });
 btnRefreshFolder.addEventListener("click", () => void refreshWorkspace());
+btnNewWorkspaceFile.addEventListener("click", () => void handleCreateWorkspaceFile());
 btnCloseFolder.addEventListener("click", () => {
   workspaceRoot = null;
   workspaceFiles = [];

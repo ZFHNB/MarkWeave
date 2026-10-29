@@ -37,6 +37,10 @@ export interface MarkWeaveDesktopAPI {
   readFile?: (filePath: string) => Promise<OpenFileResult | null>;
   writeFile?: (payload: { path: string; content: string }) => Promise<{ path: string } | null>;
   statFile?: (filePath: string) => Promise<{ path: string; mtime: number; size: number } | null>;
+  createFile?: (payload: { path: string; content: string }) => Promise<{ path?: string; error?: string } | null>;
+  createFolder?: (folderPath: string) => Promise<{ path?: string; error?: string } | null>;
+  renamePath?: (payload: { from: string; to: string }) => Promise<{ path?: string; error?: string } | null>;
+  trashPath?: (filePath: string) => Promise<{ path?: string; error?: string } | null>;
   revealInFolder?: (filePath: string) => Promise<boolean>;
   openFolder?: () => Promise<WorkspaceFolder | null>;
   listFolder?: (rootDir: string) => Promise<WorkspaceFolder | null>;

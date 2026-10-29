@@ -329,6 +329,56 @@ ipcMain.handle("file:write", async (_event, payload) => {
   }
 });
 
+ipcMain.handle("file:create", async (_event, payload) => {
+  if (!payload || typeof payload.path !== "string") return null;
+  try {
+    await fs.promises.mkdir(path.dirname(payload.path), { recursive: true });
+    await fs.promises.writeFile(payload.path, payload.content ?? "", {
+      encoding: "utf8",
+      flag: "wx",
+    });
+    return { path: payload.path };
+  } catch (err) {
+    console.error("Failed to create file:", err);
+    return { error: err?.code || "unknown" };
+  }
+});
+
+ipcMain.handle("file:create-folder", async (_event, targetPath) => {
+  if (!targetPath || typeof targetPath !== "string") return null;
+  try {
+    await fs.promises.mkdir(targetPath, { recursive: false });
+    return { path: targetPath };
+  } catch (err) {
+    console.error("Failed to create folder:", err);
+    return { error: err?.code || "unknown" };
+  }
+});
+
+ipcMain.handle("file:rename", async (_event, payload) => {
+  if (!payload || typeof payload.from !== "string" || typeof payload.to !== "string") {
+    return null;
+  }
+  try {
+    await fs.promises.rename(payload.from, payload.to);
+    return { path: payload.to };
+  } catch (err) {
+    console.error("Failed to rename:", err);
+    return { error: err?.code || "unknown" };
+  }
+});
+
+ipcMain.handle("file:trash", async (_event, targetPath) => {
+  if (!targetPath || typeof targetPath !== "string") return null;
+  try {
+    await shell.trashItem(targetPath);
+    return { path: targetPath };
+  } catch (err) {
+    console.error("Failed to trash item:", err);
+    return { error: err?.code || "unknown" };
+  }
+});
+
 ipcMain.handle("file:stat", async (_event, targetPath) => {
   if (!targetPath || typeof targetPath !== "string") return null;
   try {

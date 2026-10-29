@@ -925,6 +925,37 @@ body.theme-night .md-context-submenu {
   background: var(--item-hover-bg-color);
 }
 
+.ty-file-row-actions {
+  display: none;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.ty-file-item:hover .ty-file-row-actions {
+  display: inline-flex;
+}
+
+.ty-file-row-actions .ty-file-delete-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color: var(--meta-mark-color);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  user-select: none;
+  caret-color: transparent;
+}
+
+.ty-file-row-actions .ty-file-delete-btn:hover {
+  background: var(--item-hover-bg-color);
+  color: var(--primary-color);
+}
+
 .ty-file-group-title {
   padding: 6px 10px 3px;
   font-size: 10.5px;
