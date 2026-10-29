@@ -22,6 +22,8 @@ import { SearchPanel } from "./search/search-panel";
 import { ContextMenu } from "./context-menu";
 import { createTypewriterPlugin } from "./plugins/typewriter";
 import { createImagePlugin } from "./plugins/images";
+import { createAutoPairPlugin } from "./plugins/auto-pair";
+import { createCodeIndentPlugin } from "./plugins/code-indent";
 import { createImageResolvePlugin } from "./plugins/image-resolve";
 import { ImageView } from "./nodeviews/image";
 import {
@@ -56,6 +58,9 @@ export interface EditorOptions {
   onOutlineChange?: (headings: HeadingItem[]) => void;
   onWordCountChange?: (stats: { words: number; chars: number; lines: number }) => void;
   isTypewriterEnabled?: () => boolean;
+  isAutoPairEnabled?: () => boolean;
+  isSmartPunctuationEnabled?: () => boolean;
+  getIndentSize?: () => number;
   onSelectionChange?: (cursorPos: number) => void;
   getDocumentPath?: () => string | null;
   isDesktop?: () => boolean;
@@ -127,6 +132,13 @@ export class MarkWeaveEditor {
         createFootnoteHoverPlugin(),
         createSearchPlugin(),
         createImagePlugin(),
+        createAutoPairPlugin({
+          isEnabled: () => this.options.isAutoPairEnabled?.() ?? true,
+          smartPunctuation: () => this.options.isSmartPunctuationEnabled?.() ?? true,
+        }),
+        createCodeIndentPlugin({
+          getIndentSize: () => this.options.getIndentSize?.() ?? 2,
+        }),
         createImageResolvePlugin({
           getDocumentPath: () => this.options.getDocumentPath?.() ?? null,
           getRootUrl: () => null,

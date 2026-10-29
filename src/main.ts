@@ -49,7 +49,14 @@ import {
   revealPath,
   trashPath,
 } from "./workspace/file-ops-desktop";
-import { isValidFileName, joinPath, normalizeMarkdownFileName } from "./workspace/file-ops";
+import {
+  convertLineEnding,
+  ensureFinalNewline,
+  isValidFileName,
+  joinPath,
+  normalizeMarkdownFileName,
+  type LineEnding,
+} from "./workspace/file-ops";
 import {
   computeSelectionStats,
   createTabState,
@@ -66,7 +73,8 @@ import {
   markLocalWrite,
   type TrackedFile,
 } from "./workspace/external-change";
-import { toHtml } from "./editor/commands/clipboard-formats";
+import { toStandaloneHtml } from "./export/html-export";
+import { renderMermaidForExport } from "./export/mermaid-render";
 import { BUILT_IN_THEMES, applyBuiltInTheme, normalizeThemeId } from "./platform/themes";
 import {
   DEFAULT_PDF_OPTIONS,
@@ -445,6 +453,9 @@ const editor = new MarkWeaveEditor({
   mountEl,
   initialMarkdown: currentDoc.content,
   isTypewriterEnabled: () => document.body.classList.contains("mode-typewriter"),
+  isAutoPairEnabled: () => loadSettings().autoPair,
+  isSmartPunctuationEnabled: () => loadSettings().smartPunctuation,
+  getIndentSize: () => loadSettings().indentSize,
   onSelectionChange: (cursorPos) => {
     syncActiveOutline(cursorPos);
     updateSelectionStats();
@@ -1396,6 +1407,13 @@ function handleOpenInsertTable() {
 
 btnInsertTable.addEventListener("click", handleOpenInsertTable);
 
+/** 按偏好处理行尾符与末尾换行后，再进行磁盘写入 */
+function prepareContentForDisk(content: string): string {
+  const settings = loadSettings();
+  const withEnding = convertLineEnding(content, settings.lineEnding);
+  return ensureFinalNewline(withEnding, settings.finalNewline);
+}
+
 async function handleSave() {
   if (isSourceMode) {
     const doc = documents.find((d) => d.id === activeDocId);
@@ -1411,7 +1429,8 @@ async function handleSave() {
   if (api) {
     const currentDoc = documents.find((d) => d.id === activeDocId);
     if (!currentDoc) return;
-    const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+    const rawContent = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+    const content = prepareContentForDisk(rawContent);
     let result: { path: string } | null = null;
     if (currentDoc.filePath) {
       result = await api.saveFile({ path: currentDoc.filePath, content });
@@ -1451,7 +1470,9 @@ async function handleSaveAs() {
   if (api) {
     const currentDoc = documents.find((d) => d.id === activeDocId);
     if (!currentDoc) return;
-    const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+    const content = prepareContentForDisk(
+      isSourceMode ? sourceEditor.value : editor.getMarkdown()
+    );
     const suggestedName = suggestedSaveName(documents, activeDocId);
     const result = await api.saveFile({ content, suggestedName });
     if (result && result.path) {
@@ -1667,6 +1688,11 @@ export interface MarkWeaveSettings {
   language: Language;
   editorTheme: string;
   pdf: PdfOptions;
+  autoPair: boolean;
+  smartPunctuation: boolean;
+  indentSize: number;
+  lineEnding: LineEnding;
+  finalNewline: boolean;
 }
 
 function loadPdfOptions(): PdfOptions {
@@ -1694,6 +1720,11 @@ function loadSettings(): MarkWeaveSettings {
     language: normalizeLanguage(localStorage.getItem("markweave_language")),
     editorTheme: normalizeThemeId(localStorage.getItem("markweave_editor_theme")),
     pdf: normalizePdfOptions(loadPdfOptions()),
+    autoPair: localStorage.getItem("markweave_auto_pair") !== "false",
+    smartPunctuation: localStorage.getItem("markweave_smart_punctuation") !== "false",
+    indentSize: parseInt(localStorage.getItem("markweave_indent_size") || "2", 10) || 2,
+    lineEnding: (localStorage.getItem("markweave_line_ending") as LineEnding) || "lf",
+    finalNewline: localStorage.getItem("markweave_final_newline") !== "false",
   };
 }
 
@@ -1711,6 +1742,11 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_language", settings.language);
   localStorage.setItem("markweave_editor_theme", settings.editorTheme);
   localStorage.setItem("markweave_pdf_options", JSON.stringify(settings.pdf));
+  localStorage.setItem("markweave_auto_pair", String(settings.autoPair));
+  localStorage.setItem("markweave_smart_punctuation", String(settings.smartPunctuation));
+  localStorage.setItem("markweave_indent_size", String(settings.indentSize));
+  localStorage.setItem("markweave_line_ending", settings.lineEnding);
+  localStorage.setItem("markweave_final_newline", String(settings.finalNewline));
 
   applySettings(settings);
 }
@@ -1929,6 +1965,62 @@ function openSettingsModal() {
               <option value="lxgw" ${currentSettings.fontFamily === "lxgw" ? "selected" : ""}>霞鹜文楷风格 / 楷体 (Chinese KaiTi)</option>
             </select>
           </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自动配对括号与引号</span>
+              <span class="ty-settings-desc">输入 ( [ { 与引号时自动补全右半部分</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-autopair" ${currentSettings.autoPair ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">智能标点</span>
+              <span class="ty-settings-desc">输入时把 -- 与 --- 转换为短横线/长横线</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-smartpunct" ${currentSettings.smartPunctuation ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">列表与引用缩进</span>
+              <span class="ty-settings-desc">保存时使用的缩进空格数</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-indent">
+              <option value="2" ${currentSettings.indentSize === 2 ? "selected" : ""}>2 空格（默认）</option>
+              <option value="3" ${currentSettings.indentSize === 3 ? "selected" : ""}>3 空格</option>
+              <option value="4" ${currentSettings.indentSize === 4 ? "selected" : ""}>4 空格</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">行尾符</span>
+              <span class="ty-settings-desc">保存文件时使用的换行风格</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-line-ending">
+              <option value="lf" ${currentSettings.lineEnding === "lf" ? "selected" : ""}>LF (Unix)</option>
+              <option value="crlf" ${currentSettings.lineEnding === "crlf" ? "selected" : ""}>CRLF (Windows)</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">保存时保留末尾换行</span>
+              <span class="ty-settings-desc">保证文件以换行结尾（推荐）</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-finalnewline" ${currentSettings.finalNewline ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         <!-- Tab 3: 外观主题 -->
@@ -2109,6 +2201,11 @@ function openSettingsModal() {
     const selectPaper = ((modalOverlay.querySelector("#setting-select-paper") as HTMLSelectElement)?.value as PaperSize) || "A4";
     const pdfLandscape = (modalOverlay.querySelector("#setting-pdf-landscape") as HTMLInputElement)?.checked ?? false;
     const pdfBackground = (modalOverlay.querySelector("#setting-pdf-background") as HTMLInputElement)?.checked ?? true;
+    const autoPair = (modalOverlay.querySelector("#setting-toggle-autopair") as HTMLInputElement)?.checked ?? true;
+    const smartPunctuation = (modalOverlay.querySelector("#setting-toggle-smartpunct") as HTMLInputElement)?.checked ?? true;
+    const indentSize = parseInt((modalOverlay.querySelector("#setting-select-indent") as HTMLSelectElement)?.value || "2", 10) || 2;
+    const lineEnding = ((modalOverlay.querySelector("#setting-select-line-ending") as HTMLSelectElement)?.value as LineEnding) || "lf";
+    const finalNewline = (modalOverlay.querySelector("#setting-toggle-finalnewline") as HTMLInputElement)?.checked ?? true;
 
     const newSettings: MarkWeaveSettings = {
       mermaidDefaultMode: selectedMode,
@@ -2124,6 +2221,11 @@ function openSettingsModal() {
       language: selectLanguage,
       editorTheme: selectEditorTheme,
       pdf: normalizePdfOptions({ ...loadPdfOptions(), paper: selectPaper, landscape: pdfLandscape, printBackground: pdfBackground }),
+      autoPair,
+      smartPunctuation,
+      indentSize,
+      lineEnding,
+      finalNewline,
     };
 
     saveSettings(newSettings);
@@ -2233,17 +2335,44 @@ btnTypewriterMode.addEventListener("click", () => {
 
 // 导出为独立 HTML
 btnExportHtml.addEventListener("click", () => {
+  void exportHtml();
+});
+
+/**
+ * 导出独立 HTML：内联排版主题、KaTeX 样式与预渲染的 Mermaid 图，
+ * 生成的文件可离线直接打开。
+ */
+async function exportHtml(): Promise<void> {
   const currentDoc = documents.find((d) => d.id === activeDocId);
-  const title = currentDoc ? currentDoc.title : "Typemark 导出文档";
-  const htmlContent = toHtml(editor.getDocument(), true);
+  const rawTitle = currentDoc ? currentDoc.title : "Typemark 导出文档";
+  const title = rawTitle.replace(/\.md$/, "");
+  const settings = loadSettings();
+  const doc = editor.getDocument();
+
+  let mermaidSvgs: string[] = [];
+  try {
+    mermaidSvgs = await renderMermaidForExport(doc, {
+      dark: document.body.classList.contains("theme-night"),
+    });
+  } catch (err) {
+    console.warn("Mermaid 预渲染失败，导出将保留源代码块", err);
+  }
+
+  const htmlContent = toStandaloneHtml(doc, {
+    title,
+    themeId: settings.editorTheme,
+    dark: document.body.classList.contains("theme-night"),
+    mermaidSvgs,
+  });
+
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${title.replace(/\.md$/, "")}.html`;
+  a.download = `${title}.html`;
   a.click();
   URL.revokeObjectURL(url);
-});
+}
 
 // 导出 PDF：桌面版走 printToPDF（支持纸张/边距），Web 版回退到系统打印
 btnExportPdf.addEventListener("click", () => {
