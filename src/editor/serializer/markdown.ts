@@ -69,6 +69,15 @@ export function markdownToDoc(markdownText: string, schema: Schema): PMNode {
     el.setAttribute("data-formula", decodeURIComponent(raw));
   });
 
+  // 2.25 代码块尾部换行：markdown-it 会为最后一行补一个换行符，
+  //      若原样进入 AST，序列化时会再补一次，产生多余空行。
+  tempDiv.querySelectorAll("pre > code").forEach((code) => {
+    const last = code.lastChild;
+    if (last && last.nodeType === Node.TEXT_NODE) {
+      last.nodeValue = (last.nodeValue || "").replace(/\n$/, "");
+    }
+  });
+
   // 2.3 GFM 任务列表（在 DOM 上转换 `- [ ]` 列表项）
   applyTaskListToDom(tempDiv);
 
@@ -111,7 +120,9 @@ export function docToMarkdown(doc: PMNode): string {
 
       case "code_block": {
         const lang = node.attrs.params || "";
-        return `\`\`\`${lang}\n${node.textContent}\n\`\`\``;
+        // 去掉编辑器可能残留的单个尾部换行，避免往返后多出空行
+        const body = node.textContent.replace(/\n$/, "");
+        return `\`\`\`${lang}\n${body}\n\`\`\``;
       }
 
       case "math_block": {

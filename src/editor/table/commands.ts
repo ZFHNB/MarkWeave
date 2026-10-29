@@ -9,8 +9,24 @@ import {
 } from "prosemirror-tables";
 import { schema } from "../schema";
 
+/**
+ * 这些块自身无法承载普通文本光标（表格、代码块、公式块等），
+ * 若它们位于文档末尾，光标就无法再往下走。Typora 的做法是始终在其后保留一个空段落。
+ */
+const TERMINAL_BLOCK_TYPES = new Set([
+  "table",
+  "code_block",
+  "math_block",
+  "toc_block",
+  "yaml_frontmatter",
+  "footnote_definition",
+  "link_reference_definition",
+  "horizontal_rule",
+]);
+
 export function ensureTrailingParagraphNode(doc: PMNode): PMNode {
-  if (doc.lastChild && doc.lastChild.type.name === "table") {
+  const last = doc.lastChild;
+  if (last && TERMINAL_BLOCK_TYPES.has(last.type.name)) {
     const paragraph = schema.nodes.paragraph.createAndFill() ?? schema.nodes.paragraph.create();
     return doc.copy(doc.content.append(Fragment.from(paragraph)));
   }
@@ -19,18 +35,82 @@ export function ensureTrailingParagraphNode(doc: PMNode): PMNode {
 
 export function createTrailingParagraphPlugin(): Plugin {
   return new Plugin({
-    appendTransaction(transactions, _oldState, newState) {
+    appendTransaction(transactions, oldState, newState) {
       const docChanged = transactions.some((tr) => tr.docChanged);
       if (!docChanged) return null;
 
+      const oldLast = oldState.doc.lastChild;
       const { doc } = newState;
-      if (doc.lastChild && doc.lastChild.type.name === "table") {
-        const paragraph = schema.nodes.paragraph.createAndFill() ?? schema.nodes.paragraph.create();
-        return newState.tr.insert(doc.content.size, paragraph);
+      const last = doc.lastChild;
+      if (!last || !TERMINAL_BLOCK_TYPES.has(last.type.name)) return null;
+
+      // 用户主动删除了末尾的空段落时不强行加回，避免与退格操作打架；
+      // 只有当末尾块刚刚出现（或光标位于该块内）时才补一个空段落。
+      if (oldLast && oldLast.type === last.type) {
+        const { $head } = newState.selection;
+        const inTerminalBlock = $head.depth > 0 && $head.node(1).type === last.type;
+        if (!inTerminalBlock) return null;
       }
-      return null;
+
+      const paragraph = schema.nodes.paragraph.createAndFill() ?? schema.nodes.paragraph.create();
+      const tr = newState.tr.insert(doc.content.size, paragraph);
+      if (newState.selection.empty) {
+        tr.setSelection(TextSelection.near(tr.doc.resolve(newState.selection.head), 1));
+      }
+      return tr;
     },
   });
+}
+
+/**
+ * 从代码块/公式块等“终端块”向下退出到下一个可编辑段落。
+ * - 若光标不在块末尾，交给默认行为（返回 false）
+ * - 若已在文档最后一个块，先追加一个空段落再进入
+ */
+export function exitTerminalBlock(direction: "down" | "right" = "down"): Command {
+  return (state, dispatch) => {
+    const { $head, empty } = state.selection;
+    if (!empty) return false;
+
+    // 找到光标所在的终端块
+    let depth = -1;
+    for (let d = $head.depth; d > 0; d--) {
+      const node = $head.node(d);
+      if (TERMINAL_BLOCK_TYPES.has(node.type.name)) {
+        depth = d;
+        break;
+      }
+    }
+    if (depth === -1) return false;
+
+    const block = $head.node(depth);
+    const atEnd = $head.parentOffset >= $head.parent.content.size;
+
+    if (direction === "down" && !atEnd) return false;
+    if (direction === "right" && !atEnd) return false;
+    // 代码块内有多行时，只有最后一行才算末尾
+    if (block.type.name === "code_block") {
+      const text = block.textContent;
+      const offset = $head.parentOffset;
+      if (text.indexOf("\n", offset) !== -1) return false;
+    }
+
+    if (!dispatch) return true;
+
+    const blockEnd = $head.after(depth);
+    const docSize = state.doc.content.size;
+    const tr = state.tr;
+
+    if (blockEnd >= docSize) {
+      const paragraph = schema.nodes.paragraph.createAndFill() ?? schema.nodes.paragraph.create();
+      tr.insert(docSize, paragraph);
+    }
+
+    const target = Math.min(tr.doc.content.size, blockEnd + 1);
+    tr.setSelection(TextSelection.near(tr.doc.resolve(target), 1));
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
 }
 
 export function createTableNode(rows: number, cols: number): PMNode {

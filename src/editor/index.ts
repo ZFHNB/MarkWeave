@@ -44,6 +44,7 @@ import {
   goToNextCellOrAppendRow,
   ensureTrailingParagraphNode,
   createTrailingParagraphPlugin,
+  exitTerminalBlock,
 } from "./table/commands";
 import { createTableToolbarPlugin } from "./table/table-toolbar";
 import { createTablePastePlugin } from "./plugins/paste-table";
@@ -81,7 +82,13 @@ export class MarkWeaveEditor {
       "Mod-6": setBlockType(schema.nodes.heading, { level: 6 }),
       "Mod-0": setBlockType(schema.nodes.paragraph),
       "Mod-q": wrapIn(schema.nodes.blockquote),
-      Enter: splitListItem(schema.nodes.list_item),
+      Enter: (state, dispatch) => {
+        // 在代码块 / 公式块最后一行回车：退出到下一个段落
+        if (exitTerminalBlock("down")(state, dispatch)) return true;
+        return splitListItem(schema.nodes.list_item)(state, dispatch);
+      },
+      ArrowDown: exitTerminalBlock("down"),
+      ArrowRight: exitTerminalBlock("right"),
       "Mod-[": liftListItem(schema.nodes.list_item),
       "Mod-]": sinkListItem(schema.nodes.list_item),
       Tab: goToNextCellOrAppendRow(1),
