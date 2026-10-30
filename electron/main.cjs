@@ -565,9 +565,15 @@ ipcMain.handle("dialog:choose-directory", async () => {
 
 ipcMain.on("app:close-confirmed", () => {
   allowClose = true;
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.close();
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    app.quit();
+    return;
   }
+
+  // 第一次 close 已被 preventDefault 取消，Electron 会把窗口标记为
+  // "正在关闭"，再调 close() 不会生效。这里显式销毁并退出应用。
+  mainWindow.destroy();
+  app.quit();
 });
 
 ipcMain.handle("app:set-language", async (_event, lang) => {

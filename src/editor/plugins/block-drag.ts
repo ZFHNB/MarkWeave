@@ -9,24 +9,20 @@ export const blockDragKey = new PluginKey("blockDrag");
  *
  * 交互：
  * - 鼠标悬浮在任意顶层块上时，块左侧淡入一个六点手柄
- * - 按住手柄拖动，光标变为抓取手型，被拖动的块半透明跟随
- * - 拖动时在候选插入位置画一条主色横线，提示"松手后会插到这里"
+ * - 指针可平滑地移向左侧手柄（中间有一段"感应区"），不会因离开文字区域而消失
+ * - 按住手柄拖动，光标变为抓取手型，插入位置显示主色横线
  * - 松手后把整块移动到该位置
  *
- * 实现要点：
- * - 只对顶层块（doc 的直接子节点）生效，避免列表/表格内部出现嵌套手柄
- * - 插入位置以"顶层块边界"为粒度，绝不切开块内部
- * - 拖动全程不改文档，仅在松手时发一次事务，可直接撤销
+ * 坐标策略：手柄与指示线都用 `position: fixed` + `getBoundingClientRect()`，
+ * 直接使用视口坐标。这样滚动、缩放、侧栏开合都不会造成偏移。
  */
 
 interface DragState {
   fromPos: number;
-  toPos: number;
   size: number;
   startY: number;
   active: boolean;
   dropPos: number | null;
-  dom: HTMLElement;
 }
 
 /** 顶层块在给定文档位置上的边界信息 */
@@ -36,10 +32,16 @@ interface BlockAt {
   end: number;
 }
 
+/** 手柄与块左边缘的距离 */
+const HANDLE_OFFSET = 28;
+/** 指针在块左侧多宽的范围内仍视为"指向该块"（用于过渡到手柄） */
+const HANDLE_REACH = 70;
+/** 拖动判定阈值（像素） */
+const DRAG_THRESHOLD = 3;
+
 function blockAt(doc: PMNode, pos: number): BlockAt | null {
   if (doc.childCount === 0) return null;
   const $pos = doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
-  // 顶层位置直接对应某个子节点边界，$pos.index(0) 仍可用
   const index = Math.min($pos.index(0), doc.childCount - 1);
   let offset = 0;
   for (let i = 0; i < index; i++) offset += doc.child(i).nodeSize;
@@ -48,8 +50,8 @@ function blockAt(doc: PMNode, pos: number): BlockAt | null {
 }
 
 /**
- * 根据鼠标纵坐标计算"插入到哪个间隙"。
- * 返回值是该间隙对应的文档位置（即目标块之前的位置）。
+ * 根据视口纵坐标算出"插入到哪个间隙"。
+ * 返回该间隙对应的文档位置（目标块之前的位置）。
  */
 export function computeDropPos(view: EditorView, clientY: number): number | null {
   const doc = view.state.doc;
@@ -63,11 +65,9 @@ export function computeDropPos(view: EditorView, clientY: number): number | null
 
     if (clientY < rect.top) return; // 还没到这个块
     if (clientY <= rect.top + rect.height / 2) {
-      // 落在块的上半部分：插到该块之前
       if (result === null) result = offset;
       return;
     }
-    // 落在下半部分或更下方：插到该块之后
     result = offset + node.nodeSize;
   });
 
@@ -78,47 +78,58 @@ function clearIndicators(): void {
   document.querySelectorAll(".md-drop-indicator").forEach((el) => el.remove());
 }
 
-/**
- * 在目标间隙绘制插入指示线。
- * 用相邻块的真实几何边界定位，而不是 coordsAtPos
- * （空段落/块边界处 coordsAtPos 返回的矩形可能退化为 0 宽）。
- */
+/** 在目标间隙绘制插入指示线（视口坐标，position: fixed） */
 function showIndicator(view: EditorView, pos: number): void {
   clearIndicators();
 
   const doc = view.state.doc;
   const clamped = Math.max(0, Math.min(pos, doc.content.size));
 
-  // 找出该间隙前后相邻的顶层块
-  let beforeRect: DOMRect | null = null;
-  let afterRect: DOMRect | null = null;
+  // 滚动容器的可见区域：指示线必须落在其中，否则会画到视口外
+  const scroller = view.dom.closest(".ty-editor-scroller") as HTMLElement | null;
+  const scrollerRect = scroller?.getBoundingClientRect();
+  const viewportTop = scrollerRect ? scrollerRect.top : 0;
+  const viewportBottom = scrollerRect ? scrollerRect.bottom : window.innerHeight;
+
+  const beforeBottoms: number[] = [];
+  const afterTops: number[] = [];
+  let left = Number.POSITIVE_INFINITY;
+  let right = 0;
 
   doc.forEach((node, offset) => {
     const dom = view.nodeDOM(offset);
     if (!(dom instanceof HTMLElement)) return;
     const rect = dom.getBoundingClientRect();
-    if (offset + node.nodeSize <= clamped) beforeRect = rect;
-    else if (offset >= clamped && !afterRect) afterRect = rect;
+    if (rect.height === 0 && rect.width === 0) return;
+
+    left = Math.min(left, rect.left);
+    right = Math.max(right, rect.right);
+
+    if (offset + node.nodeSize <= clamped) {
+      beforeBottoms.push(rect.bottom);
+    } else if (offset >= clamped && afterTops.length === 0) {
+      afterTops.push(rect.top);
+    }
   });
 
-  const top = beforeRect
-    ? (beforeRect as DOMRect).bottom
-    : afterRect
-    ? (afterRect as DOMRect).top
+  const candidate = beforeBottoms.length
+    ? beforeBottoms[beforeBottoms.length - 1]
+    : afterTops.length
+    ? afterTops[0]
     : null;
-  if (top === null) return;
+  if (candidate === null) return;
+  if (!Number.isFinite(left) || right <= left) return;
 
-  const scroller = view.dom.closest(".ty-editor-scroller") as HTMLElement | null;
-  const host = view.dom.parentElement ?? view.dom;
-  const hostRect = host.getBoundingClientRect();
-  const scrollTop = scroller?.scrollTop ?? 0;
+  // 夹到滚动容器的可见范围内，保证指示线始终能看见
+  const margin = 4;
+  const top = Math.max(viewportTop + margin, Math.min(candidate, viewportBottom - margin));
 
   const line = document.createElement("div");
   line.className = "md-drop-indicator";
-  line.style.top = `${top - hostRect.top + scrollTop}px`;
-  line.style.left = "0";
-  line.style.width = "100%";
-  host.appendChild(line);
+  line.style.top = `${Math.round(top)}px`;
+  line.style.left = `${Math.round(left)}px`;
+  line.style.width = `${Math.round(right - left)}px`;
+  document.body.appendChild(line);
 }
 
 export function createBlockDragPlugin(): Plugin {
@@ -129,71 +140,113 @@ export function createBlockDragPlugin(): Plugin {
       handle.className = "md-block-handle";
       handle.setAttribute("contenteditable", "false");
       handle.setAttribute("aria-hidden", "true");
-      handle.innerHTML = "<span></span><span></span><span></span><span></span><span></span><span></span>";
-
-      const host = editorView.dom.parentElement ?? editorView.dom;
-      host.appendChild(handle);
+      handle.innerHTML =
+        "<span></span><span></span><span></span><span></span><span></span><span></span>";
+      document.body.appendChild(handle);
 
       let hovered: BlockAt | null = null;
+      let hoveredRect: DOMRect | null = null;
       let drag: DragState | null = null;
 
       const hideHandle = () => {
         handle.classList.remove("is-visible");
         hovered = null;
+        hoveredRect = null;
         delete handle.dataset.blockPos;
       };
 
-      const positionHandle = (block: BlockAt) => {
-        const dom = editorView.nodeDOM(block.pos);
-        if (!(dom instanceof HTMLElement)) return;
-        const rect = dom.getBoundingClientRect();
-        const hostRect = host.getBoundingClientRect();
-        handle.style.top = `${rect.top - hostRect.top}px`;
-        handle.style.left = `${rect.left - hostRect.left - 26}px`;
-        handle.style.height = `${Math.min(rect.height, 28)}px`;
+      /** 手柄纵向对齐块的中心，横向贴在块左缘外侧 */
+      const positionHandle = (block: BlockAt, rect: DOMRect) => {
+        hovered = block;
+        hoveredRect = rect;
+
+        // 手柄高度跟随块高（限定在合理区间），并严格以块中心为准
+        const handleHeight = Math.min(Math.max(rect.height, 22), 30);
+        const centerY = rect.top + rect.height / 2;
+        const top = centerY - handleHeight / 2;
+
+        handle.style.top = `${Math.round(top)}px`;
+        handle.style.left = `${Math.round(rect.left - HANDLE_OFFSET)}px`;
+        handle.style.height = `${Math.round(handleHeight)}px`;
         handle.classList.add("is-visible");
-        // mousedown 时鼠标已离开编辑区，改用数据集读取当前块
         handle.dataset.blockPos = String(block.pos);
       };
 
+      /** 读取块当前的视口矩形（总是实时查询，避免用缓存） */
+      const rectOf = (pos: number): DOMRect | null => {
+        const dom = editorView.nodeDOM(pos);
+        if (!(dom instanceof HTMLElement)) return null;
+        const rect = dom.getBoundingClientRect();
+        if (rect.height === 0 && rect.width === 0) return null;
+        return rect;
+      };
+
+      /** 判断指针是否位于手柄（含少量外扩）矩形内 */
+      const isOverHandle = (event: MouseEvent): boolean => {
+        if (!handle.classList.contains("is-visible")) return false;
+        const r = handle.getBoundingClientRect();
+        const pad = 6;
+        return (
+          event.clientX >= r.left - pad &&
+          event.clientX <= r.right + pad &&
+          event.clientY >= r.top - pad &&
+          event.clientY <= r.bottom + pad
+        );
+      };
+
+      /** 指针位于某个块的左侧感应带内时，返回该块 */
+      const blockFromReach = (clientX: number, clientY: number): { block: BlockAt; rect: DOMRect } | null => {
+        const doc = editorView.state.doc;
+        let found: { block: BlockAt; rect: DOMRect } | null = null;
+
+        doc.forEach((node, offset) => {
+          if (found) return;
+          const rect = rectOf(offset);
+          if (!rect) return;
+
+          const verticallyInside = clientY >= rect.top - 4 && clientY <= rect.bottom + 4;
+          const horizontallyNear = clientX >= rect.left - HANDLE_REACH && clientX <= rect.left;
+          if (verticallyInside && horizontallyNear) {
+            found = {
+              block: { pos: offset, node, end: offset + node.nodeSize },
+              rect,
+            };
+          }
+        });
+
+        return found;
+      };
+
       const onMouseMove = (event: MouseEvent) => {
-        const target = event.target;
-        // 指针位于手柄上时保持手柄可见，允许用户按下拖动
-        if (!drag && target instanceof Node && handle.contains(target)) {
-          if (hovered) positionHandle(hovered);
+        if (drag) return;
+
+        // 1) 指针在手柄附近：保持当前块的手柄可见
+        if (isOverHandle(event) && hovered && hoveredRect) {
+          positionHandle(hovered, hoveredRect);
           return;
         }
 
-        if (drag) {
-          // 拖动中：更新候选插入位置
-          const pos = computeDropPos(editorView, event.clientY);
-          if (pos !== null) {
-            // 排除落在被拖动块内部或紧邻自身的位置
-            const selfStart = drag.fromPos;
-            const selfEnd = drag.fromPos + drag.size;
-            if (pos !== selfStart && pos !== selfEnd) {
-              drag.dropPos = pos;
-              showIndicator(editorView, pos);
-            } else {
-              drag.dropPos = null;
-              clearIndicators();
+        // 2) 指针在正文上：定位到该块
+        const hit = editorView.posAtCoords({ left: event.clientX, top: event.clientY });
+        if (hit) {
+          const block = blockAt(editorView.state.doc, hit.pos);
+          if (block) {
+            const rect = rectOf(block.pos);
+            if (rect) {
+              positionHandle(block, rect);
+              return;
             }
           }
+        }
+
+        // 3) 指针在块左侧空白处：用一个较宽的感应带维持手柄
+        const near = blockFromReach(event.clientX, event.clientY);
+        if (near) {
+          positionHandle(near.block, near.rect);
           return;
         }
 
-        const pos = editorView.posAtCoords({ left: event.clientX, top: event.clientY });
-        if (!pos) {
-          hideHandle();
-          return;
-        }
-        const block = blockAt(editorView.state.doc, pos.pos);
-        if (!block) {
-          hideHandle();
-          return;
-        }
-        hovered = block;
-        positionHandle(block);
+        hideHandle();
       };
 
       const onHandleMouseDown = (event: MouseEvent) => {
@@ -205,12 +258,10 @@ export function createBlockDragPlugin(): Plugin {
 
         drag = {
           fromPos: block.pos,
-          toPos: block.end,
           size: block.node.nodeSize,
           startY: event.clientY,
           active: false,
           dropPos: null,
-          dom: handle,
         };
 
         document.body.classList.add("md-block-dragging");
@@ -219,17 +270,12 @@ export function createBlockDragPlugin(): Plugin {
 
       const onDocumentMouseMove = (event: MouseEvent) => {
         if (!drag) return;
-        // 拖动阈值，避免误触
-        if (!drag.active && Math.abs(event.clientY - drag.startY) < 4) return;
+        if (!drag.active && Math.abs(event.clientY - drag.startY) < DRAG_THRESHOLD) return;
         drag.active = true;
 
         const pos = computeDropPos(editorView, event.clientY);
-        if (pos === null) {
-          drag.dropPos = null;
-          clearIndicators();
-          return;
-        }
-        if (pos === drag.fromPos || pos === drag.fromPos + drag.size) {
+        const selfEnd = drag.fromPos + drag.size;
+        if (pos === null || pos === drag.fromPos || pos === selfEnd) {
           drag.dropPos = null;
           clearIndicators();
           return;
@@ -254,12 +300,9 @@ export function createBlockDragPlugin(): Plugin {
         const moving = doc.nodeAt(state.fromPos);
         if (!moving) return;
 
-        // 目标在被拖动块之后时，删除后位置会前移一个块高
         const target = Math.max(0, Math.min(state.dropPos, doc.content.size));
         const insertAt =
-          target > state.fromPos
-            ? Math.max(state.fromPos, target - state.size)
-            : target;
+          target > state.fromPos ? Math.max(state.fromPos, target - state.size) : target;
 
         const tr = editorState.tr;
         tr.delete(state.fromPos, state.fromPos + state.size);
@@ -268,28 +311,44 @@ export function createBlockDragPlugin(): Plugin {
       };
 
       const onDocumentMouseUp = () => finishDrag(true);
+      /** 按当前滚动位置重新对齐手柄（滚动结束后调用最可靠） */
+      const realignHandle = () => {
+        if (!hovered) return;
+        const rect = rectOf(hovered.pos);
+        if (rect) positionHandle(hovered, rect);
+        else hideHandle();
+      };
 
       const onScroll = () => {
+        if (drag) {
+          if (drag.dropPos !== null) showIndicator(editorView, drag.dropPos);
+          return;
+        }
+        // 滚动过程中布局可能尚未稳定，等一帧后再对齐
+        requestAnimationFrame(realignHandle);
+      };
+
+      const onWindowBlur = () => {
         if (!drag) hideHandle();
       };
 
-      // 用文档级监听，指针移到手柄上时不会被编辑器 mouseleave 打断
       document.addEventListener("mousemove", onMouseMove);
-      handle.addEventListener("mousedown", onHandleMouseDown);
-      handle.addEventListener("mouseenter", () => {
-        if (hovered) positionHandle(hovered);
-      });
       document.addEventListener("mousemove", onDocumentMouseMove);
       document.addEventListener("mouseup", onDocumentMouseUp);
+      handle.addEventListener("mousedown", onHandleMouseDown);
       window.addEventListener("scroll", onScroll, true);
+      window.addEventListener("resize", onScroll);
+      window.addEventListener("blur", onWindowBlur);
 
       return {
         destroy() {
           document.removeEventListener("mousemove", onMouseMove);
-          handle.removeEventListener("mousedown", onHandleMouseDown);
           document.removeEventListener("mousemove", onDocumentMouseMove);
           document.removeEventListener("mouseup", onDocumentMouseUp);
+          handle.removeEventListener("mousedown", onHandleMouseDown);
           window.removeEventListener("scroll", onScroll, true);
+          window.removeEventListener("resize", onScroll);
+          window.removeEventListener("blur", onWindowBlur);
           clearIndicators();
           handle.remove();
         },

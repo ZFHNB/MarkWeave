@@ -1322,6 +1322,13 @@ body.theme-night .md-fences-lang-popover {
   outline: none;
 }
 
+/* 代码块内部的元素必须显式继承，否则浏览器会用自带的 monospace 覆盖 */
+.md-fences-content code,
+.md-fences-content code *,
+.md-fences-content .hljs {
+  font-family: inherit;
+}
+
 /* ================= 语法高亮 Token 配色 (Syntax Highlighting) ================= */
 .md-fences-content .hljs-keyword {
   color: #a71d5d;
@@ -2873,9 +2880,10 @@ body.theme-night .md-table-toolbar-group {
 
 
 /* ================= 块拖动排序 (Block Drag Handle) ================= */
+/* 手柄与指示线都使用视口坐标（position: fixed），滚动与缩放时不会偏移 */
 .md-block-handle {
-  position: absolute;
-  z-index: 60;
+  position: fixed;
+  z-index: 900;
   display: grid;
   grid-template-columns: repeat(2, 3px);
   grid-template-rows: repeat(3, 3px);
@@ -2883,18 +2891,27 @@ body.theme-night .md-table-toolbar-group {
   align-content: center;
   justify-content: center;
   width: 16px;
-  height: 28px;
+  height: 26px;
   padding: 0;
   border-radius: 4px;
   opacity: 0;
   pointer-events: none;
   cursor: grab;
   transition: opacity 0.12s ease, background 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .md-block-handle.is-visible {
   opacity: 1;
   pointer-events: auto;
+}
+
+/* 手柄自身的感应区：比可见区域略大，移过去不会中断 */
+.md-block-handle::after {
+  content: "";
+  position: absolute;
+  inset: -8px -10px;
 }
 
 .md-block-handle:hover {
@@ -2924,13 +2941,13 @@ body.md-block-dragging .ProseMirror * {
 
 /* 插入位置指示线：提示松手后插入到哪两个块之间 */
 .md-drop-indicator {
-  position: absolute;
+  position: fixed;
   height: 2px;
   border-radius: 1px;
   background: var(--primary-color);
   box-shadow: 0 0 0 1px rgba(66, 133, 244, 0.25);
   pointer-events: none;
-  z-index: 55;
+  z-index: 899;
 }
 
 .md-drop-indicator::before,
@@ -2946,51 +2963,3 @@ body.md-block-dragging .ProseMirror * {
 
 .md-drop-indicator::before { left: -4px; }
 .md-drop-indicator::after { right: -4px; }
-
-
-/* ================= 保存状态反馈 (Save Status) ================= */
-.ty-save-status {
-  display: inline-flex;
-  align-items: center;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  color: var(--meta-mark-color);
-  background: var(--item-hover-bg-color);
-  opacity: 0;
-  transform: translateY(-1px);
-  transition: opacity 0.15s ease, transform 0.15s ease;
-  pointer-events: none;
-  white-space: nowrap;
-}
-
-.ty-save-status.is-visible {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.ty-save-status[data-tone="saving"] {
-  color: var(--primary-color);
-  background: rgba(66, 133, 244, 0.12);
-}
-
-.ty-save-status[data-tone="saved"] {
-  color: #2f855a;
-  background: rgba(47, 133, 90, 0.12);
-}
-
-.ty-save-status[data-tone="error"] {
-  color: #c53030;
-  background: rgba(197, 48, 48, 0.12);
-}
-
-.theme-night .ty-save-status[data-tone="saved"] {
-  color: #68d391;
-  background: rgba(104, 211, 145, 0.14);
-}
-
-.theme-night .ty-save-status[data-tone="error"] {
-  color: #fc8181;
-  background: rgba(252, 129, 129, 0.14);
-}

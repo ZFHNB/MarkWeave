@@ -15,10 +15,21 @@ export function convertLineEnding(text: string, target: LineEnding): string {
   return target === "crlf" ? normalized.replace(/\n/g, "\r\n") : normalized;
 }
 
+/**
+ * 确保文本以换行结束。
+ *
+ * 注意补的换行符要和文本现有风格一致：CRLF 文本若补一个单独的 \n，
+ * 后续再做一次 CRLF 转换就会多出一个空行。
+ */
 export function ensureFinalNewline(text: string, enabled: boolean): string {
   if (!enabled) return text;
   if (!text) return text;
-  return /(?:\r\n|\n)$/.test(text) ? text : `${text}\n`;
+  if (text.endsWith("\r\n")) return text;
+  if (text.endsWith("\n")) {
+    // 已是 LF 结尾；若整体是 CRLF 风格，则改成 CRLF 结尾
+    return text.includes("\r\n") ? `${text.slice(0, -1)}\r\n` : text;
+  }
+  return text.includes("\r\n") ? `${text}\r\n` : `${text}\n`;
 }
 
 /** 校验文件名：不能为空、不能含路径分隔符与 Windows 保留字符 */

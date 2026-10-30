@@ -88,11 +88,13 @@ import {
 } from "./workspace/autosave";
 import { enhanceSettingsDescriptions } from "./ui/settings-tooltip";
 import {
-  BODY_FONTS,
-  MONO_FONTS,
-  normalizeFontId,
-  resolveBodyFont,
-  resolveMonoFont,
+  BODY_CJK_FONTS,
+  BODY_LATIN_FONTS,
+  MONO_CJK_FONTS,
+  MONO_LATIN_FONTS,
+  normalizeFontIdForGroup,
+  genericFor,
+  resolveFontFamilies,
 } from "./platform/fonts";
 import {
   applyBuiltInTheme,
@@ -1738,13 +1740,16 @@ export interface MarkWeaveSettings {
   exportScale: number;
   fontSize: string;
   lineHeight: string;
-  fontFamily: string;
-  /** 自定义正文字体名（fontFamily === "custom" 时生效） */
-  customFontFamily: string;
-  /** 代码块等宽字体 */
-  monoFontFamily: string;
-  /** 自定义等宽字体名（monoFontFamily === "custom" 时生效） */
-  customMonoFontFamily: string;
+  /** 正文字体：西文 / 中文 分开 */
+  bodyLatinFont: string;
+  bodyCJKFont: string;
+  customBodyLatin: string;
+  customBodyCJK: string;
+  /** 代码字体：西文 / 中文 分开 */
+  monoLatinFont: string;
+  monoCJKFont: string;
+  customMonoLatin: string;
+  customMonoCJK: string;
   exportPolicy: "ask" | "markweave" | "compatible";
   theme: ThemeSetting;
   language: Language;
@@ -1787,10 +1792,14 @@ function loadSettings(): MarkWeaveSettings {
     exportScale: parseInt(localStorage.getItem("markweave_export_scale") || "2", 10) || 2,
     fontSize: localStorage.getItem("markweave_font_size") || "16px",
     lineHeight: localStorage.getItem("markweave_line_height") || "1.65",
-    fontFamily: normalizeFontId(BODY_FONTS, localStorage.getItem("markweave_font_family")),
-    customFontFamily: localStorage.getItem("markweave_custom_font_family") || "",
-    monoFontFamily: normalizeFontId(MONO_FONTS, localStorage.getItem("markweave_mono_font_family")),
-    customMonoFontFamily: localStorage.getItem("markweave_custom_mono_font_family") || "",
+    bodyLatinFont: normalizeFontIdForGroup("bodyLatin", localStorage.getItem("markweave_body_latin_font")),
+    bodyCJKFont: normalizeFontIdForGroup("bodyCJK", localStorage.getItem("markweave_body_cjk_font")),
+    customBodyLatin: localStorage.getItem("markweave_custom_body_latin") || "",
+    customBodyCJK: localStorage.getItem("markweave_custom_body_cjk") || "",
+    monoLatinFont: normalizeFontIdForGroup("monoLatin", localStorage.getItem("markweave_mono_latin_font")),
+    monoCJKFont: normalizeFontIdForGroup("monoCJK", localStorage.getItem("markweave_mono_cjk_font")),
+    customMonoLatin: localStorage.getItem("markweave_custom_mono_latin") || "",
+    customMonoCJK: localStorage.getItem("markweave_custom_mono_cjk") || "",
     exportPolicy: (localStorage.getItem("markweave_default_export_policy") as any) || "ask",
     theme: (localStorage.getItem("markweave_theme") as any) || "light",
     language: normalizeLanguage(localStorage.getItem("markweave_language")),
@@ -1813,10 +1822,14 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_export_scale", String(settings.exportScale));
   localStorage.setItem("markweave_font_size", settings.fontSize);
   localStorage.setItem("markweave_line_height", settings.lineHeight);
-  localStorage.setItem("markweave_font_family", settings.fontFamily);
-  localStorage.setItem("markweave_custom_font_family", settings.customFontFamily);
-  localStorage.setItem("markweave_mono_font_family", settings.monoFontFamily);
-  localStorage.setItem("markweave_custom_mono_font_family", settings.customMonoFontFamily);
+  localStorage.setItem("markweave_body_latin_font", settings.bodyLatinFont);
+  localStorage.setItem("markweave_body_cjk_font", settings.bodyCJKFont);
+  localStorage.setItem("markweave_custom_body_latin", settings.customBodyLatin);
+  localStorage.setItem("markweave_custom_body_cjk", settings.customBodyCJK);
+  localStorage.setItem("markweave_mono_latin_font", settings.monoLatinFont);
+  localStorage.setItem("markweave_mono_cjk_font", settings.monoCJKFont);
+  localStorage.setItem("markweave_custom_mono_latin", settings.customMonoLatin);
+  localStorage.setItem("markweave_custom_mono_cjk", settings.customMonoCJK);
   localStorage.setItem("markweave_default_export_policy", settings.exportPolicy);
   localStorage.setItem("markweave_theme", settings.theme);
   localStorage.setItem("markweave_language", settings.language);
@@ -1841,14 +1854,21 @@ function applySettings(settings: MarkWeaveSettings) {
   root.style.setProperty("--editor-font-size", settings.fontSize);
   root.style.setProperty("--editor-line-height", settings.lineHeight);
 
-  root.style.setProperty(
-    "--editor-font-family",
-    resolveBodyFont(settings.fontFamily, settings.customFontFamily)
-  );
-  root.style.setProperty(
-    "--monospace",
-    resolveMonoFont(settings.monoFontFamily, settings.customMonoFontFamily)
-  );
+  // 正文：西文候选在前、中文候选在后，最后只留一个 generic。
+  // 浏览器按字形逐字回退，所以英文命中前面的西文字体，中文落到后面的中文字体。
+  const bodyStack = [
+    ...resolveFontFamilies("bodyLatin", settings.bodyLatinFont, settings.customBodyLatin),
+    ...resolveFontFamilies("bodyCJK", settings.bodyCJKFont, settings.customBodyCJK),
+    genericFor("bodyLatin"),
+  ];
+  root.style.setProperty("--editor-font-family", bodyStack.join(", "));
+
+  const monoStack = [
+    ...resolveFontFamilies("monoLatin", settings.monoLatinFont, settings.customMonoLatin),
+    ...resolveFontFamilies("monoCJK", settings.monoCJKFont, settings.customMonoCJK),
+    genericFor("monoLatin"),
+  ];
+  root.style.setProperty("--monospace", monoStack.join(", "));
 
   // 主题应用
   const wasNight = document.body.classList.contains("theme-night");
@@ -2034,58 +2054,116 @@ function openSettingsModal() {
             </select>
           </div>
 
+          <div class="ty-settings-section-title">正文字体</div>
+
           <div class="ty-settings-row">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">正文字体族</span>
-              <span class="ty-settings-desc">渲染文章所用的主要字体方案</span>
+              <span class="ty-settings-label">正文 · 西文</span>
+              <span class="ty-settings-desc">英文字母与数字使用的字体</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-font-family">
-              ${BODY_FONTS.map(
+            <select class="ty-settings-select" id="setting-select-body-latin">
+              ${BODY_LATIN_FONTS.map(
                 (font) =>
                   `<option value="${font.id}" ${
-                    currentSettings.fontFamily === font.id ? "selected" : ""
+                    currentSettings.bodyLatinFont === font.id ? "selected" : ""
                   }>${font.label}</option>`
               ).join("")}
             </select>
           </div>
 
-          <div class="ty-settings-row" id="row-custom-font" style="display: ${
-            currentSettings.fontFamily === "custom" ? "flex" : "none"
+          <div class="ty-settings-row" id="row-custom-body-latin" style="display: ${
+            currentSettings.bodyLatinFont === "custom" ? "flex" : "none"
           };">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">自定义正文字体</span>
-              <span class="ty-settings-desc">填写本机已安装的字体名，可用逗号分隔多个回退</span>
+              <span class="ty-settings-label">自定义西文字体</span>
+              <span class="ty-settings-desc">填写本机已安装的字体名，可用逗号分隔多个候选</span>
             </div>
-            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-custom-font"
-              placeholder="例如：Source Han Serif SC, serif"
-              value="${currentSettings.customFontFamily.replace(/"/g, "&quot;")}" />
+            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-body-latin"
+              placeholder="例如：EB Garamond, Garamond"
+              value="${currentSettings.customBodyLatin.replace(/"/g, "&quot;")}" />
           </div>
 
           <div class="ty-settings-row">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">代码块字体</span>
-              <span class="ty-settings-desc">含主流编程字体；未安装时自动回退到系统等宽字体</span>
+              <span class="ty-settings-label">正文 · 中文</span>
+              <span class="ty-settings-desc">中文字符使用的字体，与西文独立</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-mono-font">
-              ${MONO_FONTS.map(
+            <select class="ty-settings-select" id="setting-select-body-cjk">
+              ${BODY_CJK_FONTS.map(
                 (font) =>
                   `<option value="${font.id}" ${
-                    currentSettings.monoFontFamily === font.id ? "selected" : ""
+                    currentSettings.bodyCJKFont === font.id ? "selected" : ""
                   }>${font.label}</option>`
               ).join("")}
             </select>
           </div>
 
-          <div class="ty-settings-row" id="row-custom-mono" style="display: ${
-            currentSettings.monoFontFamily === "custom" ? "flex" : "none"
+          <div class="ty-settings-row" id="row-custom-body-cjk" style="display: ${
+            currentSettings.bodyCJKFont === "custom" ? "flex" : "none"
           };">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">自定义代码字体</span>
+              <span class="ty-settings-label">自定义中文字体</span>
+              <span class="ty-settings-desc">填写本机已安装的中文字体名</span>
+            </div>
+            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-body-cjk"
+              placeholder="例如：Source Han Sans SC"
+              value="${currentSettings.customBodyCJK.replace(/"/g, "&quot;")}" />
+          </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">代码字体</div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">代码 · 西文</span>
+              <span class="ty-settings-desc">代码块中英文代码使用的等宽字体</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-mono-latin">
+              ${MONO_LATIN_FONTS.map(
+                (font) =>
+                  `<option value="${font.id}" ${
+                    currentSettings.monoLatinFont === font.id ? "selected" : ""
+                  }>${font.label}</option>`
+              ).join("")}
+            </select>
+          </div>
+
+          <div class="ty-settings-row" id="row-custom-mono-latin" style="display: ${
+            currentSettings.monoLatinFont === "custom" ? "flex" : "none"
+          };">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自定义代码西文字体</span>
               <span class="ty-settings-desc">填写本机已安装的等宽字体名</span>
             </div>
-            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-custom-mono"
-              placeholder="例如：Sarasa Mono SC, monospace"
-              value="${currentSettings.customMonoFontFamily.replace(/"/g, "&quot;")}" />
+            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-mono-latin"
+              placeholder="例如：JetBrains Mono"
+              value="${currentSettings.customMonoLatin.replace(/"/g, "&quot;")}" />
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">代码 · 中文</span>
+              <span class="ty-settings-desc">代码块中注释等中文字符使用的字体</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-mono-cjk">
+              ${MONO_CJK_FONTS.map(
+                (font) =>
+                  `<option value="${font.id}" ${
+                    currentSettings.monoCJKFont === font.id ? "selected" : ""
+                  }>${font.label}</option>`
+              ).join("")}
+            </select>
+          </div>
+
+          <div class="ty-settings-row" id="row-custom-mono-cjk" style="display: ${
+            currentSettings.monoCJKFont === "custom" ? "flex" : "none"
+          };">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自定义代码中文字体</span>
+              <span class="ty-settings-desc">填写本机已安装的中文等宽字体名</span>
+            </div>
+            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-mono-cjk"
+              placeholder="例如：Sarasa Mono SC"
+              value="${currentSettings.customMonoCJK.replace(/"/g, "&quot;")}" />
           </div>
 
           <div class="ty-settings-row">
@@ -2385,8 +2463,10 @@ function openSettingsModal() {
       if (row) row.style.display = select.value === "custom" ? "flex" : "none";
     });
   };
-  bindCustomFontToggle("#setting-select-font-family", "#row-custom-font");
-  bindCustomFontToggle("#setting-select-mono-font", "#row-custom-mono");
+  bindCustomFontToggle("#setting-select-body-latin", "#row-custom-body-latin");
+  bindCustomFontToggle("#setting-select-body-cjk", "#row-custom-body-cjk");
+  bindCustomFontToggle("#setting-select-mono-latin", "#row-custom-mono-latin");
+  bindCustomFontToggle("#setting-select-mono-cjk", "#row-custom-mono-cjk");
 
   // 选择历史副本目录
   modalOverlay.querySelector("#setting-btn-history-dir")?.addEventListener("click", async () => {
@@ -2428,16 +2508,16 @@ function openSettingsModal() {
     const selectScale = parseInt((modalOverlay.querySelector("#setting-select-scale") as HTMLSelectElement)?.value || "2", 10) || 2;
     const selectFontSize = (modalOverlay.querySelector("#setting-select-font-size") as HTMLSelectElement)?.value || "16px";
     const selectLineHeight = (modalOverlay.querySelector("#setting-select-line-height") as HTMLSelectElement)?.value || "1.65";
-    const selectFontFamily = normalizeFontId(
-      BODY_FONTS,
-      (modalOverlay.querySelector("#setting-select-font-family") as HTMLSelectElement)?.value
-    );
-    const customFontFamily = (modalOverlay.querySelector("#setting-input-custom-font") as HTMLInputElement)?.value || "";
-    const selectMonoFont = normalizeFontId(
-      MONO_FONTS,
-      (modalOverlay.querySelector("#setting-select-mono-font") as HTMLSelectElement)?.value
-    );
-    const customMonoFontFamily = (modalOverlay.querySelector("#setting-input-custom-mono") as HTMLInputElement)?.value || "";
+    const readVal = (selector: string) =>
+      (modalOverlay.querySelector(selector) as HTMLInputElement | HTMLSelectElement | null)?.value || "";
+    const bodyLatinFont = normalizeFontIdForGroup("bodyLatin", readVal("#setting-select-body-latin"));
+    const bodyCJKFont = normalizeFontIdForGroup("bodyCJK", readVal("#setting-select-body-cjk"));
+    const customBodyLatin = readVal("#setting-input-body-latin");
+    const customBodyCJK = readVal("#setting-input-body-cjk");
+    const monoLatinFont = normalizeFontIdForGroup("monoLatin", readVal("#setting-select-mono-latin"));
+    const monoCJKFont = normalizeFontIdForGroup("monoCJK", readVal("#setting-select-mono-cjk"));
+    const customMonoLatin = readVal("#setting-input-mono-latin");
+    const customMonoCJK = readVal("#setting-input-mono-cjk");
     const selectExportPolicy = ((modalOverlay.querySelector("#setting-select-export-policy") as HTMLSelectElement)?.value as any) || "ask";
     const selectTheme = ((modalOverlay.querySelector("#setting-select-theme") as HTMLSelectElement)?.value as any) || "light";
     const selectLanguage = normalizeLanguage((modalOverlay.querySelector("#setting-select-language") as HTMLSelectElement)?.value);
@@ -2465,10 +2545,14 @@ function openSettingsModal() {
       exportScale: selectScale,
       fontSize: selectFontSize,
       lineHeight: selectLineHeight,
-      fontFamily: selectFontFamily,
-      customFontFamily,
-      monoFontFamily: selectMonoFont,
-      customMonoFontFamily,
+      bodyLatinFont,
+      bodyCJKFont,
+      customBodyLatin,
+      customBodyCJK,
+      monoLatinFont,
+      monoCJKFont,
+      customMonoLatin,
+      customMonoCJK,
       exportPolicy: selectExportPolicy,
       theme: selectTheme,
       language: selectLanguage,
@@ -2739,9 +2823,21 @@ function scheduleAutoSaveOnChange() {
  * 先弹窗询问 → 需要保存则立刻写盘 → 再关闭。
  * 同步返回无法 await，因此在 Electron 里通过主进程的 close 事件协调。
  */
-/** 未命名文档（还没有落盘路径）同样属于未保存内容 */
+/**
+ * 是否存在"真正需要保存"的内容。
+ *
+ * 只判断 dirty 是不够的：新建的空白文档也会被标记为 dirty，
+ * 但用户什么都没写时不该弹窗打扰。
+ * 因此额外要求内容非空白。
+ */
 function hasUnsavedContent(): boolean {
-  return documents.some((doc) => doc.dirty);
+  return documents.some((doc) => {
+    if (!doc.dirty) return false;
+    // 已落盘的文件，只要 dirty 就说明与磁盘不一致
+    if (doc.filePath) return true;
+    // 未命名文档：有实际文字才算未保存
+    return doc.content.trim().length > 0;
+  });
 }
 
 interface CloseChoice {
@@ -2786,33 +2882,52 @@ function promptUnsavedChanges(): Promise<CloseChoice> {
 /** 关闭流程：必要时提醒、保存，再真正关闭 */
 async function handleCloseRequest(): Promise<void> {
   const api = getDesktopAPI();
+  let shouldClose = true;
 
-  if (hasUnsavedContent() && shouldPromptOnClose(true, autoSaveSettings.mode)) {
-    const choice = await promptUnsavedChanges();
-    if (choice.action === "cancel") return;
-    if (choice.action === "save") {
-      // 逐个保存所有脏文档，确保关窗不丢内容
-      for (const doc of documents.filter((d) => d.dirty)) {
-        if (doc.filePath) {
-          showSaveStatus("保存中…", "saving");
-          await writeHistoryCopy(doc.id);
-          await writeDocumentToDisk(doc.id);
-        } else {
-          // 未命名文档交给另存为对话框
-          activeDocId = doc.id;
-          await handleSaveAs();
+  try {
+    if (hasUnsavedContent() && shouldPromptOnClose(true, autoSaveSettings.mode)) {
+      const choice = await promptUnsavedChanges();
+      if (choice.action === "cancel") {
+        shouldClose = false;
+      } else if (choice.action === "save") {
+        // 逐个保存所有脏文档，确保关窗不丢内容
+        for (const doc of documents.filter((d) => d.dirty && (d.filePath || d.content.trim()))) {
+          if (doc.filePath) {
+            showSaveStatus("保存中…", "saving");
+            await writeHistoryCopy(doc.id);
+            await writeDocumentToDisk(doc.id);
+          } else {
+            // 未命名文档交给另存为对话框；用户取消则中止退出
+            activeDocId = doc.id;
+            await handleSaveAs();
+            const after = documents.find((d) => d.id === doc.id);
+            if (after?.dirty) {
+              shouldClose = false;
+              break;
+            }
+          }
         }
       }
     }
+  } catch (err) {
+    console.error("关闭前保存失败", err);
+    shouldClose = false;
+  } finally {
+    // 无论成功与否都要给主进程一个明确答复，
+    // 否则用户再点关闭按钮将没有任何反应。
+    if (shouldClose) {
+      api?.confirmClose?.();
+    }
   }
-
-  api?.confirmClose?.();
 }
 
 // 桌面版：主进程拦截关窗后交给渲染层处理
 getDesktopAPI()?.onCloseRequested?.(() => {
   void handleCloseRequest();
 });
+
+// 自动化测试钩子：在页面内触发一次关闭流程（不真正退出进程）
+(window as any).__MARKWEAVE_TEST_CLOSE__ = () => handleCloseRequest();
 
 // Web 版：使用浏览器原生离校提示
 window.addEventListener("beforeunload", (event) => {
