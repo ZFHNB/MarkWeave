@@ -518,6 +518,16 @@ const editor = new MarkWeaveEditor({
 (window as any).__TYPEMARK_EDITOR__ = editor;
 (window as any).__MARKWEAVE_EDITOR__ = editor;
 
+// 自动化测试钩子：把当前文档绑定到指定路径（等价于"打开过该文件"）
+(window as any).__MARKWEAVE_TEST_BIND__ = (filePath: string) => {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc) return false;
+  doc.filePath = filePath;
+  doc.dirty = false;
+  void refreshTrackedFile(doc.id, filePath);
+  return true;
+};
+
 // 监听源码编辑器输入，实时同步修改并防抖保存
 sourceEditor.addEventListener("input", () => {
   const doc = documents.find((d) => d.id === activeDocId);
@@ -1513,7 +1523,10 @@ async function handleSaveAs() {
       isSourceMode ? sourceEditor.value : editor.getMarkdown()
     );
     const suggestedName = suggestedSaveName(documents, activeDocId);
+
+    showSaveStatus("保存中…", "saving");
     const result = await api.saveFile({ content, suggestedName });
+
     if (result && result.path) {
       documents = markDocumentSaved(documents, currentDoc.id, result.path);
       const fileName = extractFileName(result.path);
@@ -1524,7 +1537,11 @@ async function handleSaveAs() {
       syncTitle(doc ? doc.title : currentDoc.title);
       renderFileList();
       flushSave();
-      void refreshTrackedFile(currentDoc.id, result.path);
+      await refreshTrackedFile(currentDoc.id, result.path);
+      showSaveStatus("已保存", "saved");
+    } else {
+      // 用户取消了文件对话框
+      showSaveStatus("已取消", "idle");
     }
   } else {
     downloadMarkdown();
@@ -2515,9 +2532,14 @@ async function runManualSave(): Promise<void> {
   }
 
   showSaveStatus("保存中…", "saving");
-  await writeHistoryCopy(doc.id);
-  const ok = await writeDocumentToDisk(doc.id);
-  showSaveStatus(ok ? "已保存" : "保存失败", ok ? "saved" : "error");
+  try {
+    await writeHistoryCopy(doc.id);
+    const ok = await writeDocumentToDisk(doc.id);
+    showSaveStatus(ok ? "已保存" : "保存失败", ok ? "saved" : "error");
+  } catch (err) {
+    console.error("保存失败", err);
+    showSaveStatus("保存失败", "error");
+  }
 }
 
 // 主题切换 (明亮 / 暗色)
@@ -2632,13 +2654,23 @@ async function writeDocumentToDisk(docId: string): Promise<boolean> {
   const doc = documents.find((d) => d.id === docId);
   if (!api || !doc?.filePath) return false;
 
-  const content = prepareContentForDisk(doc.content);
+  // 以编辑器当前内容为准，避免 doc.content 因程序化 setMarkdown 而滞后
+  const isActive = doc.id === activeDocId;
+  const raw = isActive
+    ? isSourceMode
+      ? sourceEditor.value
+      : editor.getMarkdown()
+    : doc.content;
+  const content = prepareContentForDisk(raw);
   const result = await api.saveFile({ path: doc.filePath, content });
   if (!result?.path) return false;
 
   documents = markDocumentSaved(documents, doc.id, result.path);
   const updated = documents.find((d) => d.id === doc.id);
-  if (updated) syncTitle(updated.title);
+  if (updated) {
+    updated.content = raw;
+    syncTitle(updated.title);
+  }
   renderFileList();
   flushSave();
 
