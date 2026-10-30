@@ -1461,15 +1461,19 @@ async function handleSave() {
   if (api) {
     const currentDoc = documents.find((d) => d.id === activeDocId);
     if (!currentDoc) return;
+
+    // 已有路径时统一走带历史副本与状态反馈的保存流程
+    if (currentDoc.filePath) {
+      await runManualSave();
+      return;
+    }
+
+    showSaveStatus("保存中…", "saving");
     const rawContent = isSourceMode ? sourceEditor.value : editor.getMarkdown();
     const content = prepareContentForDisk(rawContent);
-    let result: { path: string } | null = null;
-    if (currentDoc.filePath) {
-      result = await api.saveFile({ path: currentDoc.filePath, content });
-    } else {
-      const suggestedName = suggestedSaveName(documents, activeDocId);
-      result = await api.saveFile({ content, suggestedName });
-    }
+    const suggestedName = suggestedSaveName(documents, activeDocId);
+    const result = await api.saveFile({ content, suggestedName });
+
     if (result && result.path) {
       documents = markDocumentSaved(documents, currentDoc.id, result.path);
       const fileName = extractFileName(result.path);
@@ -1480,7 +1484,10 @@ async function handleSave() {
       syncTitle(doc ? doc.title : currentDoc.title);
       renderFileList();
       flushSave();
-      void refreshTrackedFile(currentDoc.id, result.path);
+      await refreshTrackedFile(currentDoc.id, result.path);
+      showSaveStatus("已保存", "saved");
+    } else {
+      showSaveStatus("已取消", "idle");
     }
   } else {
     downloadMarkdown();
@@ -1892,7 +1899,7 @@ function openSettingsModal() {
 
       <div class="ty-settings-nav" id="settings-tabs-nav">
         <button class="ty-settings-tab-btn active" data-tab="charts">图表设置</button>
-        <button class="ty-settings-tab-btn" data-tab="editor">编辑排版</button>
+        <button class="ty-settings-tab-btn" data-tab="editor">字体排版</button>
         <button class="ty-settings-tab-btn" data-tab="appearance">外观主题</button>
         <button class="ty-settings-tab-btn" data-tab="storage">存储与导出</button>
         <button class="ty-settings-tab-btn" data-tab="about">关于系统</button>
@@ -2634,6 +2641,10 @@ async function writeDocumentToDisk(docId: string): Promise<boolean> {
   if (updated) syncTitle(updated.title);
   renderFileList();
   flushSave();
+
+  // 关键：立即把本次写入登记为"本地写入"，
+  // 否则下一轮轮询会把自己的保存当成外部修改并弹窗。
+  await refreshTrackedFile(doc.id, result.path);
   return true;
 }
 
