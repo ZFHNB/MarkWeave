@@ -85,3 +85,7 @@ powershell.cmd
 # 10. 删除回收站与本地 Claude 配置 (Deletion Trash & Local Agent Config)
 .deleted/
 .claude/
+
+# 打包中间产物
+build-out/
+release-new/
