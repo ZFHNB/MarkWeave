@@ -1997,6 +1997,80 @@ body.theme-night .md-inline-node-input {
   font-size: 20px;
 }
 
+/* 设置对话框头部：标题左、关闭按钮右 */
+.ty-settings-header {
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 0;
+}
+
+.ty-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-color);
+  letter-spacing: 0.01em;
+}
+
+.ty-modal-title svg {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+/* 关闭按钮：圆形描边图标按钮，替代浏览器原生样式 */
+.ty-modal-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-color);
+  opacity: 0.55;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease, border-color 0.15s ease;
+}
+
+.ty-modal-close:hover {
+  opacity: 1;
+  background: var(--item-hover-bg-color);
+}
+
+.ty-modal-close:focus-visible {
+  outline: none;
+  opacity: 1;
+  border-color: var(--primary-color);
+}
+
+/* 推荐标记：胶囊标签 */
+.ty-badge-recommended {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--primary-color);
+  background: rgba(66, 133, 244, 0.1);
+  vertical-align: middle;
+}
+
+.theme-night .ty-badge-recommended {
+  color: #7cb7ff;
+  background: rgba(77, 170, 252, 0.16);
+}
+
 .ty-modal-header h3 {
   margin: 0;
   font-size: 16px;
@@ -2257,6 +2331,78 @@ body.theme-night .md-inline-node-input {
   font-size: 12px;
   color: #777;
   line-height: 1.4;
+}
+
+/* 说明文字收进问号标后的行内布局 */
+.ty-settings-info {
+  position: relative;
+}
+
+.ty-settings-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 问号标：圆形描边小图标 */
+.ty-info-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  margin-left: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-color);
+  opacity: 0.38;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  transition: opacity 0.15s ease;
+  vertical-align: middle;
+  align-self: flex-start;
+}
+
+.ty-settings-label-row .ty-info-btn {
+  align-self: center;
+  margin-left: 0;
+}
+
+.ty-info-btn:hover,
+.ty-info-btn:focus-visible,
+.ty-info-btn-active {
+  opacity: 0.95;
+  outline: none;
+}
+
+/* 二级提示浮层 */
+.ty-info-tooltip {
+  position: fixed;
+  z-index: 10001;
+  max-width: 280px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: rgba(38, 41, 46, 0.96);
+  color: #f2f3f5;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.24);
+  pointer-events: auto;
+  animation: tyTooltipIn 0.12s ease-out;
+}
+
+.ty-info-tooltip[hidden] {
+  display: none;
+}
+
+@keyframes tyTooltipIn {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .theme-night .ty-settings-desc {

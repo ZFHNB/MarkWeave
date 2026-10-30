@@ -75,6 +75,7 @@ import {
 } from "./workspace/external-change";
 import { toStandaloneHtml } from "./export/html-export";
 import { renderMermaidForExport } from "./export/mermaid-render";
+import { enhanceSettingsDescriptions } from "./ui/settings-tooltip";
 import {
   applyBuiltInTheme,
   getAllThemes,
@@ -1827,23 +1828,23 @@ function openSettingsModal() {
 
   modalOverlay.innerHTML = `
     <div class="ty-modal-card ty-settings-dialog">
-      <div class="ty-modal-header">
-        <div class="ty-modal-title" style="display: flex; align-items: center; gap: 8px;">
+      <div class="ty-modal-header ty-settings-header">
+        <div class="ty-modal-title">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <circle cx="12" cy="12" r="3"></circle>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
           </svg>
-          偏好设置 (Preferences)
+          偏好设置
         </div>
-        <button class="ty-modal-close" id="btn-close-settings-x">&times;</button>
+        <button class="ty-modal-close" id="btn-close-settings-x" aria-label="关闭">&times;</button>
       </div>
 
       <div class="ty-settings-nav" id="settings-tabs-nav">
-        <button class="ty-settings-tab-btn active" data-tab="charts">📊 图表设置</button>
-        <button class="ty-settings-tab-btn" data-tab="editor">✍️ 编辑排版</button>
-        <button class="ty-settings-tab-btn" data-tab="appearance">🎨 外观主题</button>
-        <button class="ty-settings-tab-btn" data-tab="storage">📁 存储与导出</button>
-        <button class="ty-settings-tab-btn" data-tab="about">ℹ️ 关于系统</button>
+        <button class="ty-settings-tab-btn active" data-tab="charts">图表设置</button>
+        <button class="ty-settings-tab-btn" data-tab="editor">编辑排版</button>
+        <button class="ty-settings-tab-btn" data-tab="appearance">外观主题</button>
+        <button class="ty-settings-tab-btn" data-tab="storage">存储与导出</button>
+        <button class="ty-settings-tab-btn" data-tab="about">关于系统</button>
       </div>
 
       <div class="ty-modal-body" style="overflow-y: auto; max-height: 56vh; padding-right: 6px;">
@@ -1859,7 +1860,7 @@ function openSettingsModal() {
               <input type="radio" name="mermaid-default-mode" value="custom" ${currentSettings.mermaidDefaultMode === "custom" ? "checked" : ""} />
               <div class="ty-export-option-content">
                 <div class="ty-export-option-title">
-                  ✨ 增强模式 (MarkWeave 样式) <span style="font-size: 11px; color: var(--primary-color); background: rgba(66, 133, 244, 0.1); padding: 1px 6px; border-radius: 4px; margin-left: 4px;">默认推荐</span>
+                  增强模式 <span class="ty-badge-recommended">默认推荐</span>
                 </div>
                 <div class="ty-export-option-desc">
                   展示 MarkWeave 独创样式与全部功能，支持拖拽排版、正交拐角圆弧/直角折线、箭头反转、行内修改连线文字等完整功能。
@@ -1871,7 +1872,7 @@ function openSettingsModal() {
               <input type="radio" name="mermaid-default-mode" value="standard" ${currentSettings.mermaidDefaultMode === "standard" ? "checked" : ""} />
               <div class="ty-export-option-content">
                 <div class="ty-export-option-title">
-                  🌐 兼容模式 (主流标准样式)
+                  兼容模式
                 </div>
                 <div class="ty-export-option-desc">
                   展示主流标准 Mermaid 样式，仅保留纵横向排布转换功能，保证与 GitHub、Typora 等平台预览完全一致。
@@ -2194,7 +2195,13 @@ function openSettingsModal() {
     cardCustom?.classList.remove("selected");
   });
 
-  const closeModal = () => modalOverlay.remove();
+  // 说明文字收进问号标的二级提示，保持面板简洁
+  const tooltipController = enhanceSettingsDescriptions(modalOverlay);
+
+  const closeModal = () => {
+    tooltipController.destroy();
+    modalOverlay.remove();
+  };
 
   modalOverlay.querySelector("#btn-close-settings-x")?.addEventListener("click", closeModal);
 
