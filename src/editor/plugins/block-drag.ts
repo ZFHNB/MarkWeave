@@ -217,6 +217,21 @@ export function createBlockDragPlugin(): Plugin {
         return found;
       };
 
+      /**
+       * 对齐到下一帧再执行：滚动或窗口刚变化时，
+       * 本次 mousemove 读到的矩形可能是布局完成前的旧值。
+       */
+      let realignFrame = 0;
+      const scheduleAlign = (block: BlockAt) => {
+        if (realignFrame) cancelAnimationFrame(realignFrame);
+        realignFrame = requestAnimationFrame(() => {
+          realignFrame = 0;
+          if (drag || !hovered || hovered.pos !== block.pos) return;
+          const rect = rectOf(block.pos);
+          if (rect) positionHandle(block, rect);
+        });
+      };
+
       const onMouseMove = (event: MouseEvent) => {
         if (drag) return;
 
@@ -234,6 +249,7 @@ export function createBlockDragPlugin(): Plugin {
             const rect = rectOf(block.pos);
             if (rect) {
               positionHandle(block, rect);
+              scheduleAlign(block);
               return;
             }
           }
@@ -349,6 +365,7 @@ export function createBlockDragPlugin(): Plugin {
           window.removeEventListener("scroll", onScroll, true);
           window.removeEventListener("resize", onScroll);
           window.removeEventListener("blur", onWindowBlur);
+          if (realignFrame) cancelAnimationFrame(realignFrame);
           clearIndicators();
           handle.remove();
         },
