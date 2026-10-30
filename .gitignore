@@ -81,3 +81,7 @@ powershell.cmd
 # 9. 本地开发与代理临时目录 (Agent & Workspace Temp)
 .agents/
 .gemini/
+
+# 10. 删除回收站与本地 Claude 配置 (Deletion Trash & Local Agent Config)
+.deleted/
+.claude/
