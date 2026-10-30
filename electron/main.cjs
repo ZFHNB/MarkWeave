@@ -35,6 +35,8 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow = null;
 let currentLanguage = "zh";
+/** 渲染层确认可以关闭后置为 true，避免 close 事件重复拦截 */
+let allowClose = false;
 
 function normalizeLanguage(lang) {
   if (typeof lang === "string" && lang.toLowerCase() === "en") {
@@ -167,6 +169,16 @@ function createWindow() {
 
   mainWindow.once("ready-to-show", () => {
     mainWindow.show();
+  });
+
+  /**
+   * 关窗前先让渲染层检查未保存修改：
+   * 渲染层完成保存（或用户选择不保存）后回发 app:close-confirmed。
+   */
+  mainWindow.on("close", (event) => {
+    if (allowClose) return;
+    event.preventDefault();
+    mainWindow.webContents.send("app:close-requested");
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -496,6 +508,66 @@ ipcMain.handle("themes:open-folder", async () => {
   }
   shell.openPath(dir);
   return { path: dir };
+});
+
+/**
+ * 历史副本：写入、列举、清理。
+ * 副本只写不读回编辑器，属于纯备份文件。
+ */
+ipcMain.handle("history:write", async (_event, payload) => {
+  if (!payload || typeof payload.path !== "string") return null;
+  try {
+    await fs.promises.mkdir(path.dirname(payload.path), { recursive: true });
+    await fs.promises.writeFile(payload.path, payload.content ?? "", "utf8");
+    return { path: payload.path };
+  } catch (err) {
+    console.error("Failed to write history copy:", err);
+    return null;
+  }
+});
+
+ipcMain.handle("history:list", async (_event, dir) => {
+  if (!dir || typeof dir !== "string") return [];
+  try {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile())
+      .map((entry) => entry.name)
+      .sort();
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle("history:remove", async (_event, payload) => {
+  if (!payload || typeof payload.dir !== "string" || !Array.isArray(payload.names)) return 0;
+  let removed = 0;
+  for (const name of payload.names) {
+    if (typeof name !== "string" || name.includes("/") || name.includes("\\")) continue;
+    try {
+      await fs.promises.unlink(path.join(payload.dir, name));
+      removed += 1;
+    } catch {
+      // 文件可能已被外部删除
+    }
+  }
+  return removed;
+});
+
+ipcMain.handle("dialog:choose-directory", async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: "选择历史副本目录",
+    properties: ["openDirectory", "createDirectory"],
+  });
+  if (result.canceled || !result.filePaths?.length) return null;
+  return result.filePaths[0];
+});
+
+ipcMain.on("app:close-confirmed", () => {
+  allowClose = true;
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.close();
+  }
 });
 
 ipcMain.handle("app:set-language", async (_event, lang) => {

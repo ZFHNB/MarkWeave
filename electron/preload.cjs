@@ -21,6 +21,10 @@ contextBridge.exposeInMainWorld("markweave", {
   getInfo: () => ipcRenderer.invoke("app:get-info"),
   setLanguage: (language) => ipcRenderer.invoke("app:set-language", language),
   listCustomThemes: () => ipcRenderer.invoke("themes:list-custom"),
+  writeHistory: (payload) => ipcRenderer.invoke("history:write", payload),
+  listHistory: (dir) => ipcRenderer.invoke("history:list", dir),
+  removeHistory: (payload) => ipcRenderer.invoke("history:remove", payload),
+  chooseDirectory: () => ipcRenderer.invoke("dialog:choose-directory"),
   openThemesFolder: () => ipcRenderer.invoke("themes:open-folder"),
   onMenuAction: (callback) => {
     if (typeof callback !== "function") return () => {};
@@ -30,6 +34,15 @@ contextBridge.exposeInMainWorld("markweave", {
       ipcRenderer.removeListener("menu:action", subscription);
     };
   },
+  onCloseRequested: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const subscription = () => callback();
+    ipcRenderer.on("app:close-requested", subscription);
+    return () => {
+      ipcRenderer.removeListener("app:close-requested", subscription);
+    };
+  },
+  confirmClose: () => ipcRenderer.send("app:close-confirmed"),
   onOpenPath: (callback) => {
     if (typeof callback !== "function") return () => {};
     const subscription = (_event, filePath) => callback(filePath);

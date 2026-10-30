@@ -59,9 +59,15 @@ export interface MarkWeaveDesktopAPI {
   getInfo?: () => Promise<AppInfo>;
   setLanguage?: (language: string) => Promise<boolean>;
   listCustomThemes?: () => Promise<CustomThemePayload[]>;
+  writeHistory?: (payload: { path: string; content: string }) => Promise<{ path: string } | null>;
+  listHistory?: (dir: string) => Promise<string[]>;
+  removeHistory?: (payload: { dir: string; names: string[] }) => Promise<number>;
+  chooseDirectory?: () => Promise<string | null>;
   openThemesFolder?: () => Promise<{ path: string | null }>;
   onMenuAction: (callback: (action: string) => void) => () => void;
   onOpenPath: (callback: (filePath: string) => void) => () => void;
+  onCloseRequested?: (callback: () => void) => () => void;
+  confirmClose?: () => void;
 }
 
 declare global {

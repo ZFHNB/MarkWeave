@@ -2426,6 +2426,32 @@ body.theme-night .md-inline-node-input {
   border-color: var(--primary-color);
 }
 
+.ty-settings-input {
+  width: 110px;
+  padding: 5px 10px;
+  font-size: 13px;
+  border-radius: 4px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-color);
+  color: var(--text-color);
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.ty-settings-input:focus {
+  border-color: var(--primary-color);
+}
+
+.ty-settings-input-wide {
+  width: 260px;
+}
+
+.ty-settings-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .ty-settings-action {
   padding: 5px 14px;
   font-size: 13px;
@@ -2844,3 +2870,127 @@ body.theme-night .md-table-toolbar-group {
 
 
 
+
+
+/* ================= 块拖动排序 (Block Drag Handle) ================= */
+.md-block-handle {
+  position: absolute;
+  z-index: 60;
+  display: grid;
+  grid-template-columns: repeat(2, 3px);
+  grid-template-rows: repeat(3, 3px);
+  gap: 2px;
+  align-content: center;
+  justify-content: center;
+  width: 16px;
+  height: 28px;
+  padding: 0;
+  border-radius: 4px;
+  opacity: 0;
+  pointer-events: none;
+  cursor: grab;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+
+.md-block-handle.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.md-block-handle:hover {
+  background: var(--item-hover-bg-color);
+}
+
+.md-block-handle.is-dragging {
+  cursor: grabbing;
+  opacity: 1;
+}
+
+.md-block-handle span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--meta-mark-color);
+}
+
+body.md-block-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
+body.md-block-dragging .ProseMirror * {
+  cursor: grabbing !important;
+}
+
+/* 插入位置指示线：提示松手后插入到哪两个块之间 */
+.md-drop-indicator {
+  position: absolute;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--primary-color);
+  box-shadow: 0 0 0 1px rgba(66, 133, 244, 0.25);
+  pointer-events: none;
+  z-index: 55;
+}
+
+.md-drop-indicator::before,
+.md-drop-indicator::after {
+  content: "";
+  position: absolute;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--primary-color);
+}
+
+.md-drop-indicator::before { left: -4px; }
+.md-drop-indicator::after { right: -4px; }
+
+
+/* ================= 保存状态反馈 (Save Status) ================= */
+.ty-save-status {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--meta-mark-color);
+  background: var(--item-hover-bg-color);
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.ty-save-status.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ty-save-status[data-tone="saving"] {
+  color: var(--primary-color);
+  background: rgba(66, 133, 244, 0.12);
+}
+
+.ty-save-status[data-tone="saved"] {
+  color: #2f855a;
+  background: rgba(47, 133, 90, 0.12);
+}
+
+.ty-save-status[data-tone="error"] {
+  color: #c53030;
+  background: rgba(197, 48, 48, 0.12);
+}
+
+.theme-night .ty-save-status[data-tone="saved"] {
+  color: #68d391;
+  background: rgba(104, 211, 145, 0.14);
+}
+
+.theme-night .ty-save-status[data-tone="error"] {
+  color: #fc8181;
+  background: rgba(252, 129, 129, 0.14);
+}

@@ -24,6 +24,7 @@ import { createTypewriterPlugin } from "./plugins/typewriter";
 import { createImagePlugin } from "./plugins/images";
 import { createAutoPairPlugin } from "./plugins/auto-pair";
 import { createCodeIndentPlugin } from "./plugins/code-indent";
+import { createBlockDragPlugin } from "./plugins/block-drag";
 import { createImageResolvePlugin } from "./plugins/image-resolve";
 import { ImageView } from "./nodeviews/image";
 import {
@@ -87,11 +88,9 @@ export class MarkWeaveEditor {
       "Mod-6": setBlockType(schema.nodes.heading, { level: 6 }),
       "Mod-0": setBlockType(schema.nodes.paragraph),
       "Mod-q": wrapIn(schema.nodes.blockquote),
-      Enter: (state, dispatch) => {
-        // 在代码块 / 公式块最后一行回车：退出到下一个段落
-        if (exitTerminalBlock("down")(state, dispatch)) return true;
-        return splitListItem(schema.nodes.list_item)(state, dispatch);
-      },
+      // 代码块/公式块内的回车始终在块内换行（与 Typora 一致）；
+      // 退出块使用方向键或鼠标点击，避免末行回车时意外跳出
+      Enter: splitListItem(schema.nodes.list_item),
       ArrowDown: exitTerminalBlock("down"),
       ArrowRight: exitTerminalBlock("right"),
       "Mod-[": liftListItem(schema.nodes.list_item),
@@ -144,6 +143,7 @@ export class MarkWeaveEditor {
           getRootUrl: () => null,
           isDesktop: () => this.options.isDesktop?.() ?? false,
         }),
+        createBlockDragPlugin(),
         createTypewriterPlugin({
           isEnabled: () => this.options.isTypewriterEnabled?.() ?? false,
         }),

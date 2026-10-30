@@ -75,7 +75,25 @@ import {
 } from "./workspace/external-change";
 import { toStandaloneHtml } from "./export/html-export";
 import { renderMermaidForExport } from "./export/mermaid-render";
+import {
+  DEFAULT_AUTO_SAVE,
+  autoSaveIntervalMs,
+  historyFileName,
+  normalizeAutoSaveSettings,
+  resolveHistoryDir,
+  selectExpiredHistory,
+  shouldPromptOnClose,
+  shouldSaveOnChange,
+  type AutoSaveSettings,
+} from "./workspace/autosave";
 import { enhanceSettingsDescriptions } from "./ui/settings-tooltip";
+import {
+  BODY_FONTS,
+  MONO_FONTS,
+  normalizeFontId,
+  resolveBodyFont,
+  resolveMonoFont,
+} from "./platform/fonts";
 import {
   applyBuiltInTheme,
   getAllThemes,
@@ -309,6 +327,11 @@ app.innerHTML = `
         <span class="ty-doc-title" id="doc-title">欢迎使用 Typemark.md</span>
       </div>
       <div class="ty-header-right">
+        <span class="ty-save-status" id="save-status" aria-live="polite"></span>
+        <button class="ty-icon-btn ty-save-btn" id="btn-save-file" title="保存文件 (Ctrl+S)">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          保存
+        </button>
         <button class="ty-icon-btn" id="btn-toggle-source" title="切换源码模式 (Ctrl+/)">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
           源码模式
@@ -374,6 +397,8 @@ const btnToggleTheme = document.getElementById("btn-toggle-theme")!;
 const btnFocusMode = document.getElementById("btn-focus-mode")!;
 const btnTypewriterMode = document.getElementById("btn-typewriter-mode")!;
 const btnSaveMd = document.getElementById("btn-save-md")!;
+const btnSaveFile = document.getElementById("btn-save-file") as HTMLButtonElement;
+const saveStatusEl = document.getElementById("save-status") as HTMLElement;
 const btnExportHtml = document.getElementById("btn-export-html")!;
 const btnExportPdf = document.getElementById("btn-export-pdf")!;
 const btnNewFile = document.getElementById("btn-new-file")!;
@@ -476,6 +501,7 @@ const editor = new MarkWeaveEditor({
         doc.updatedAt = Date.now();
         syncTitle(doc.title);
         scheduleSave();
+        scheduleAutoSaveOnChange();
       }
     }
   },
@@ -1689,6 +1715,12 @@ export interface MarkWeaveSettings {
   fontSize: string;
   lineHeight: string;
   fontFamily: string;
+  /** 自定义正文字体名（fontFamily === "custom" 时生效） */
+  customFontFamily: string;
+  /** 代码块等宽字体 */
+  monoFontFamily: string;
+  /** 自定义等宽字体名（monoFontFamily === "custom" 时生效） */
+  customMonoFontFamily: string;
   exportPolicy: "ask" | "markweave" | "compatible";
   theme: ThemeSetting;
   language: Language;
@@ -1699,6 +1731,7 @@ export interface MarkWeaveSettings {
   indentSize: number;
   lineEnding: LineEnding;
   finalNewline: boolean;
+  autoSave: AutoSaveSettings;
 }
 
 function loadPdfOptions(): PdfOptions {
@@ -1711,6 +1744,16 @@ function loadPdfOptions(): PdfOptions {
   }
 }
 
+function loadAutoSaveSettings(): AutoSaveSettings {
+  try {
+    const raw = localStorage.getItem("markweave_autosave");
+    if (!raw) return { ...DEFAULT_AUTO_SAVE };
+    return normalizeAutoSaveSettings(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_AUTO_SAVE };
+  }
+}
+
 function loadSettings(): MarkWeaveSettings {
   return {
     mermaidDefaultMode: (localStorage.getItem("markweave_mermaid_default_mode") as any) || "custom",
@@ -1720,7 +1763,10 @@ function loadSettings(): MarkWeaveSettings {
     exportScale: parseInt(localStorage.getItem("markweave_export_scale") || "2", 10) || 2,
     fontSize: localStorage.getItem("markweave_font_size") || "16px",
     lineHeight: localStorage.getItem("markweave_line_height") || "1.65",
-    fontFamily: localStorage.getItem("markweave_font_family") || "default",
+    fontFamily: normalizeFontId(BODY_FONTS, localStorage.getItem("markweave_font_family")),
+    customFontFamily: localStorage.getItem("markweave_custom_font_family") || "",
+    monoFontFamily: normalizeFontId(MONO_FONTS, localStorage.getItem("markweave_mono_font_family")),
+    customMonoFontFamily: localStorage.getItem("markweave_custom_mono_font_family") || "",
     exportPolicy: (localStorage.getItem("markweave_default_export_policy") as any) || "ask",
     theme: (localStorage.getItem("markweave_theme") as any) || "light",
     language: normalizeLanguage(localStorage.getItem("markweave_language")),
@@ -1731,6 +1777,7 @@ function loadSettings(): MarkWeaveSettings {
     indentSize: parseInt(localStorage.getItem("markweave_indent_size") || "2", 10) || 2,
     lineEnding: (localStorage.getItem("markweave_line_ending") as LineEnding) || "lf",
     finalNewline: localStorage.getItem("markweave_final_newline") !== "false",
+    autoSave: loadAutoSaveSettings(),
   };
 }
 
@@ -1743,6 +1790,9 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_font_size", settings.fontSize);
   localStorage.setItem("markweave_line_height", settings.lineHeight);
   localStorage.setItem("markweave_font_family", settings.fontFamily);
+  localStorage.setItem("markweave_custom_font_family", settings.customFontFamily);
+  localStorage.setItem("markweave_mono_font_family", settings.monoFontFamily);
+  localStorage.setItem("markweave_custom_mono_font_family", settings.customMonoFontFamily);
   localStorage.setItem("markweave_default_export_policy", settings.exportPolicy);
   localStorage.setItem("markweave_theme", settings.theme);
   localStorage.setItem("markweave_language", settings.language);
@@ -1753,6 +1803,7 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_indent_size", String(settings.indentSize));
   localStorage.setItem("markweave_line_ending", settings.lineEnding);
   localStorage.setItem("markweave_final_newline", String(settings.finalNewline));
+  localStorage.setItem("markweave_autosave", JSON.stringify(settings.autoSave));
 
   applySettings(settings);
 }
@@ -1766,15 +1817,14 @@ function applySettings(settings: MarkWeaveSettings) {
   root.style.setProperty("--editor-font-size", settings.fontSize);
   root.style.setProperty("--editor-line-height", settings.lineHeight);
 
-  if (settings.fontFamily === "serif") {
-    root.style.setProperty("--editor-font-family", "Georgia, 'Songti SC', SimSun, serif");
-  } else if (settings.fontFamily === "pingfang") {
-    root.style.setProperty("--editor-font-family", "'PingFang SC', 'Microsoft YaHei', sans-serif");
-  } else if (settings.fontFamily === "lxgw") {
-    root.style.setProperty("--editor-font-family", "'LXGW WenKai', 'Kaiti SC', KaiTi, STKaiti, serif");
-  } else {
-    root.style.setProperty("--editor-font-family", "var(--font-family)");
-  }
+  root.style.setProperty(
+    "--editor-font-family",
+    resolveBodyFont(settings.fontFamily, settings.customFontFamily)
+  );
+  root.style.setProperty(
+    "--monospace",
+    resolveMonoFont(settings.monoFontFamily, settings.customMonoFontFamily)
+  );
 
   // 主题应用
   const wasNight = document.body.classList.contains("theme-night");
@@ -1789,6 +1839,7 @@ function applySettings(settings: MarkWeaveSettings) {
   }
 
   applyBuiltInTheme(settings.editorTheme);
+  applyAutoSaveSettings(settings.autoSave);
 
   const api = getDesktopAPI();
   if (api && typeof api.setLanguage === "function") {
@@ -1965,11 +2016,52 @@ function openSettingsModal() {
               <span class="ty-settings-desc">渲染文章所用的主要字体方案</span>
             </div>
             <select class="ty-settings-select" id="setting-select-font-family">
-              <option value="default" ${currentSettings.fontFamily === "default" ? "selected" : ""}>系统原生无衬线 (System Default)</option>
-              <option value="pingfang" ${currentSettings.fontFamily === "pingfang" ? "selected" : ""}>苹方 / 微软雅黑 (Modern UI)</option>
-              <option value="serif" ${currentSettings.fontFamily === "serif" ? "selected" : ""}>宋体 / 优雅衬线 (Elegant Serif)</option>
-              <option value="lxgw" ${currentSettings.fontFamily === "lxgw" ? "selected" : ""}>霞鹜文楷风格 / 楷体 (Chinese KaiTi)</option>
+              ${BODY_FONTS.map(
+                (font) =>
+                  `<option value="${font.id}" ${
+                    currentSettings.fontFamily === font.id ? "selected" : ""
+                  }>${font.label}</option>`
+              ).join("")}
             </select>
+          </div>
+
+          <div class="ty-settings-row" id="row-custom-font" style="display: ${
+            currentSettings.fontFamily === "custom" ? "flex" : "none"
+          };">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自定义正文字体</span>
+              <span class="ty-settings-desc">填写本机已安装的字体名，可用逗号分隔多个回退</span>
+            </div>
+            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-custom-font"
+              placeholder="例如：Source Han Serif SC, serif"
+              value="${currentSettings.customFontFamily.replace(/"/g, "&quot;")}" />
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">代码块字体</span>
+              <span class="ty-settings-desc">含主流编程字体；未安装时自动回退到系统等宽字体</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-mono-font">
+              ${MONO_FONTS.map(
+                (font) =>
+                  `<option value="${font.id}" ${
+                    currentSettings.monoFontFamily === font.id ? "selected" : ""
+                  }>${font.label}</option>`
+              ).join("")}
+            </select>
+          </div>
+
+          <div class="ty-settings-row" id="row-custom-mono" style="display: ${
+            currentSettings.monoFontFamily === "custom" ? "flex" : "none"
+          };">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自定义代码字体</span>
+              <span class="ty-settings-desc">填写本机已安装的等宽字体名</span>
+            </div>
+            <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-custom-mono"
+              placeholder="例如：Sarasa Mono SC, monospace"
+              value="${currentSettings.customMonoFontFamily.replace(/"/g, "&quot;")}" />
           </div>
 
           <div class="ty-settings-row">
@@ -2084,6 +2176,62 @@ function openSettingsModal() {
 
         <!-- Tab 4: 存储与导出 -->
         <div class="ty-settings-panel" id="tab-panel-storage">
+          <div class="ty-settings-section-title">自动保存</div>
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自动保存模式</span>
+              <span class="ty-settings-desc">默认关闭；开启后按下方方式自动写回原文件</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-autosave-mode">
+              <option value="off" ${currentSettings.autoSave.mode === "off" ? "selected" : ""}>关闭（手动保存）</option>
+              <option value="onChange" ${currentSettings.autoSave.mode === "onChange" ? "selected" : ""}>每次修改后自动保存</option>
+              <option value="interval" ${currentSettings.autoSave.mode === "interval" ? "selected" : ""}>按固定间隔自动保存</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自动保存间隔</span>
+              <span class="ty-settings-desc">选择「按固定间隔」时生效，单位分钟</span>
+            </div>
+            <input class="ty-settings-input" type="number" id="setting-input-autosave-interval"
+              min="1" max="120" step="1" value="${currentSettings.autoSave.intervalMinutes}" />
+          </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">历史副本</div>
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">保存历史副本</span>
+              <span class="ty-settings-desc">保存前留一份带时间戳的备份，便于回溯</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">副本存放目录</span>
+              <span class="ty-settings-desc">留空则存到文档同级的 .markweave-history 目录</span>
+            </div>
+            <div class="ty-settings-inline">
+              <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-history-dir"
+                placeholder="默认：文档同级 .markweave-history" value="${currentSettings.autoSave.historyDir}" />
+              <button class="ty-settings-action" id="setting-btn-history-dir">选择…</button>
+            </div>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">保留副本数量</span>
+              <span class="ty-settings-desc">超出数量后自动删除最旧的副本</span>
+            </div>
+            <input class="ty-settings-input" type="number" id="setting-input-history-max"
+              min="1" max="200" step="1" value="${currentSettings.autoSave.maxHistory}" />
+          </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">导出</div>
           <div class="ty-settings-row">
             <div class="ty-settings-info">
               <span class="ty-settings-label">导出 Markdown 默认行为</span>
@@ -2205,6 +2353,26 @@ function openSettingsModal() {
 
   modalOverlay.querySelector("#btn-close-settings-x")?.addEventListener("click", closeModal);
 
+  // 字体选择切换到「自定义」时显示输入框
+  const bindCustomFontToggle = (selectId: string, rowId: string) => {
+    const select = modalOverlay.querySelector<HTMLSelectElement>(selectId);
+    const row = modalOverlay.querySelector<HTMLElement>(rowId);
+    select?.addEventListener("change", () => {
+      if (row) row.style.display = select.value === "custom" ? "flex" : "none";
+    });
+  };
+  bindCustomFontToggle("#setting-select-font-family", "#row-custom-font");
+  bindCustomFontToggle("#setting-select-mono-font", "#row-custom-mono");
+
+  // 选择历史副本目录
+  modalOverlay.querySelector("#setting-btn-history-dir")?.addEventListener("click", async () => {
+    const api = getDesktopAPI();
+    if (!api?.chooseDirectory) return;
+    const dir = await api.chooseDirectory();
+    const input = modalOverlay.querySelector<HTMLInputElement>("#setting-input-history-dir");
+    if (dir && input) input.value = dir;
+  });
+
   // 打开自定义主题目录，并在用户回到窗口后刷新主题列表
   modalOverlay.querySelector("#setting-btn-themes-folder")?.addEventListener("click", async () => {
     const api = getDesktopAPI();
@@ -2236,7 +2404,16 @@ function openSettingsModal() {
     const selectScale = parseInt((modalOverlay.querySelector("#setting-select-scale") as HTMLSelectElement)?.value || "2", 10) || 2;
     const selectFontSize = (modalOverlay.querySelector("#setting-select-font-size") as HTMLSelectElement)?.value || "16px";
     const selectLineHeight = (modalOverlay.querySelector("#setting-select-line-height") as HTMLSelectElement)?.value || "1.65";
-    const selectFontFamily = (modalOverlay.querySelector("#setting-select-font-family") as HTMLSelectElement)?.value || "default";
+    const selectFontFamily = normalizeFontId(
+      BODY_FONTS,
+      (modalOverlay.querySelector("#setting-select-font-family") as HTMLSelectElement)?.value
+    );
+    const customFontFamily = (modalOverlay.querySelector("#setting-input-custom-font") as HTMLInputElement)?.value || "";
+    const selectMonoFont = normalizeFontId(
+      MONO_FONTS,
+      (modalOverlay.querySelector("#setting-select-mono-font") as HTMLSelectElement)?.value
+    );
+    const customMonoFontFamily = (modalOverlay.querySelector("#setting-input-custom-mono") as HTMLInputElement)?.value || "";
     const selectExportPolicy = ((modalOverlay.querySelector("#setting-select-export-policy") as HTMLSelectElement)?.value as any) || "ask";
     const selectTheme = ((modalOverlay.querySelector("#setting-select-theme") as HTMLSelectElement)?.value as any) || "light";
     const selectLanguage = normalizeLanguage((modalOverlay.querySelector("#setting-select-language") as HTMLSelectElement)?.value);
@@ -2250,6 +2427,11 @@ function openSettingsModal() {
     const indentSize = parseInt((modalOverlay.querySelector("#setting-select-indent") as HTMLSelectElement)?.value || "2", 10) || 2;
     const lineEnding = ((modalOverlay.querySelector("#setting-select-line-ending") as HTMLSelectElement)?.value as LineEnding) || "lf";
     const finalNewline = (modalOverlay.querySelector("#setting-toggle-finalnewline") as HTMLInputElement)?.checked ?? true;
+    const autoSaveMode = ((modalOverlay.querySelector("#setting-select-autosave-mode") as HTMLSelectElement)?.value as AutoSaveSettings["mode"]) || "off";
+    const autoSaveInterval = parseInt((modalOverlay.querySelector("#setting-input-autosave-interval") as HTMLInputElement)?.value || "5", 10) || 5;
+    const historyDir = (modalOverlay.querySelector("#setting-input-history-dir") as HTMLInputElement)?.value || "";
+    const historyMax = parseInt((modalOverlay.querySelector("#setting-input-history-max") as HTMLInputElement)?.value || "20", 10) || 20;
+    const historyEnabled = (modalOverlay.querySelector("#setting-toggle-history") as HTMLInputElement)?.checked ?? true;
 
     const newSettings: MarkWeaveSettings = {
       mermaidDefaultMode: selectedMode,
@@ -2260,6 +2442,9 @@ function openSettingsModal() {
       fontSize: selectFontSize,
       lineHeight: selectLineHeight,
       fontFamily: selectFontFamily,
+      customFontFamily,
+      monoFontFamily: selectMonoFont,
+      customMonoFontFamily,
       exportPolicy: selectExportPolicy,
       theme: selectTheme,
       language: selectLanguage,
@@ -2270,6 +2455,13 @@ function openSettingsModal() {
       indentSize,
       lineEnding,
       finalNewline,
+      autoSave: normalizeAutoSaveSettings({
+        mode: autoSaveMode,
+        intervalMinutes: autoSaveInterval,
+        historyDir,
+        maxHistory: historyMax,
+        historyEnabled,
+      }),
     };
 
     saveSettings(newSettings);
@@ -2294,6 +2486,32 @@ const btnOpenSettings = document.getElementById("btn-open-settings");
 btnOpenSettings?.addEventListener("click", openSettingsModal);
 
 btnSaveMd.addEventListener("click", downloadMarkdown);
+
+// 顶部「保存」按钮：优先写回原文件，未命名文档走「另存为」
+btnSaveFile?.addEventListener("click", () => {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (doc?.filePath) {
+    void runManualSave();
+  } else {
+    void handleSaveAs();
+  }
+});
+
+/** 手动保存：写盘 + 历史副本 + 状态反馈 */
+async function runManualSave(): Promise<void> {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc) return;
+
+  if (!doc.filePath) {
+    await handleSaveAs();
+    return;
+  }
+
+  showSaveStatus("保存中…", "saving");
+  await writeHistoryCopy(doc.id);
+  const ok = await writeDocumentToDisk(doc.id);
+  showSaveStatus(ok ? "已保存" : "保存失败", ok ? "saved" : "error");
+}
 
 // 主题切换 (明亮 / 暗色)
 function toggleTheme() {
@@ -2353,6 +2571,212 @@ document.addEventListener("click", (e: MouseEvent) => {
   if (target.closest(interactiveSelector)) return;
 
   editor.focusStart();
+});
+
+/* ================= 自动保存、历史副本与关闭提醒 ================= */
+let autoSaveSettings: AutoSaveSettings = { ...DEFAULT_AUTO_SAVE };
+let autoSaveTimer: ReturnType<typeof setInterval> | null = null;
+let autoSaveOnChangeTimer: ReturnType<typeof setTimeout> | null = null;
+let statusResetTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 顶部保存状态反馈：保存中 / 已保存 / 已自动保存 */
+function showSaveStatus(text: string, tone: "idle" | "saving" | "saved" | "error" = "idle") {
+  if (!saveStatusEl) return;
+  saveStatusEl.textContent = text;
+  saveStatusEl.dataset.tone = tone;
+  saveStatusEl.classList.add("is-visible");
+
+  if (statusResetTimer) clearTimeout(statusResetTimer);
+  if (tone === "saved" || tone === "error") {
+    statusResetTimer = setTimeout(() => {
+      saveStatusEl.classList.remove("is-visible");
+      statusResetTimer = null;
+    }, 2200);
+  }
+}
+
+function clearAutoSaveTimer() {
+  if (autoSaveTimer) {
+    clearInterval(autoSaveTimer);
+    autoSaveTimer = null;
+  }
+  if (autoSaveOnChangeTimer) {
+    clearTimeout(autoSaveOnChangeTimer);
+    autoSaveOnChangeTimer = null;
+  }
+}
+
+/** 应用自动保存设置：重建定时器 */
+function applyAutoSaveSettings(settings: AutoSaveSettings) {
+  autoSaveSettings = settings;
+  clearAutoSaveTimer();
+
+  const interval = autoSaveIntervalMs(settings);
+  if (interval !== null) {
+    autoSaveTimer = setInterval(() => {
+      void runAutoSave("interval");
+    }, interval);
+  }
+}
+
+/** 把当前文档内容写回磁盘（不弹保存对话框；无路径时跳过） */
+async function writeDocumentToDisk(docId: string): Promise<boolean> {
+  const api = getDesktopAPI();
+  const doc = documents.find((d) => d.id === docId);
+  if (!api || !doc?.filePath) return false;
+
+  const content = prepareContentForDisk(doc.content);
+  const result = await api.saveFile({ path: doc.filePath, content });
+  if (!result?.path) return false;
+
+  documents = markDocumentSaved(documents, doc.id, result.path);
+  const updated = documents.find((d) => d.id === doc.id);
+  if (updated) syncTitle(updated.title);
+  renderFileList();
+  flushSave();
+  return true;
+}
+
+/**
+ * 历史副本：在覆盖原文件前先留一份带时间戳的拷贝。
+ * 失败不影响主保存流程。
+ */
+async function writeHistoryCopy(docId: string): Promise<void> {
+  const api = getDesktopAPI();
+  const doc = documents.find((d) => d.id === docId);
+  if (!api?.writeHistory || !doc?.filePath || !autoSaveSettings.historyEnabled) return;
+
+  const dir = resolveHistoryDir(doc.filePath, autoSaveSettings);
+  const target = historyFileName(doc.filePath, new Date());
+  const content = prepareContentForDisk(doc.content);
+
+  const written = await api.writeHistory({ path: target, content });
+  if (!written || !api.listHistory || !api.removeHistory) return;
+
+  try {
+    const files = await api.listHistory(dir);
+    const expired = selectExpiredHistory(files, autoSaveSettings.maxHistory);
+    if (expired.length > 0) {
+      await api.removeHistory({ dir, names: expired });
+    }
+  } catch (err) {
+    console.warn("清理历史副本失败", err);
+  }
+}
+
+/** 自动保存入口：按设置决定是否真正落盘 */
+async function runAutoSave(reason: "change" | "interval" | "manual"): Promise<void> {
+  if (reason === "change" && !shouldSaveOnChange(autoSaveSettings, true)) return;
+
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc?.dirty || !doc.filePath) return;
+
+  showSaveStatus(reason === "interval" ? "自动保存中…" : "保存中…", "saving");
+  await writeHistoryCopy(doc.id);
+  const ok = await writeDocumentToDisk(doc.id);
+  showSaveStatus(
+    ok ? (reason === "interval" ? "已自动保存" : "已保存") : "保存失败",
+    ok ? "saved" : "error"
+  );
+}
+
+/** 内容变化后按设置调度自动保存 */
+function scheduleAutoSaveOnChange() {
+  if (autoSaveSettings.mode !== "onChange") return;
+  if (autoSaveOnChangeTimer) clearTimeout(autoSaveOnChangeTimer);
+  // 合并连续输入，避免每敲一个字就写盘
+  autoSaveOnChangeTimer = setTimeout(() => {
+    autoSaveOnChangeTimer = null;
+    void runAutoSave("change");
+  }, 800);
+}
+
+/**
+ * 关闭窗口时若仍有未保存修改：
+ * 先弹窗询问 → 需要保存则立刻写盘 → 再关闭。
+ * 同步返回无法 await，因此在 Electron 里通过主进程的 close 事件协调。
+ */
+/** 未命名文档（还没有落盘路径）同样属于未保存内容 */
+function hasUnsavedContent(): boolean {
+  return documents.some((doc) => doc.dirty);
+}
+
+interface CloseChoice {
+  action: "save" | "discard" | "cancel";
+}
+
+/** 关闭前提醒弹窗；返回用户选择 */
+function promptUnsavedChanges(): Promise<CloseChoice> {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "ty-modal-overlay";
+    overlay.id = "close-confirm-overlay";
+    overlay.innerHTML = `
+      <div class="ty-modal-card" role="dialog" aria-modal="true" aria-labelledby="close-confirm-title">
+        <div class="ty-modal-header">
+          <div class="ty-modal-title" id="close-confirm-title">未保存的修改</div>
+        </div>
+        <p class="ty-modal-desc">当前文件已修改但尚未保存，是否保存后再退出？</p>
+        <div class="ty-modal-footer">
+          <button class="ty-btn" id="close-confirm-cancel">取消</button>
+          <button class="ty-btn" id="close-confirm-discard">不保存</button>
+          <button class="ty-btn ty-btn-primary" id="close-confirm-save">保存并退出</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const finish = (action: CloseChoice["action"]) => {
+      overlay.remove();
+      resolve({ action });
+    };
+
+    overlay.querySelector("#close-confirm-cancel")?.addEventListener("click", () => finish("cancel"));
+    overlay.querySelector("#close-confirm-discard")?.addEventListener("click", () => finish("discard"));
+    overlay.querySelector("#close-confirm-save")?.addEventListener("click", () => finish("save"));
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) finish("cancel");
+    });
+  });
+}
+
+/** 关闭流程：必要时提醒、保存，再真正关闭 */
+async function handleCloseRequest(): Promise<void> {
+  const api = getDesktopAPI();
+
+  if (hasUnsavedContent() && shouldPromptOnClose(true, autoSaveSettings.mode)) {
+    const choice = await promptUnsavedChanges();
+    if (choice.action === "cancel") return;
+    if (choice.action === "save") {
+      // 逐个保存所有脏文档，确保关窗不丢内容
+      for (const doc of documents.filter((d) => d.dirty)) {
+        if (doc.filePath) {
+          showSaveStatus("保存中…", "saving");
+          await writeHistoryCopy(doc.id);
+          await writeDocumentToDisk(doc.id);
+        } else {
+          // 未命名文档交给另存为对话框
+          activeDocId = doc.id;
+          await handleSaveAs();
+        }
+      }
+    }
+  }
+
+  api?.confirmClose?.();
+}
+
+// 桌面版：主进程拦截关窗后交给渲染层处理
+getDesktopAPI()?.onCloseRequested?.(() => {
+  void handleCloseRequest();
+});
+
+// Web 版：使用浏览器原生离校提示
+window.addEventListener("beforeunload", (event) => {
+  if (!hasUnsavedContent()) return;
+  if (autoSaveSettings.mode !== "off") return;
+  event.preventDefault();
+  event.returnValue = "";
 });
 
 // 初始化加载并应用设置

@@ -113,6 +113,7 @@ export function exitTerminalBlock(direction: "down" | "right" = "down"): Command
   };
 }
 
+
 export function createTableNode(rows: number, cols: number): PMNode {
   const clampedRows = Math.max(1, Math.min(50, Number.isFinite(rows) ? Math.floor(rows) : 1));
   const clampedCols = Math.max(1, Math.min(50, Number.isFinite(cols) ? Math.floor(cols) : 1));
