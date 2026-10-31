@@ -60,12 +60,16 @@
     "asar": true,
     "win": {
       "target": [
-        "portable"
+        "dir"
       ],
       "icon": "resources/icon.png"
     },
     "portable": {
       "artifactName": "MarkWeave-${version}-portable.exe"
-    }
+    },
+    "compression": "store"
+  },
+  "scripts_extra": {
+    "_comment": "便携版每次启动要把约 475MB 解压到临时目录（约 15 秒）。dir 形式免解压，启动约 1-2 秒。"
   }
 }

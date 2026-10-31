@@ -286,67 +286,125 @@ export function docToMarkdown(doc: PMNode): string {
     return blocks.join("<br>").trim();
   }
 
+  /** 按 mark 种类定义包裹方式 */
+  function wrapWithMark(piece: string, mark: any, inTable: boolean): string {
+    switch (mark.type.name) {
+      case "strong":
+        return `**${piece}**`;
+      case "em":
+        return `*${piece}*`;
+      case "strike":
+        return `~~${piece}~~`;
+      case "highlight":
+        return `==${piece}==`;
+      case "superscript":
+        return `^${piece}^`;
+      case "subscript":
+        return `~${piece}~`;
+      case "code":
+        return `\`${piece}\``;
+      case "link": {
+        if (mark.attrs.reference) {
+          return mark.attrs.referenceCollapsed
+            ? `[${piece}][]`
+            : `[${piece}][${mark.attrs.reference}]`;
+        }
+        const title = mark.attrs.title ? ` "${mark.attrs.title}"` : "";
+        return `[${piece}](${mark.attrs.href}${title})`;
+      }
+      case "inline_math": {
+        const formula = mark.attrs.formula || piece;
+        return `$${inTable ? formula.replace(/\|/g, "\\|") : formula}$`;
+      }
+      default:
+        return piece;
+    }
+  }
+
+  /** 包裹顺序：code 最内层，其次数学，再由内向外 */
+  function markRank(mark: any): number {
+    if (mark.type.name === "code") return 0;
+    if (mark.type.name === "inline_math") return 1;
+    return 2;
+  }
+
+  /**
+   * 把一组文本片段按「mark 组合」重新分段并序列化。
+   *
+   * 难点：加粗若跨越「普通文字 + 行内代码」，逐段包裹会得到
+   *   **a**`b`**c**
+   * 相邻的 ** 会被 Markdown 解析器合并，导致强调边界错位。
+   *
+   * 解决：以外层 mark 为界递归。同一外层 mark 覆盖的连续片段先合到一起，
+   * 只包裹一次，内部再分别处理各自的内层 mark。
+   */
+  function serializePieces(
+    pieces: { text: string; marks: any[] }[],
+    inTable: boolean
+  ): string {
+    if (pieces.length === 0) return "";
+
+    // 找出所有片段共有的最外层 mark 候选：取第一个片段的 marks 中
+    // 能覆盖全部片段的那个（其余片段都含有等价的 mark）
+    const first = pieces[0];
+    const common = first.marks.filter((candidate) =>
+      pieces.every((p) => p.marks.some((m) => m.eq(candidate)))
+    );
+
+    if (common.length === 0) {
+      // 没有共同 mark：逐个片段独立处理
+      return pieces
+        .map((p) => {
+          if (p.marks.length === 0) return p.text;
+          const inner = serializePieces(
+            [{ text: p.text, marks: [] }],
+            inTable
+          );
+          const ordered = [...p.marks].sort((a, b) => markRank(a) - markRank(b));
+          return ordered.reduce((out, mark) => wrapWithMark(out, mark, inTable), inner);
+        })
+        .join("");
+    }
+
+    // 取优先级最低（最外层）的共同 mark 作为外层包裹
+    const outer = common.sort((a, b) => markRank(a) - markRank(b)).pop();
+
+    const inner = serializePieces(
+      pieces.map((p) => ({
+        text: p.text,
+        marks: p.marks.filter((m) => !m.eq(outer!)),
+      })),
+      inTable
+    );
+
+    return wrapWithMark(inner, outer, inTable);
+  }
+
   function serializeInlines(node: PMNode, inTable = false): string {
-    let text = "";
+    const pieces: { text: string; marks: any[] }[] = [];
+
     node.forEach((child) => {
       if (child.isText) {
         let piece = child.text || "";
-        if (inTable) {
-          piece = piece.replace(/\|/g, "\\|");
-        }
-        // 按 marks 逆序包裹语法
-        child.marks.forEach((mark) => {
-          switch (mark.type.name) {
-            case "strong":
-              piece = `**${piece}**`;
-              break;
-            case "em":
-              piece = `*${piece}*`;
-              break;
-            case "strike":
-              piece = `~~${piece}~~`;
-              break;
-            case "highlight":
-              piece = `==${piece}==`;
-              break;
-            case "superscript":
-              piece = `^${piece}^`;
-              break;
-            case "subscript":
-              piece = `~${piece}~`;
-              break;
-            case "code":
-              piece = `\`${piece}\``;
-              break;
-            case "link": {
-              if (mark.attrs.reference) {
-                piece = mark.attrs.referenceCollapsed
-                  ? `[${piece}][]`
-                  : `[${piece}][${mark.attrs.reference}]`;
-              } else {
-                const title = mark.attrs.title ? ` "${mark.attrs.title}"` : "";
-                piece = `[${piece}](${mark.attrs.href}${title})`;
-              }
-              break;
-            }
-            case "inline_math": {
-              const formula = mark.attrs.formula || piece;
-              piece = `$${inTable ? formula.replace(/\|/g, "\\|") : formula}$`;
-              break;
-            }
-          }
-        });
-        text += piece;
-      } else if (child.type.name === "image") {
+        if (inTable) piece = piece.replace(/\|/g, "\\|");
+        if (piece) pieces.push({ text: piece, marks: child.marks as any[] });
+        return;
+      }
+
+      if (child.type.name === "image") {
         const title = child.attrs.title ? ` "${child.attrs.title}"` : "";
-        text += `![${child.attrs.alt || ""}](${child.attrs.src}${title})`;
+        pieces.push({
+          text: `![${child.attrs.alt || ""}](${child.attrs.src}${title})`,
+          marks: [],
+        });
       } else if (child.type.name === "hard_break") {
-        text += inTable ? "<br>" : "  \n";
+        pieces.push({ text: inTable ? "<br>" : "  \n", marks: [] });
       } else if (child.type.name === "footnote_ref") {
-        text += `[^${child.attrs.id || ""}]`;
+        pieces.push({ text: `[^${child.attrs.id || ""}]`, marks: [] });
       }
     });
-    return text;
+
+    return serializePieces(pieces, inTable);
   }
 
   doc.forEach((child) => {

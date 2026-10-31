@@ -1,4 +1,4 @@
-import mermaid from "mermaid";
+import { loadMermaid } from "../editor/diagram/mermaid-loader";
 import type { Node as PMNode } from "prosemirror-model";
 import { resolveMermaidTheme, getMermaidThemePreference } from "../platform/mermaid-theme";
 
@@ -30,6 +30,7 @@ export async function renderMermaidForExport(
   if (!blocks.length) return [];
 
   const theme = resolveMermaidTheme(getMermaidThemePreference(), Boolean(options.dark));
+  const mermaid = await loadMermaid();
   mermaid.initialize({
     startOnLoad: false,
     theme,

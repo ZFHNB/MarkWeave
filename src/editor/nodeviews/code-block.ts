@@ -1,6 +1,6 @@
 import { Node as PMNode } from "prosemirror-model";
 import { EditorView, type NodeView } from "prosemirror-view";
-import mermaid from "mermaid";
+import { loadMermaid } from "../diagram/mermaid-loader";
 import { MermaidInteractor } from "../diagram/mermaid-interactor";
 import { LanguagePicker } from "../code/language-picker";
 import {
@@ -8,14 +8,7 @@ import {
   resolveMermaidTheme,
 } from "../../platform/mermaid-theme";
 
-// 初始化 Mermaid 全局配置
-mermaid.initialize({
-  startOnLoad: false,
-  theme: "default",
-  securityLevel: "loose",
-  fontFamily: "var(--font-family)",
-});
-
+// Mermaid 改为首次渲染时按需加载，避免拖慢启动
 let mermaidCounter = 0;
 
 export class CodeBlockView implements NodeView {
@@ -512,6 +505,7 @@ export class CodeBlockView implements NodeView {
 
     try {
       const curve = this.interactor.detectCurveStyle(codeText);
+      const mermaid = await loadMermaid();
       mermaid.initialize({
         startOnLoad: false,
         theme,

@@ -88,6 +88,13 @@ import {
 } from "./workspace/autosave";
 import { enhanceSettingsDescriptions } from "./ui/settings-tooltip";
 import {
+  computeBlockStartLines,
+  findLineByBlockText,
+  lineForBlockIndex,
+  ratioFromScroll,
+  scrollTopForLine,
+} from "./editor/source-mapping";
+import {
   BODY_CJK_FONTS,
   BODY_LATIN_FONTS,
   MONO_CJK_FONTS,
@@ -1416,26 +1423,122 @@ document.querySelectorAll(".ty-sidebar-tab").forEach((tab) => {
 
 // 源码模式切换 (Ctrl+/ 或按钮)
 let isSourceMode = false;
+/** 读出 textarea 的行高与内边距，用于按行定位滚动 */
+function sourceMetrics() {
+  const cs = getComputedStyle(sourceEditor);
+  const lineHeight = parseFloat(cs.lineHeight) || 24;
+  const paddingTop = parseFloat(cs.paddingTop) || 0;
+  return { lineHeight, paddingTop, viewportHeight: sourceEditor.clientHeight };
+}
+
+/** 把光标的行号滚动到可视区上部三分之一处 */
+function scrollSourceToLine(line: number) {
+  const { lineHeight, paddingTop, viewportHeight } = sourceMetrics();
+  sourceEditor.scrollTop = scrollTopForLine(line, { lineHeight, paddingTop, viewportHeight });
+}
+
+/** 找出 textarea 中光标所在的行号（0 起） */
+function currentSourceLine(): number {
+  const upto = sourceEditor.value.slice(0, sourceEditor.selectionStart);
+  return upto.split("\n").length - 1;
+}
+
 function toggleSourceMode() {
   isSourceMode = !isSourceMode;
+
   if (isSourceMode) {
+    // 进入源码视图：以"光标所在块的内容"为锚点定位源码行
+    const anchorText = editor.getCursorBlockText();
+    const metrics = editor.getScrollMetrics();
+
     sourceEditor.value = editor.getMarkdown();
     sourceEditor.classList.add("visible");
     btnToggleSource.classList.add("active");
+
+    // 估算当前在文档中的大致比例，作为多处命中时的参考
+    const ratio = ratioFromScroll(metrics.top, metrics.scrollHeight, metrics.height);
+    const totalLines = sourceEditor.value.split("\n").length;
+    const nearLine = Math.round(ratio * totalLines);
+
+    const found = findLineByBlockText(anchorText, sourceEditor.value, nearLine);
+    const line =
+      found !== null
+        ? found
+        : lineForBlockIndex(
+            computeBlockStartLines(sourceEditor.value, editor.getBlockCount()),
+            editor.getCursorBlockIndex()
+          );
+
     sourceEditor.focus();
-  } else {
-    editor.setMarkdown(sourceEditor.value);
-    const doc = documents.find((d) => d.id === activeDocId);
-    if (doc && doc.content !== sourceEditor.value) {
-      doc.content = sourceEditor.value;
-      doc.dirty = true;
-      doc.updatedAt = Date.now();
-      scheduleSave();
-    }
-    sourceEditor.classList.remove("visible");
-    btnToggleSource.classList.remove("active");
-    editor.focus();
+    // 光标落到该行行首，切回时能从同一位置恢复
+    const lines = sourceEditor.value.split("\n");
+    const offset = lines.slice(0, line).reduce((sum, l) => sum + l.length + 1, 0);
+    sourceEditor.setSelectionRange(offset, offset);
+    scrollSourceToLine(line);
+    // textarea 首次获得布局后需要再滚一次
+    requestAnimationFrame(() => scrollSourceToLine(line));
+    return;
   }
+
+  // 退出源码视图：按光标所在行找对应的块
+  const line = currentSourceLine();
+  const sourceText = sourceEditor.value;
+
+  editor.setMarkdown(sourceText);
+
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (doc && doc.content !== sourceText) {
+    doc.content = sourceText;
+    doc.dirty = true;
+    doc.updatedAt = Date.now();
+    scheduleSave();
+  }
+
+  sourceEditor.classList.remove("visible");
+  btnToggleSource.classList.remove("active");
+  editor.focus();
+
+  // 用该行的文本在渲染文档里反查块位置。
+  // 需要等两帧：setMarkdown 之后 ProseMirror 才会完成 DOM 重建。
+  const lineText = sourceText.split("\n")[line]?.trim() ?? "";
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      if (!lineText) return;
+
+      // 直接在渲染文档的顶层块里找包含该文本的块，比行号映射更直接
+      const needle = lineText
+        .replace(/^[#>*+\-\d.\s]+/, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 24);
+
+      if (needle) {
+        const doc = editor.getDocument();
+        let targetIndex = -1;
+        let idx = 0;
+        doc.forEach((node) => {
+          if (targetIndex >= 0) return;
+          const text = node.textContent.replace(/\s+/g, " ").trim();
+          if (text.includes(needle)) targetIndex = idx;
+          idx++;
+        });
+
+        if (targetIndex >= 0) {
+          editor.scrollToBlockIndex(targetIndex);
+          return;
+        }
+      }
+
+      // 兜底：按行号比例定位
+      const totalLines = Math.max(1, sourceText.split("\n").length);
+      const ratio = line / totalLines;
+      const metrics = editor.getScrollMetrics();
+      const scroller = document.querySelector(".ty-editor-scroller") as HTMLElement | null;
+      if (scroller) {
+        scroller.scrollTop = ratio * Math.max(0, metrics.scrollHeight - metrics.height);
+      }
+    })
+  );
 }
 
 btnToggleSource.addEventListener("click", toggleSourceMode);

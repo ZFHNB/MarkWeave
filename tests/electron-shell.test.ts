@@ -14,10 +14,18 @@ describe("electron shell configuration", () => {
     expect(pkg.devDependencies["electron-builder"]).toBeTruthy();
   });
 
-  it("configures the Windows portable target", () => {
-    expect(pkg.build.win.target).toContain("portable");
+  it("defaults to the unpacked dir target so startup skips NSIS extraction", () => {
+    // 便携版每次启动要把约 475MB 解压到临时目录（实测约 17 秒）；
+    // dir 形式免解压，冷启动约 1.5 秒。分发时仍可手动指定 portable。
+    expect(pkg.build.win.target).toContain("dir");
     expect(pkg.build.files).toContain("dist/**/*");
     expect(pkg.build.files).toContain("electron/**/*");
+  });
+
+  it("keeps the portable artifact name available for distribution", () => {
+    expect(pkg.build.portable.artifactName).toBe("MarkWeave-${version}-portable.exe");
+    // store 压缩：打包时不再二次压缩，减少首次读取的解压开销
+    expect(pkg.build.compression).toBe("store");
   });
 
   it("hardens the browser window and keeps portable data beside the exe", () => {

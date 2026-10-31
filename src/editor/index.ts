@@ -209,6 +209,66 @@ export class MarkWeaveEditor {
     return this.view.state.selection.from;
   }
 
+  /**
+   * 光标所在的顶层块序号（从 0 开始）。
+   * 源码视图切换到编辑视图时，用它把滚动位置对齐到同一块。
+   */
+  public getCursorBlockIndex(): number {
+    const { $head } = this.view.state.selection;
+    return $head.depth > 0 ? Math.min($head.index(0), this.view.state.doc.childCount - 1) : 0;
+  }
+
+  /** 顶层块总数，供源码行号映射使用 */
+  public getBlockCount(): number {
+    return this.view.state.doc.childCount;
+  }
+
+  /** 光标所在顶层块的纯文本（用于在源码中定位该块） */
+  public getCursorBlockText(): string {
+    const doc = this.view.state.doc;
+    const index = this.getCursorBlockIndex();
+    if (doc.childCount === 0) return "";
+    return doc.child(index).textContent;
+  }
+
+  /** 指定位置所在顶层块的纯文本 */
+  public getBlockTextAt(pos: number): string {
+    const doc = this.view.state.doc;
+    const $pos = doc.resolve(Math.max(0, Math.min(pos, doc.content.size)));
+    const index = Math.min($pos.index(0), doc.childCount - 1);
+    return doc.child(index).textContent;
+  }
+
+  /** 滚动容器当前滚动位置与可视高度（用于两视图位置同步） */
+  public getScrollMetrics(): { top: number; height: number; scrollHeight: number } {
+    const scroller = this.view.dom.closest(".ty-editor-scroller") as HTMLElement | null;
+    if (!scroller) return { top: 0, height: 0, scrollHeight: 0 };
+    return {
+      top: scroller.scrollTop,
+      height: scroller.clientHeight,
+      scrollHeight: scroller.scrollHeight,
+    };
+  }
+
+  /** 把滚动容器定位到指定顶层块，使该块出现在可视区上部三分之一处 */
+  public scrollToBlockIndex(index: number): void {
+    const doc = this.view.state.doc;
+    if (doc.childCount === 0) return;
+
+    const clamped = Math.min(Math.max(0, index), doc.childCount - 1);
+    let offset = 0;
+    for (let i = 0; i < clamped; i++) offset += doc.child(i).nodeSize;
+
+    const dom = this.view.nodeDOM(offset);
+    const scroller = this.view.dom.closest(".ty-editor-scroller") as HTMLElement | null;
+    if (!(dom instanceof HTMLElement) || !scroller) return;
+
+    const domRect = dom.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    const relativeTop = domRect.top - scrollerRect.top + scroller.scrollTop;
+    scroller.scrollTop = Math.max(0, relativeTop - scroller.clientHeight / 3);
+  }
+
   /** 当前选区文本；无选区时返回空串 */
   public getSelectionText(): string {
     const { from, to, empty } = this.view.state.selection;
