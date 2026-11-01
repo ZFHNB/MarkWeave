@@ -51,6 +51,7 @@ import {
 } from "./table/commands";
 import { createTableToolbarPlugin } from "./table/table-toolbar";
 import { createTablePastePlugin } from "./plugins/paste-table";
+import { createMarkdownPastePlugin } from "./plugins/paste-markdown";
 
 export interface EditorOptions {
   mountEl: HTMLElement;
@@ -128,6 +129,7 @@ export class MarkWeaveEditor {
         createTrailingParagraphPlugin(),
         createTableToolbarPlugin(),
         createTablePastePlugin(),
+        createMarkdownPastePlugin(),
         createFootnoteHoverPlugin(),
         createSearchPlugin(),
         createImagePlugin(),
@@ -284,10 +286,33 @@ export class MarkWeaveEditor {
       this.options.onOutlineChange?.(this.getHeadings());
       this.updateStats();
     } else {
-      let tr = this.view.state.tr.replaceWith(0, this.view.state.doc.content.size, newDoc.content);
-      tr = tr.setSelection(Selection.atStart(tr.doc));
+      // 尽量保留原光标位置：按文档比例映射，避免切视图后跳回开头
+      const oldSize = this.view.state.doc.content.size;
+      const oldPos = this.view.state.selection.from;
+      const ratio = oldSize > 0 ? oldPos / oldSize : 0;
+
+      let tr = this.view.state.tr.replaceWith(0, oldSize, newDoc.content);
+      const target = Math.max(1, Math.min(Math.round(ratio * tr.doc.content.size), tr.doc.content.size));
+      tr = tr.setSelection(TextSelection.near(tr.doc.resolve(target), 1));
       this.view.dispatch(tr);
     }
+  }
+
+  /**
+   * 把光标放到指定顶层块的开头（用于源码视图切回时恢复位置）。
+   * 块序号越界时钳制到有效范围。
+   */
+  public setCursorToBlock(index: number) {
+    const doc = this.view.state.doc;
+    if (doc.childCount === 0) return;
+
+    const clamped = Math.min(Math.max(0, index), doc.childCount - 1);
+    let offset = 0;
+    for (let i = 0; i < clamped; i++) offset += doc.child(i).nodeSize;
+
+    const target = Math.min(offset + 1, doc.content.size);
+    const tr = this.view.state.tr.setSelection(TextSelection.near(doc.resolve(target), 1));
+    this.view.dispatch(tr);
   }
 
   public getHeadings(): HeadingItem[] {

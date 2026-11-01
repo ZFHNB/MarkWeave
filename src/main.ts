@@ -379,6 +379,11 @@ app.innerHTML = `
     <!-- 底部状态栏 -->
     <footer class="ty-footer">
       <div class="ty-footer-left">
+        <button class="ty-view-toggle" id="btn-view-toggle" title="切换视图 (Ctrl+/)">
+          <span class="ty-view-toggle-icon" id="view-toggle-icon">&lt;/&gt;</span>
+          <span class="ty-view-toggle-label" id="view-toggle-label">源码模式</span>
+        </button>
+        <span class="ty-footer-divider"></span>
         <span id="stat-words">0 词</span>
         <span id="stat-chars">0 字符</span>
         <span id="stat-lines">0 行</span>
@@ -401,6 +406,9 @@ const sidebar = document.getElementById("sidebar")!;
 const docTitleEl = document.getElementById("doc-title")!;
 const btnToggleSidebar = document.getElementById("btn-toggle-sidebar")!;
 const btnToggleSource = document.getElementById("btn-toggle-source")!;
+const btnViewToggle = document.getElementById("btn-view-toggle") as HTMLButtonElement;
+const viewToggleIcon = document.getElementById("view-toggle-icon") as HTMLElement;
+const viewToggleLabel = document.getElementById("view-toggle-label") as HTMLElement;
 const btnInsertTable = document.getElementById("btn-insert-table")!;
 const btnToggleTheme = document.getElementById("btn-toggle-theme")!;
 const btnFocusMode = document.getElementById("btn-focus-mode")!;
@@ -1443,6 +1451,22 @@ function currentSourceLine(): number {
   return upto.split("\n").length - 1;
 }
 
+/** 更新视图切换指示器：主视图显示"源码模式"，源码视图显示"退出源代码模式" */
+function syncViewToggleIndicator() {
+  if (!btnViewToggle) return;
+  if (isSourceMode) {
+    btnViewToggle.classList.add("is-source");
+    viewToggleLabel.textContent = "退出源代码模式";
+    viewToggleIcon.textContent = "</>";
+    btnViewToggle.title = "退出源代码模式 (Ctrl+/)";
+  } else {
+    btnViewToggle.classList.remove("is-source");
+    viewToggleLabel.textContent = "源码模式";
+    viewToggleIcon.textContent = "</>";
+    btnViewToggle.title = "切换到源码模式 (Ctrl+/)";
+  }
+}
+
 function toggleSourceMode() {
   isSourceMode = !isSourceMode;
 
@@ -1477,6 +1501,7 @@ function toggleSourceMode() {
     scrollSourceToLine(line);
     // textarea 首次获得布局后需要再滚一次
     requestAnimationFrame(() => scrollSourceToLine(line));
+    syncViewToggleIndicator();
     return;
   }
 
@@ -1497,6 +1522,7 @@ function toggleSourceMode() {
   sourceEditor.classList.remove("visible");
   btnToggleSource.classList.remove("active");
   editor.focus();
+  syncViewToggleIndicator();
 
   // 用该行的文本在渲染文档里反查块位置。
   // 需要等两帧：setMarkdown 之后 ProseMirror 才会完成 DOM 重建。
@@ -1524,6 +1550,8 @@ function toggleSourceMode() {
         });
 
         if (targetIndex >= 0) {
+          // 光标与滚动位置都要恢复，否则下一次切换又会从文档开头算起
+          editor.setCursorToBlock(targetIndex);
           editor.scrollToBlockIndex(targetIndex);
           return;
         }
@@ -1542,6 +1570,10 @@ function toggleSourceMode() {
 }
 
 btnToggleSource.addEventListener("click", toggleSourceMode);
+btnViewToggle?.addEventListener("click", toggleSourceMode);
+
+// 初始化指示器
+syncViewToggleIndicator();
 
 function handleOpenInsertTable() {
   if (isSourceMode) {
