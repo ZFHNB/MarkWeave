@@ -75,6 +75,11 @@ import {
 } from "./workspace/external-change";
 import { toStandaloneHtml } from "./export/html-export";
 import { PANDOC_FORMATS, getFormat } from "./export/pandoc";
+import {
+  DEFAULT_EDITOR_BEHAVIOR,
+  normalizeEditorBehavior,
+  type EditorBehaviorSettings,
+} from "./editor/behavior-settings";
 import { renderMermaidForExport } from "./export/mermaid-render";
 import {
   DEFAULT_AUTO_SAVE,
@@ -248,7 +253,11 @@ const seededWorkspace: WorkspaceStateV1 = createWorkspace(
 
 let workspaceState: WorkspaceStateV1;
 try {
-  workspaceState = loadWorkspace(localStorage, seededWorkspace);
+  // 关闭「恢复上次会话」时跳过本地存档，直接从初始文档开始
+  const behavior = loadEditorBehavior();
+  workspaceState = behavior.restoreSession
+    ? loadWorkspace(localStorage, seededWorkspace)
+    : seededWorkspace;
 } catch (err) {
   console.warn("Failed to load workspace, using fallback:", err);
   workspaceState = seededWorkspace;
@@ -1910,6 +1919,7 @@ export interface MarkWeaveSettings {
   lineEnding: LineEnding;
   finalNewline: boolean;
   autoSave: AutoSaveSettings;
+  behavior: EditorBehaviorSettings;
 }
 
 function loadPdfOptions(): PdfOptions {
@@ -1919,6 +1929,16 @@ function loadPdfOptions(): PdfOptions {
     return normalizePdfOptions(JSON.parse(raw));
   } catch {
     return DEFAULT_PDF_OPTIONS;
+  }
+}
+
+function loadEditorBehavior(): EditorBehaviorSettings {
+  try {
+    const raw = localStorage.getItem("markweave_editor_behavior");
+    if (!raw) return { ...DEFAULT_EDITOR_BEHAVIOR };
+    return normalizeEditorBehavior(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_EDITOR_BEHAVIOR };
   }
 }
 
@@ -1960,6 +1980,7 @@ function loadSettings(): MarkWeaveSettings {
     lineEnding: (localStorage.getItem("markweave_line_ending") as LineEnding) || "lf",
     finalNewline: localStorage.getItem("markweave_final_newline") !== "false",
     autoSave: loadAutoSaveSettings(),
+    behavior: loadEditorBehavior(),
   };
 }
 
@@ -1990,6 +2011,7 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_line_ending", settings.lineEnding);
   localStorage.setItem("markweave_final_newline", String(settings.finalNewline));
   localStorage.setItem("markweave_autosave", JSON.stringify(settings.autoSave));
+  localStorage.setItem("markweave_editor_behavior", JSON.stringify(settings.behavior));
 
   applySettings(settings);
 }
@@ -1997,6 +2019,20 @@ function saveSettings(settings: MarkWeaveSettings) {
 let currentMermaidThemePreference: MermaidThemePreference = normalizeMermaidTheme(
   typeof localStorage !== "undefined" ? localStorage.getItem("markweave_mermaid_theme") : "auto"
 );
+
+/** 把编辑器行为设置应用到 DOM：拼写检查、代码换行等 */
+function applyEditorBehavior(behavior: EditorBehaviorSettings) {
+  // 拼写检查：正文可编辑区
+  const editable = mountEl;
+  if (editable) {
+    editable.setAttribute("spellcheck", behavior.spellcheck ? "true" : "false");
+  }
+
+  // 代码块自动换行
+  document.body.classList.toggle("code-wrap", behavior.codeWrap);
+
+  // 自动链接由输入规则插件在运行时读取，这里只需持久化
+}
 
 function applySettings(settings: MarkWeaveSettings) {
   const root = document.documentElement;
@@ -2033,6 +2069,7 @@ function applySettings(settings: MarkWeaveSettings) {
 
   applyBuiltInTheme(settings.editorTheme);
   applyAutoSaveSettings(settings.autoSave);
+  applyEditorBehavior(settings.behavior);
 
   const api = getDesktopAPI();
   if (api && typeof api.setLanguage === "function") {
@@ -2370,6 +2407,52 @@ function openSettingsModal() {
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">编辑行为</div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">拼写检查</span>
+              <span class="ty-settings-desc">正文中拼错的单词显示波浪下划线</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-spellcheck" ${currentSettings.behavior.spellcheck ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自动链接</span>
+              <span class="ty-settings-desc">输入网址后按空格自动转为可点击链接</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-autolink" ${currentSettings.behavior.autoLink ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">代码块自动换行</span>
+              <span class="ty-settings-desc">长代码行折行显示，而不是横向滚动</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-codewrap" ${currentSettings.behavior.codeWrap ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">恢复上次会话</span>
+              <span class="ty-settings-desc">启动时打开上次的文档与光标位置</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-restore" ${currentSettings.behavior.restoreSession ? "checked" : ""} />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         <!-- Tab 3: 外观主题 -->
@@ -2680,6 +2763,10 @@ function openSettingsModal() {
     const indentSize = parseInt((modalOverlay.querySelector("#setting-select-indent") as HTMLSelectElement)?.value || "2", 10) || 2;
     const lineEnding = ((modalOverlay.querySelector("#setting-select-line-ending") as HTMLSelectElement)?.value as LineEnding) || "lf";
     const finalNewline = (modalOverlay.querySelector("#setting-toggle-finalnewline") as HTMLInputElement)?.checked ?? true;
+    const spellcheck = (modalOverlay.querySelector("#setting-toggle-spellcheck") as HTMLInputElement)?.checked ?? false;
+    const autoLink = (modalOverlay.querySelector("#setting-toggle-autolink") as HTMLInputElement)?.checked ?? true;
+    const codeWrap = (modalOverlay.querySelector("#setting-toggle-codewrap") as HTMLInputElement)?.checked ?? false;
+    const restoreSession = (modalOverlay.querySelector("#setting-toggle-restore") as HTMLInputElement)?.checked ?? true;
     const autoSaveMode = ((modalOverlay.querySelector("#setting-select-autosave-mode") as HTMLSelectElement)?.value as AutoSaveSettings["mode"]) || "off";
     const autoSaveInterval = parseInt((modalOverlay.querySelector("#setting-input-autosave-interval") as HTMLInputElement)?.value || "5", 10) || 5;
     const historyDir = (modalOverlay.querySelector("#setting-input-history-dir") as HTMLInputElement)?.value || "";
@@ -2712,6 +2799,7 @@ function openSettingsModal() {
       indentSize,
       lineEnding,
       finalNewline,
+      behavior: normalizeEditorBehavior({ spellcheck, autoLink, codeWrap, restoreSession }),
       autoSave: normalizeAutoSaveSettings({
         mode: autoSaveMode,
         intervalMinutes: autoSaveInterval,

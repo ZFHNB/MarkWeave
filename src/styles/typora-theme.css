@@ -3046,3 +3046,15 @@ body.md-block-dragging .ProseMirror * {
   font-size: 11px;
   opacity: 0.7;
 }
+
+/* ================= 代码块自动换行（可在偏好设置中开启） ================= */
+body.code-wrap .md-fences-content {
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+body.code-wrap .md-fences-content code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}

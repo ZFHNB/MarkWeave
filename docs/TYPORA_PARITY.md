@@ -146,7 +146,7 @@ General（窗口样式/主题/字数/字体/左侧面板/语言）、Editor（�
 ### P7 — 外观与偏好
 1. 内置主题移植（github/newsprint/night/pixyll/whitey）+ 自定义主题文件夹。
 2. 独立深色主题、跟随系统。
-3. 偏好设置面板扩展至 Typora 全集（General/Editor/Markdown/Appearance/Save&Recover/Security/Advanced）。
+3. 偏好设置面板扩展（进行中）：已补拼写检查、自动链接、代码换行、恢复上次会话；其余分组待办。
 4. 字体族/字号/行距/缩进/自动配对/智能标点。
 
 ### P8 — 质量与发布
