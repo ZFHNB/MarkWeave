@@ -3,6 +3,8 @@
 const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
+const { execFile } = require("child_process");
 const { buildMenuTemplate } = require("./menu.cjs");
 
 // Configure portable userData directory before app is ready
@@ -395,6 +397,137 @@ ipcMain.handle("file:trash", async (_event, targetPath) => {
  * 使用 Electron 的 printToPDF 导出 PDF：不会弹出打印对话框，
  * 支持纸张、方向、页边距与背景色。
  */
+/**
+ * Pandoc 桥：把 Markdown 转成 docx / epub 等格式。
+ *
+ * 只调用系统已安装的 pandoc，不做任何下载或安装。
+ * 未安装时返回明确的结构化错误，由界面提示用户。
+ */
+const PANDOC_TIMEOUT_MS = 60 * 1000;
+
+/** 允许用户通过环境变量指定 pandoc 路径（便携场景常用） */
+function pandocExecutable() {
+  const custom = process.env.MARKWEAVE_PANDOC_PATH || process.env.PANDOC_PATH;
+  return custom && custom.trim() ? custom.trim() : "pandoc";
+}
+
+function runPandoc(args) {
+  return new Promise((resolve) => {
+    const executable = pandocExecutable();
+    // Windows 上 .cmd/.bat 必须经 shell 才能启动（直接 execFile 会 EINVAL）
+    const needsShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(executable);
+
+    execFile(
+      executable,
+      args,
+      {
+        timeout: PANDOC_TIMEOUT_MS,
+        windowsHide: true,
+        maxBuffer: 8 * 1024 * 1024,
+        ...(needsShell ? { shell: true } : {}),
+      },
+      (error, stdout, stderr) => {
+        if (error) {
+          resolve({
+            ok: false,
+            exitCode: typeof error.code === "number" ? error.code : null,
+            stderr: String(stderr || error.message || ""),
+          });
+          return;
+        }
+        resolve({ ok: true, stdout: String(stdout || ""), stderr: String(stderr || "") });
+      }
+    );
+  });
+}
+
+ipcMain.handle("pandoc:detect", async () => {
+  const result = await runPandoc(["--version"]);
+  if (!result.ok) {
+    return { available: false, version: null, error: classifyPandocFailure(result) };
+  }
+  const firstLine = (result.stdout || "").trim().split("\n")[0] || "";
+  return { available: true, version: firstLine, error: null };
+});
+
+function classifyPandocFailure(result) {
+  const text = (result.stderr || "").trim();
+  if (!text) return "pandoc 执行失败";
+  if (/ENOENT|not found/i.test(text)) return "未安装 pandoc 或不在 PATH 中";
+  return text.split("\n")[0].slice(0, 200);
+}
+
+/**
+ * 执行转换。
+ * payload: { markdown, format, outputPath, metadata }
+ * 未提供 outputPath 时弹出保存对话框。
+ */
+ipcMain.handle("pandoc:convert", async (_event, payload) => {
+  if (!payload || typeof payload.markdown !== "string") {
+    return { ok: false, error: "缺少输入内容" };
+  }
+
+  const format = typeof payload.format === "string" ? payload.format : "docx";
+  const EXTENSIONS = {
+    docx: "docx", odt: "odt", epub: "epub", latex: "tex", rtf: "rtf",
+    pptx: "pptx", rst: "rst", org: "org", mediawiki: "wiki", plain: "txt",
+  };
+  const ext = EXTENSIONS[format] || "txt";
+
+  let outputPath = payload.outputPath;
+  if (!outputPath) {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: "导出文档",
+      defaultPath: payload.suggestedName || `document.${ext}`,
+      filters: [{ name: format.toUpperCase(), extensions: [ext] }],
+    });
+    if (result.canceled || !result.filePath) {
+      return { ok: false, canceled: true, error: null };
+    }
+    outputPath = result.filePath;
+  }
+
+  // 先写临时 Markdown，再让 pandoc 读取
+  let tmpDir = null;
+  try {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "markweave-pandoc-"));
+    const inputPath = path.join(tmpDir, "input.md");
+    await fs.promises.writeFile(inputPath, payload.markdown, "utf8");
+
+    const args = [
+      inputPath,
+      "-f",
+      "markdown+pipe_tables+task_lists+footnotes+strikeout",
+      "-t",
+      format,
+      "-o",
+      outputPath,
+      "--standalone",
+    ];
+
+    for (const [key, value] of Object.entries(payload.metadata || {})) {
+      if (typeof value === "string" && value.trim()) {
+        args.push("-M", `${key}=${value}`);
+      }
+    }
+
+    const result = await runPandoc(args);
+    if (!result.ok) {
+      return { ok: false, error: classifyPandocFailure(result), exitCode: result.exitCode };
+    }
+
+    const stat = await fs.promises.stat(outputPath);
+    return { ok: true, path: outputPath, bytes: stat.size };
+  } catch (err) {
+    console.error("Pandoc 转换失败:", err);
+    return { ok: false, error: String(err && err.message ? err.message : err) };
+  } finally {
+    if (tmpDir) {
+      fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+});
+
 ipcMain.handle("print:pdf", async (_event, payload) => {
   if (!mainWindow || mainWindow.isDestroyed()) return null;
   const options = payload?.options || {};

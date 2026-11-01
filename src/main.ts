@@ -74,6 +74,7 @@ import {
   type TrackedFile,
 } from "./workspace/external-change";
 import { toStandaloneHtml } from "./export/html-export";
+import { PANDOC_FORMATS, getFormat } from "./export/pandoc";
 import { renderMermaidForExport } from "./export/mermaid-render";
 import {
   DEFAULT_AUTO_SAVE,
@@ -362,6 +363,9 @@ app.innerHTML = `
         <button class="ty-icon-btn" id="btn-export-pdf" title="打印/导出 PDF">
           打印 PDF
         </button>
+        <button class="ty-icon-btn" id="btn-export-pandoc" title="用 Pandoc 导出为 Word / EPUB 等格式">
+          更多格式
+        </button>
       </div>
     </header>
 
@@ -418,6 +422,7 @@ const btnSaveFile = document.getElementById("btn-save-file") as HTMLButtonElemen
 const saveStatusEl = document.getElementById("save-status") as HTMLElement;
 const btnExportHtml = document.getElementById("btn-export-html")!;
 const btnExportPdf = document.getElementById("btn-export-pdf")!;
+const btnExportPandoc = document.getElementById("btn-export-pandoc") as HTMLButtonElement;
 const btnNewFile = document.getElementById("btn-new-file")!;
 const btnOpenFile = document.getElementById("btn-open-file")!;
 const localFileInput = document.getElementById("local-file-input") as HTMLInputElement;
@@ -3187,6 +3192,114 @@ async function exportHtml(): Promise<void> {
 btnExportPdf.addEventListener("click", () => {
   void exportPdf();
 });
+
+/* ================= Pandoc 导出（Word / EPUB 等） ================= */
+btnExportPandoc?.addEventListener("click", () => {
+  void openPandocExportDialog();
+});
+
+/** 打开格式选择对话框，并在选择后执行转换 */
+async function openPandocExportDialog(): Promise<void> {
+  const api = getDesktopAPI();
+
+  if (!api?.convertWithPandoc) {
+    window.alert("Pandoc 导出仅在桌面版可用。");
+    return;
+  }
+
+  // 先检测 pandoc 是否可用，避免用户选完格式才失败
+  const detected = await api.detectPandoc?.();
+  if (detected && !detected.available) {
+    window.alert(
+      `未检测到 pandoc。\n\n${detected.error ?? ""}\n\n` +
+        "请先安装 pandoc（https://pandoc.org/installing.html），安装后重启本程序。"
+    );
+    return;
+  }
+
+  const currentDoc = documents.find((d) => d.id === activeDocId);
+  const baseTitle = (currentDoc?.title ?? "document").replace(/\.md$/i, "");
+
+  const overlay = document.createElement("div");
+  overlay.className = "ty-modal-overlay";
+  overlay.id = "pandoc-export-overlay";
+
+  const formatCards = PANDOC_FORMATS.map(
+    (f) => `
+      <label class="ty-export-option-card ${f.id === "docx" ? "selected" : ""}"
+             data-format="${f.id}">
+        <input type="radio" name="pandoc-format" value="${f.id}" ${f.id === "docx" ? "checked" : ""} />
+        <div class="ty-export-option-content">
+          <div class="ty-export-option-title">${f.label}</div>
+          <div class="ty-export-option-desc">${f.description}</div>
+        </div>
+      </label>`
+  ).join("");
+
+  overlay.innerHTML = `
+    <div class="ty-modal-card ty-pandoc-dialog">
+      <div class="ty-modal-header ty-settings-header">
+        <div class="ty-modal-title">导出为其他格式</div>
+        <button class="ty-modal-close" id="pandoc-close" aria-label="关闭">&times;</button>
+      </div>
+      <p class="ty-modal-desc">
+        通过 pandoc 转换，适合输出到 Word、EPUB、LaTeX 等格式。
+        ${detected?.version ? `<br /><span class="ty-pandoc-version">${detected.version}</span>` : ""}
+      </p>
+      <div class="ty-pandoc-formats">${formatCards}</div>
+      <div class="ty-modal-footer">
+        <button class="ty-btn" id="pandoc-cancel">取消</button>
+        <button class="ty-btn ty-btn-primary" id="pandoc-confirm">导出</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  const close = () => overlay.remove();
+
+  overlay.querySelector("#pandoc-close")?.addEventListener("click", close);
+  overlay.querySelector("#pandoc-cancel")?.addEventListener("click", close);
+  overlay.addEventListener("click", (e) => {
+    if (e.target === overlay) close();
+  });
+
+  // 卡片选中态
+  overlay.querySelectorAll<HTMLElement>(".ty-export-option-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      overlay
+        .querySelectorAll(".ty-export-option-card")
+        .forEach((c) => c.classList.remove("selected"));
+      card.classList.add("selected");
+    });
+  });
+
+  overlay.querySelector("#pandoc-confirm")?.addEventListener("click", async () => {
+    const selected =
+      overlay.querySelector<HTMLInputElement>('input[name="pandoc-format"]:checked')?.value ??
+      "docx";
+    const format = getFormat(selected);
+
+    close();
+    showSaveStatus("导出中…", "saving");
+
+    const markdown = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+    const result = await api.convertWithPandoc?.({
+      markdown,
+      format: selected,
+      suggestedName: `${baseTitle}.${format.extension}`,
+      metadata: { title: baseTitle },
+    });
+
+    if (result?.ok) {
+      showSaveStatus("已导出", "saved");
+    } else if (result?.canceled) {
+      showSaveStatus("已取消", "idle");
+    } else {
+      showSaveStatus("导出失败", "error");
+      window.alert(`导出失败：${result?.error ?? "未知错误"}`);
+    }
+  });
+}
 
 async function exportPdf(): Promise<void> {
   const api = getDesktopAPI();

@@ -1,6 +1,6 @@
 {
   "name": "markweave",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MarkWeave - 现代即时渲染、支持可拖拽 Mermaid 图表可视化排版的 Markdown 编辑器",
   "private": true,
   "type": "module",

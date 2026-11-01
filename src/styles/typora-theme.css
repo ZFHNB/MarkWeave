@@ -3012,3 +3012,37 @@ body.md-block-dragging .ProseMirror * {
   margin: 0 8px;
   background: var(--border-color);
 }
+
+/* ================= Pandoc 导出对话框 ================= */
+.ty-pandoc-dialog {
+  max-width: 560px !important;
+  width: 90% !important;
+}
+
+.ty-pandoc-formats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 44vh;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.ty-pandoc-formats .ty-export-option-card {
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.ty-pandoc-formats .ty-export-option-title {
+  font-size: 13px;
+}
+
+.ty-pandoc-formats .ty-export-option-desc {
+  font-size: 11.5px;
+}
+
+.ty-pandoc-version {
+  font-family: var(--monospace);
+  font-size: 11px;
+  opacity: 0.7;
+}

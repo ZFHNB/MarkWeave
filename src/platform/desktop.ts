@@ -68,6 +68,14 @@ export interface MarkWeaveDesktopAPI {
   onOpenPath: (callback: (filePath: string) => void) => () => void;
   onCloseRequested?: (callback: () => void) => () => void;
   confirmClose?: () => void;
+  detectPandoc?: () => Promise<{ available: boolean; version: string | null; error: string | null }>;
+  convertWithPandoc?: (payload: {
+    markdown: string;
+    format: string;
+    outputPath?: string;
+    suggestedName?: string;
+    metadata?: Record<string, string>;
+  }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string | null; canceled?: boolean }>;
 }
 
 declare global {

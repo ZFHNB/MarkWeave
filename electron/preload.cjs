@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("markweave", {
   listHistory: (dir) => ipcRenderer.invoke("history:list", dir),
   removeHistory: (payload) => ipcRenderer.invoke("history:remove", payload),
   chooseDirectory: () => ipcRenderer.invoke("dialog:choose-directory"),
+  detectPandoc: () => ipcRenderer.invoke("pandoc:detect"),
+  convertWithPandoc: (payload) => ipcRenderer.invoke("pandoc:convert", payload),
   openThemesFolder: () => ipcRenderer.invoke("themes:open-folder"),
   onMenuAction: (callback) => {
     if (typeof callback !== "function") return () => {};
