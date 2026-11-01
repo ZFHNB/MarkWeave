@@ -13,8 +13,9 @@
     "test:e2e": "node scripts/test-e2e.mjs",
     "electron:dev": "cross-env MARKWEAVE_DEV_URL=http://localhost:5173 electron .",
     "electron:start": "npm run build && electron .",
-    "package:portable": "npm run build && electron-builder --win portable",
-    "package:dir": "npm run build && electron-builder --win dir"
+    "package": "node scripts/package.mjs",
+    "package:dir": "node scripts/package.mjs --dir",
+    "package:portable": "node scripts/package.mjs --portable"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",
@@ -66,8 +67,7 @@
     },
     "portable": {
       "artifactName": "MarkWeave-${version}-portable.exe"
-    },
-    "compression": "store"
+    }
   },
   "scripts_extra": {
     "_comment": "便携版每次启动要把约 475MB 解压到临时目录（约 15 秒）。dir 形式免解压，启动约 1-2 秒。"

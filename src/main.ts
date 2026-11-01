@@ -1524,9 +1524,18 @@ function toggleSourceMode() {
   editor.focus();
   syncViewToggleIndicator();
 
+  // 记录源码光标在本行内的列偏移，切回时据此还原块内位置
+  const sourceLines = sourceText.split("\n");
+  const lineRaw = sourceLines[line] ?? "";
+  const lineStart = sourceText.lastIndexOf("\n", sourceEditor.selectionStart - 1) + 1;
+  const columnInLine = Math.max(0, sourceEditor.selectionStart - lineStart);
+  // 行首的 Markdown 标记（#、>、- 等）在渲染视图里不存在，需要扣掉
+  const leadingMarkup = (lineRaw.match(/^[\s#>*+\-\d.]+/) ?? [""])[0].length;
+  const inlineOffset = Math.max(0, columnInLine - leadingMarkup);
+
   // 用该行的文本在渲染文档里反查块位置。
   // 需要等两帧：setMarkdown 之后 ProseMirror 才会完成 DOM 重建。
-  const lineText = sourceText.split("\n")[line]?.trim() ?? "";
+  const lineText = lineRaw.trim();
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
       if (!lineText) return;
@@ -1551,7 +1560,7 @@ function toggleSourceMode() {
 
         if (targetIndex >= 0) {
           // 光标与滚动位置都要恢复，否则下一次切换又会从文档开头算起
-          editor.setCursorToBlock(targetIndex);
+          editor.setCursorToBlock(targetIndex, inlineOffset);
           editor.scrollToBlockIndex(targetIndex);
           return;
         }

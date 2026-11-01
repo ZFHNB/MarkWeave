@@ -302,7 +302,7 @@ export class MarkWeaveEditor {
    * 把光标放到指定顶层块的开头（用于源码视图切回时恢复位置）。
    * 块序号越界时钳制到有效范围。
    */
-  public setCursorToBlock(index: number) {
+  public setCursorToBlock(index: number, inlineOffset = 0) {
     const doc = this.view.state.doc;
     if (doc.childCount === 0) return;
 
@@ -310,7 +310,11 @@ export class MarkWeaveEditor {
     let offset = 0;
     for (let i = 0; i < clamped; i++) offset += doc.child(i).nodeSize;
 
-    const target = Math.min(offset + 1, doc.content.size);
+    const block = doc.child(clamped);
+    // 块内相对偏移钳制到块内容长度内，保证光标落在同一块的同一位置附近
+    const inner = Math.min(Math.max(0, inlineOffset), Math.max(0, block.content.size));
+    const target = Math.min(offset + 1 + inner, doc.content.size);
+
     const tr = this.view.state.tr.setSelection(TextSelection.near(doc.resolve(target), 1));
     this.view.dispatch(tr);
   }

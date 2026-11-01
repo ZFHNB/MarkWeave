@@ -24,8 +24,8 @@ describe("electron shell configuration", () => {
 
   it("keeps the portable artifact name available for distribution", () => {
     expect(pkg.build.portable.artifactName).toBe("MarkWeave-${version}-portable.exe");
-    // store 压缩：打包时不再二次压缩，减少首次读取的解压开销
-    expect(pkg.build.compression).toBe("store");
+    // 使用默认压缩：store 会让产物从 98MB 膨胀到 387MB，不划算
+    expect(pkg.build.compression).toBeUndefined();
   });
 
   it("hardens the browser window and keeps portable data beside the exe", () => {

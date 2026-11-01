@@ -87,8 +87,7 @@ powershell.cmd
 .claude/
 
 # 打包中间产物
-build-out/
-release-new/
 
 # 目录版发布产物
-release-dir/
+released/
+.package-staging/
