@@ -76,6 +76,18 @@ import {
 import { toStandaloneHtml } from "./export/html-export";
 import { PANDOC_FORMATS, getFormat } from "./export/pandoc";
 import {
+  DEFAULT_SYNTAX_OPTIONS,
+  setMarkdownSyntaxOptions,
+  type MarkdownSyntaxOptions,
+} from "./editor/serializer/markdown";
+import {
+  INITIAL_UPDATE_STATE,
+  createUnsupportedChannel,
+  type UpdateChannel,
+  type UpdateState,
+  type UpdateStatus,
+} from "./platform/update-channel";
+import {
   buildExportMeta,
   frontMatterFromNode,
   resolveHtmlTitle,
@@ -2058,6 +2070,7 @@ export interface MarkWeaveSettings {
   finalNewline: boolean;
   autoSave: AutoSaveSettings;
   behavior: EditorBehaviorSettings;
+  markdownSyntax: MarkdownSyntaxOptions;
 }
 
 function loadPdfOptions(): PdfOptions {
@@ -2067,6 +2080,26 @@ function loadPdfOptions(): PdfOptions {
     return normalizePdfOptions(JSON.parse(raw));
   } catch {
     return DEFAULT_PDF_OPTIONS;
+  }
+}
+
+function loadMarkdownSyntax(): MarkdownSyntaxOptions {
+  try {
+    const raw = localStorage.getItem("markweave_markdown_syntax");
+    if (!raw) return { ...DEFAULT_SYNTAX_OPTIONS };
+    const parsed = JSON.parse(raw) as Partial<MarkdownSyntaxOptions>;
+    return {
+      softBreaksAsHardBreaks:
+        typeof parsed.softBreaksAsHardBreaks === "boolean"
+          ? parsed.softBreaksAsHardBreaks
+          : DEFAULT_SYNTAX_OPTIONS.softBreaksAsHardBreaks,
+      autoLink:
+        typeof parsed.autoLink === "boolean"
+          ? parsed.autoLink
+          : DEFAULT_SYNTAX_OPTIONS.autoLink,
+    };
+  } catch {
+    return { ...DEFAULT_SYNTAX_OPTIONS };
   }
 }
 
@@ -2119,6 +2152,7 @@ function loadSettings(): MarkWeaveSettings {
     finalNewline: localStorage.getItem("markweave_final_newline") !== "false",
     autoSave: loadAutoSaveSettings(),
     behavior: loadEditorBehavior(),
+    markdownSyntax: loadMarkdownSyntax(),
   };
 }
 
@@ -2150,6 +2184,7 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_final_newline", String(settings.finalNewline));
   localStorage.setItem("markweave_autosave", JSON.stringify(settings.autoSave));
   localStorage.setItem("markweave_editor_behavior", JSON.stringify(settings.behavior));
+  localStorage.setItem("markweave_markdown_syntax", JSON.stringify(settings.markdownSyntax));
 
   applySettings(settings);
 }
@@ -2170,6 +2205,11 @@ function applyEditorBehavior(behavior: EditorBehaviorSettings) {
   document.body.classList.toggle("code-wrap", behavior.codeWrap);
 
   // 自动链接由输入规则插件在运行时读取，这里只需持久化
+}
+
+/** 把语法开关写入解析器；变更后需重新解析当前文档才生效 */
+function applyMarkdownSyntax(syntax: MarkdownSyntaxOptions) {
+  setMarkdownSyntaxOptions(syntax);
 }
 
 function applySettings(settings: MarkWeaveSettings) {
@@ -2208,6 +2248,7 @@ function applySettings(settings: MarkWeaveSettings) {
   applyBuiltInTheme(settings.editorTheme);
   applyAutoSaveSettings(settings.autoSave);
   applyEditorBehavior(settings.behavior);
+  applyMarkdownSyntax(settings.markdownSyntax);
 
   const api = getDesktopAPI();
   if (api && typeof api.setLanguage === "function") {
@@ -2319,7 +2360,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">拖拽节点时自动吸附对齐到 10px 网格，连线更规整</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-grid" ${currentSettings.gridSnap ? "checked" : ""} / aria-label="节点拖拽吸附网格">
+              <input type="checkbox" id="setting-toggle-grid" ${currentSettings.gridSnap ? "checked" : ""} aria-label="节点拖拽吸附网格" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2404,7 +2445,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-body-latin"
               placeholder="例如：EB Garamond, Garamond"
-              value="${currentSettings.customBodyLatin.replace(/"/g, "&quot;")}" / aria-label="自定义西文字体">
+              value="${currentSettings.customBodyLatin.replace(/"/g, "&quot;")}" aria-label="自定义西文字体" />
           </div>
 
           <div class="ty-settings-row">
@@ -2431,7 +2472,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-body-cjk"
               placeholder="例如：Source Han Sans SC"
-              value="${currentSettings.customBodyCJK.replace(/"/g, "&quot;")}" / aria-label="自定义中文字体">
+              value="${currentSettings.customBodyCJK.replace(/"/g, "&quot;")}" aria-label="自定义中文字体" />
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">代码字体</div>
@@ -2460,7 +2501,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-mono-latin"
               placeholder="例如：JetBrains Mono"
-              value="${currentSettings.customMonoLatin.replace(/"/g, "&quot;")}" / aria-label="自定义代码西文字体">
+              value="${currentSettings.customMonoLatin.replace(/"/g, "&quot;")}" aria-label="自定义代码西文字体" />
           </div>
 
           <div class="ty-settings-row">
@@ -2487,7 +2528,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-mono-cjk"
               placeholder="例如：Sarasa Mono SC"
-              value="${currentSettings.customMonoCJK.replace(/"/g, "&quot;")}" / aria-label="自定义代码中文字体">
+              value="${currentSettings.customMonoCJK.replace(/"/g, "&quot;")}" aria-label="自定义代码中文字体" />
           </div>
 
           <div class="ty-settings-row">
@@ -2496,7 +2537,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">输入 ( [ { 与引号时自动补全右半部分</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-autopair" ${currentSettings.autoPair ? "checked" : ""} / aria-label="自动配对括号与引号">
+              <input type="checkbox" id="setting-toggle-autopair" ${currentSettings.autoPair ? "checked" : ""} aria-label="自动配对括号与引号" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2507,7 +2548,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">输入时把 -- 与 --- 转换为短横线/长横线</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-smartpunct" ${currentSettings.smartPunctuation ? "checked" : ""} / aria-label="智能标点">
+              <input type="checkbox" id="setting-toggle-smartpunct" ${currentSettings.smartPunctuation ? "checked" : ""} aria-label="智能标点" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2541,7 +2582,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">保证文件以换行结尾（推荐）</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-finalnewline" ${currentSettings.finalNewline ? "checked" : ""} / aria-label="保存时保留末尾换行">
+              <input type="checkbox" id="setting-toggle-finalnewline" ${currentSettings.finalNewline ? "checked" : ""} aria-label="保存时保留末尾换行" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2554,7 +2595,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">正文中拼错的单词显示波浪下划线</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-spellcheck" ${currentSettings.behavior.spellcheck ? "checked" : ""} / aria-label="拼写检查">
+              <input type="checkbox" id="setting-toggle-spellcheck" ${currentSettings.behavior.spellcheck ? "checked" : ""} aria-label="拼写检查" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2565,7 +2606,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">输入网址后按空格自动转为可点击链接</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-autolink" ${currentSettings.behavior.autoLink ? "checked" : ""} / aria-label="自动链接">
+              <input type="checkbox" id="setting-toggle-autolink" ${currentSettings.behavior.autoLink ? "checked" : ""} aria-label="自动链接" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2576,7 +2617,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">长代码行折行显示，而不是横向滚动</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-codewrap" ${currentSettings.behavior.codeWrap ? "checked" : ""} / aria-label="代码块自动换行">
+              <input type="checkbox" id="setting-toggle-codewrap" ${currentSettings.behavior.codeWrap ? "checked" : ""} aria-label="代码块自动换行" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2587,7 +2628,31 @@ function openSettingsModal() {
               <span class="ty-settings-desc">启动时打开上次的文档与光标位置</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-restore" ${currentSettings.behavior.restoreSession ? "checked" : ""} / aria-label="恢复上次会话">
+              <input type="checkbox" id="setting-toggle-restore" ${currentSettings.behavior.restoreSession ? "checked" : ""} aria-label="恢复上次会话" />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">Markdown 语法</div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">单个换行视为换行</span>
+              <span class="ty-settings-desc">开启后段落内换行直接断行；关闭时需空行才分段</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-softbreak" ${currentSettings.markdownSyntax.softBreaksAsHardBreaks ? "checked" : ""} aria-label="单个换行视为换行" />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">自动识别网址</span>
+              <span class="ty-settings-desc">把裸网址自动转成可点击链接</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-syntax-autolink" ${currentSettings.markdownSyntax.autoLink ? "checked" : ""} aria-label="自动识别网址" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2667,7 +2732,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">选择「按固定间隔」时生效，单位分钟</span>
             </div>
             <input class="ty-settings-input" type="number" id="setting-input-autosave-interval"
-              min="1" max="120" step="1" value="${currentSettings.autoSave.intervalMinutes}" / aria-label="自动保存间隔">
+              min="1" max="120" step="1" value="${currentSettings.autoSave.intervalMinutes}" aria-label="自动保存间隔" />
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">历史副本</div>
@@ -2677,7 +2742,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">保存前留一份带时间戳的备份，便于回溯</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} / aria-label="保存历史副本">
+              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} aria-label="保存历史副本" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2689,7 +2754,7 @@ function openSettingsModal() {
             </div>
             <div class="ty-settings-inline">
               <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-history-dir"
-                placeholder="默认：文档同级 .markweave-history" value="${currentSettings.autoSave.historyDir}" / aria-label="副本存放目录">
+                placeholder="默认：文档同级 .markweave-history" value="${currentSettings.autoSave.historyDir}" aria-label="副本存放目录" />
               <button class="ty-settings-action" id="setting-btn-history-dir">选择…</button>
             </div>
           </div>
@@ -2700,7 +2765,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">超出数量后自动删除最旧的副本</span>
             </div>
             <input class="ty-settings-input" type="number" id="setting-input-history-max"
-              min="1" max="200" step="1" value="${currentSettings.autoSave.maxHistory}" / aria-label="保留副本数量">
+              min="1" max="200" step="1" value="${currentSettings.autoSave.maxHistory}" aria-label="保留副本数量" />
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">导出</div>
@@ -2742,7 +2807,7 @@ function openSettingsModal() {
             <label class="ty-settings-toggle">
               <input type="checkbox" id="setting-pdf-landscape" ${
                 currentSettings.pdf.landscape ? "checked" : ""
-              } / aria-label="横向排版">
+              } aria-label="横向排版" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2755,7 +2820,7 @@ function openSettingsModal() {
             <label class="ty-settings-toggle">
               <input type="checkbox" id="setting-pdf-background" ${
                 currentSettings.pdf.printBackground ? "checked" : ""
-              } / aria-label="打印背景色">
+              } aria-label="打印背景色" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2765,7 +2830,9 @@ function openSettingsModal() {
         <div class="ty-settings-panel" id="tab-panel-about">
           <div style="text-align: center; padding: 18px 0 10px;">
             <h2 style="font-size: 22px; font-weight: 700; color: var(--text-color); margin-bottom: 4px;">MarkWeave</h2>
-            <div style="font-size: 13px; color: var(--primary-color); font-weight: 500; margin-bottom: 16px;">v0.2.0 • 交互式 Markdown 绘图编辑器</div>
+            <div style="font-size: 13px; color: var(--primary-color); font-weight: 500; margin-bottom: 16px;">
+              <span id="about-version">v—</span> • 交互式 Markdown 绘图编辑器
+            </div>
             <p style="font-size: 13px; color: #666; line-height: 1.6; max-width: 480px; margin: 0 auto 20px;">
               MarkWeave 是下一代所见即所得 Markdown 编辑器。首创 Mermaid 图表可视化拖拽节点、拐角平滑圆角、任意箭头换向、文字原地修改，并无缝兼容主流标准。
             </p>
@@ -2773,6 +2840,18 @@ function openSettingsModal() {
               <a href="https://github.com/ZFHNB/MarkWeave.git" target="_blank" class="ty-btn" style="text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
                 <span>🌐</span> GitHub 仓库
               </a>
+            </div>
+          </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 20px;">更新</div>
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">检查更新</span>
+              <span class="ty-settings-desc">查询是否有新版本可用</span>
+            </div>
+            <div class="ty-settings-inline">
+              <span class="ty-update-status" id="update-status" aria-live="polite"></span>
+              <button class="ty-settings-action" id="btn-check-update">检查更新</button>
             </div>
           </div>
         </div>
@@ -2889,6 +2968,48 @@ function openSettingsModal() {
     if (dir && input) input.value = dir;
   });
 
+  // 关于页：填入真实版本号，并接上更新通道
+  void (async () => {
+    const api = getDesktopAPI();
+    const info = await api?.getInfo?.();
+    const version = info?.version ?? "0.1.1";
+    const badge = modalOverlay.querySelector("#about-version");
+    if (badge) badge.textContent = `v${version}`;
+
+    const channel = getUpdateChannel(version);
+    const statusEl = modalOverlay.querySelector<HTMLElement>("#update-status");
+    const checkBtn = modalOverlay.querySelector<HTMLButtonElement>("#btn-check-update");
+
+    const render = (state: UpdateState) => {
+      if (!statusEl) return;
+      const map: Record<UpdateStatus, string> = {
+        idle: "",
+        checking: "检查中…",
+        available: `有新版本 v${state.info?.version ?? ""}`,
+        "up-to-date": "已是最新版本",
+        downloading: `下载中 ${state.progress}%`,
+        ready: "可重启安装",
+        error: state.error ?? "检查失败",
+        unsupported: "当前构建未接入更新服务",
+      };
+      statusEl.textContent = map[state.status];
+      statusEl.dataset.state = state.status;
+    };
+
+    if (!channel.isSupported() && checkBtn) {
+      checkBtn.setAttribute("aria-disabled", "true");
+    }
+
+    checkBtn?.addEventListener("click", async () => {
+      if (checkBtn.disabled) return;
+      checkBtn.disabled = true;
+      render({ ...INITIAL_UPDATE_STATE, status: "checking", current: version });
+      const state = await channel.check();
+      render(state);
+      checkBtn.disabled = false;
+    });
+  })();
+
   // 打开自定义主题目录，并在用户回到窗口后刷新主题列表
   modalOverlay.querySelector("#setting-btn-themes-folder")?.addEventListener("click", async () => {
     const api = getDesktopAPI();
@@ -2947,6 +3068,8 @@ function openSettingsModal() {
     const autoLink = (modalOverlay.querySelector("#setting-toggle-autolink") as HTMLInputElement)?.checked ?? true;
     const codeWrap = (modalOverlay.querySelector("#setting-toggle-codewrap") as HTMLInputElement)?.checked ?? false;
     const restoreSession = (modalOverlay.querySelector("#setting-toggle-restore") as HTMLInputElement)?.checked ?? true;
+    const softBreaksAsHardBreaks = (modalOverlay.querySelector("#setting-toggle-softbreak") as HTMLInputElement)?.checked ?? false;
+    const syntaxAutoLink = (modalOverlay.querySelector("#setting-toggle-syntax-autolink") as HTMLInputElement)?.checked ?? true;
     const autoSaveMode = ((modalOverlay.querySelector("#setting-select-autosave-mode") as HTMLSelectElement)?.value as AutoSaveSettings["mode"]) || "off";
     const autoSaveInterval = parseInt((modalOverlay.querySelector("#setting-input-autosave-interval") as HTMLInputElement)?.value || "5", 10) || 5;
     const historyDir = (modalOverlay.querySelector("#setting-input-history-dir") as HTMLInputElement)?.value || "";
@@ -2980,6 +3103,7 @@ function openSettingsModal() {
       lineEnding,
       finalNewline,
       behavior: normalizeEditorBehavior({ spellcheck, autoLink, codeWrap, restoreSession }),
+      markdownSyntax: { softBreaksAsHardBreaks, autoLink: syntaxAutoLink },
       autoSave: normalizeAutoSaveSettings({
         mode: autoSaveMode,
         intervalMinutes: autoSaveInterval,
@@ -3414,6 +3538,16 @@ btnExportHtml.addEventListener("click", () => {
  * 导出独立 HTML：内联排版主题、KaTeX 样式与预渲染的 Mermaid 图，
  * 生成的文件可离线直接打开。
  */
+/**
+ * 获取更新通道。
+ *
+ * 目前返回空实现（界面显示「未接入更新服务」）。
+ * 未来接入时把这里换成真实实现即可，调用方无需改动。
+ */
+function getUpdateChannel(currentVersion: string): UpdateChannel {
+  return createUnsupportedChannel(currentVersion);
+}
+
 /** 读取当前文档的 YAML front matter（没有则返回空对象） */
 function currentFrontMatter(): FrontMatter {
   const doc = editor.getDocument();

@@ -11,14 +11,62 @@ import {
   slugifyHeading,
 } from "./link-references";
 
-const md = new MarkdownIt({
-  html: true,
-  breaks: false,
-  linkify: true,
-});
+/**
+ * 解析器的可配置语法项（对应偏好设置里的「Markdown 语法」分组）。
+ */
+export interface MarkdownSyntaxOptions {
+  /** 单个换行是否渲染为 <br>（Typora 默认关闭） */
+  softBreaksAsHardBreaks: boolean;
+  /** 是否自动把裸网址识别为链接 */
+  autoLink: boolean;
+}
 
-applyTyporaInlineRules(md);
-applyTyporaBlockRules(md);
+export const DEFAULT_SYNTAX_OPTIONS: MarkdownSyntaxOptions = {
+  softBreaksAsHardBreaks: false,
+  autoLink: true,
+};
+
+/** 当前生效的语法配置；由 UI 在设置变更时写入 */
+let activeSyntax: MarkdownSyntaxOptions = { ...DEFAULT_SYNTAX_OPTIONS };
+
+export function setMarkdownSyntaxOptions(options: Partial<MarkdownSyntaxOptions>): void {
+  activeSyntax = { ...activeSyntax, ...options };
+  parserCache.clear();
+}
+
+export function getMarkdownSyntaxOptions(): MarkdownSyntaxOptions {
+  return { ...activeSyntax };
+}
+
+/**
+ * 解析器实例按配置缓存。
+ * markdown-it 的 breaks / linkify 在构造时固定，无法运行时切换，
+ * 因此每种配置组合各保留一个实例。
+ */
+type MarkdownItInstance = InstanceType<typeof MarkdownIt>;
+const parserCache = new Map<string, MarkdownItInstance>();
+
+function buildParser(options: MarkdownSyntaxOptions): MarkdownItInstance {
+  const key = `${options.softBreaksAsHardBreaks ? 1 : 0}${options.autoLink ? 1 : 0}`;
+  const cached = parserCache.get(key);
+  if (cached) return cached;
+
+  const instance = new MarkdownIt({
+    html: true,
+    breaks: options.softBreaksAsHardBreaks,
+    linkify: options.autoLink,
+  });
+
+  applyTyporaInlineRules(instance);
+  applyTyporaBlockRules(instance);
+  parserCache.set(key, instance);
+  return instance;
+}
+
+/** 取当前配置对应的解析器 */
+function currentParser(): MarkdownItInstance {
+  return buildParser(activeSyntax);
+}
 
 /**
  * 将 Markdown 纯文本解析为 ProseMirror 文档对象模型 (AST)
@@ -41,7 +89,7 @@ export function markdownToDoc(markdownText: string, schema: Schema): PMNode {
   }
 
   // 2. 将 Markdown 转为标准 HTML DOM
-  const renderedHTML = md.render(processed);
+  const renderedHTML = currentParser().render(processed);
   const tempDiv = document.createElement("div");
   tempDiv.innerHTML = renderedHTML;
 
