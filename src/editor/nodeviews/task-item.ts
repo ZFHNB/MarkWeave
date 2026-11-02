@@ -22,6 +22,11 @@ export class TaskItemView implements NodeView {
     this.checkbox.type = "checkbox";
     this.checkbox.className = "md-task-checkbox";
     this.checkbox.checked = !!node.attrs.checked;
+    // 复选框没有可见文字，用任务内容作为可访问名称
+    this.checkbox.setAttribute(
+      "aria-label",
+      node.textContent.trim().slice(0, 80) || "任务项"
+    );
 
     this.checkbox.addEventListener("change", () => {
       const pos = this.getPos();
@@ -46,6 +51,10 @@ export class TaskItemView implements NodeView {
     if (node.type !== this.node.type) return false;
     this.node = node;
     this.checkbox.checked = !!node.attrs.checked;
+    this.checkbox.setAttribute(
+      "aria-label",
+      node.textContent.trim().slice(0, 80) || "任务项"
+    );
     if (node.attrs.checked) {
       this.dom.classList.add("task-done");
     } else {

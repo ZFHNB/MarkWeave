@@ -49,46 +49,6 @@ function metaSpan(className: string, text: string, visible: boolean): HTMLSpanEl
 }
 
 /** 折叠态：整块所有标记都隐藏，结果与光标位置无关，可安全缓存 */
-function buildCollapsedDecorations(block: PMNode, blockStart: number): Decoration[] {
-  const decorations: Decoration[] = [];
-
-  block.descendants((node, offset) => {
-    const pos = blockStart + 1 + offset;
-
-    if (node.type.name === "heading") {
-      const level = node.attrs.level || 1;
-      decorations.push(
-        Decoration.widget(
-          pos + 1,
-          metaSpan("md-meta md-heading-mark", `${"#".repeat(level)} `, false),
-          { side: -1, stopEvent: () => false }
-        )
-      );
-    }
-
-    if (!node.isText) return;
-
-    for (const mark of node.marks) {
-      const markers =
-        mark.type.name === "link"
-          ? linkMarkers(mark.attrs as Record<string, any>)
-          : CAPTION_MARKS[mark.type.name];
-      if (!markers) continue;
-
-      decorations.push(
-        Decoration.widget(pos, metaSpan("md-meta md-inline-mark md-before", markers[0], false), {
-          side: -1,
-        }),
-        Decoration.widget(pos + node.nodeSize, metaSpan("md-meta md-inline-mark md-after", markers[1], false), {
-          side: 1,
-        })
-      );
-    }
-  });
-
-  return decorations;
-}
-
 /** 展开态：标题井号常显，行内标记只在光标附近显现 */
 function buildExpandedDecorations(
   block: PMNode,
@@ -143,41 +103,24 @@ function buildExpandedDecorations(
 
 export function createSyntaxFoldingPlugin(options: SyntaxFoldingOptions = {}) {
   let focused = true;
-  /** 折叠态装饰缓存：块起点 -> 缓存条目 */
-  const collapsedCache = new Map<number, { node: PMNode; decorations: Decoration[] }>();
-
+  /**
+   * 构建装饰集。
+   *
+   * 只有光标命中的块才会生成装饰（展开态）；其余块折叠态零装饰，
+   * 因此这个函数对整篇文档的开销与「命中块数」成正比，而不是文档大小。
+   */
   const collect = (doc: PMNode, from: number, to: number): DecorationSet => {
     const useFolding = focused;
     const all: Decoration[] = [];
-    const seen = new Set<number>();
 
     doc.forEach((block, offset) => {
       const blockStart = offset;
       const blockEnd = offset + block.nodeSize;
-      seen.add(blockStart);
-
-      // 与旧行为一致：选区与块相交即展开该块
       const touched = useFolding && from <= blockEnd && to >= blockStart;
-
       if (touched) {
         all.push(...buildExpandedDecorations(block, blockStart, from, to));
-        return;
       }
-
-      let entry = collapsedCache.get(blockStart);
-      // 块内容变化后（节点身份改变）缓存失效
-      if (!entry || entry.node !== block) {
-        entry = { node: block, decorations: buildCollapsedDecorations(block, blockStart) };
-        collapsedCache.set(blockStart, entry);
-      }
-      all.push(...entry.decorations);
     });
-
-    if (collapsedCache.size > seen.size) {
-      for (const key of [...collapsedCache.keys()]) {
-        if (!seen.has(key)) collapsedCache.delete(key);
-      }
-    }
 
     return DecorationSet.create(doc, all);
   };
@@ -201,6 +144,7 @@ export function createSyntaxFoldingPlugin(options: SyntaxFoldingOptions = {}) {
         }
 
         if (!docChanged && !selectionChanged) return oldSet;
+
         return collect(newState.doc, newState.selection.from, newState.selection.to);
       },
     },

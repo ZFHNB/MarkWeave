@@ -177,10 +177,13 @@ export class MarkWeaveEditor {
         this.view.updateState(newState);
 
         if (tr.docChanged) {
+          // 序列化是这条链路上最贵的一步，每次输入只做一次并复用
           const md = this.getMarkdown();
           this.options.onDocChange?.(md);
-          this.options.onOutlineChange?.(this.getHeadings());
-          this.updateStats();
+
+          // 统计与大纲对实时性要求不高，合并到空闲时统一刷新。
+          // 大文档下逐键重算会明显拖慢输入。
+          this.scheduleDerivedRefresh(md);
         }
         if (tr.docChanged || tr.selectionSet) {
           this.options.onSelectionChange?.(this.view.state.selection.from);
@@ -348,9 +351,26 @@ export class MarkWeaveEditor {
     this.view.focus();
   }
 
-  private updateStats() {
-    const stats = computeStats(this.getMarkdown());
+  /**
+   * 更新字数统计。
+   * `markdown` 可由调用方传入已序列化的结果，避免重复遍历整篇文档。
+   */
+  private updateStats(markdown?: string) {
+    const stats = computeStats(markdown ?? this.getMarkdown());
     this.options.onWordCountChange?.(stats);
+  }
+
+  /** 派生数据（大纲、字数）的刷新句柄 */
+  private derivedTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** 合并连续的文档变更，空闲后再重建大纲与字数统计 */
+  private scheduleDerivedRefresh(markdown: string) {
+    if (this.derivedTimer) clearTimeout(this.derivedTimer);
+    this.derivedTimer = setTimeout(() => {
+      this.derivedTimer = null;
+      this.options.onOutlineChange?.(this.getHeadings());
+      this.updateStats(markdown);
+    }, 200);
   }
 
   public insertTable(rows: number, cols: number) {
@@ -402,6 +422,10 @@ export class MarkWeaveEditor {
   }
 
   public destroy() {
+    if (this.derivedTimer) {
+      clearTimeout(this.derivedTimer);
+      this.derivedTimer = null;
+    }
     this.contextMenu?.destroy();
     this.searchPanel?.destroy();
     this.view.destroy();

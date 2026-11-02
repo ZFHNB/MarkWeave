@@ -38,6 +38,7 @@ export class MathBlockView implements NodeView {
 
     this.textarea = document.createElement("textarea");
     this.textarea.className = "md-math-input";
+    this.textarea.setAttribute("aria-label", "LaTeX 公式");
     this.textarea.value = node.attrs.formula || "f(x) = \\int_{-\\infty}^\\infty \\hat f(\\xi)\\,e^{2 \\pi i \\xi x} \\,d\\xi";
     this.textarea.rows = 3;
 

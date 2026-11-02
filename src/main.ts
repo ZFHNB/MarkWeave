@@ -291,7 +291,7 @@ if (!documents.some((d) => d.id === activeDocId)) {
 const app = document.querySelector<HTMLDivElement>("#app")!;
 app.innerHTML = `
   <!-- 侧边栏 (Sidebar) -->
-  <aside class="ty-sidebar" id="sidebar">
+  <aside class="ty-sidebar" id="sidebar" role="navigation" aria-label="侧边栏">
     <div class="ty-sidebar-tabs">
       <div class="ty-sidebar-tab active" data-tab="outline">大纲 (Outline)</div>
       <div class="ty-sidebar-tab" data-tab="files">文件 (Files)</div>
@@ -300,7 +300,7 @@ app.innerHTML = `
       <!-- 大纲目录容器 -->
       <div id="outline-container">
         <div class="ty-outline-toolbar">
-          <input type="search" id="outline-filter" class="ty-outline-filter" placeholder="过滤标题…" />
+          <input type="search" id="outline-filter" class="ty-outline-filter" placeholder="过滤标题…" aria-label="过滤大纲标题" />
           <button class="ty-outline-tool-btn" id="btn-outline-collapse" title="全部折叠">⊟</button>
           <button class="ty-outline-tool-btn" id="btn-outline-expand" title="全部展开">⊞</button>
         </div>
@@ -315,7 +315,7 @@ app.innerHTML = `
           <button class="ty-icon-btn" id="btn-open-file" style="flex: 1; justify-content: center; border: 1px dashed var(--border-color); padding: 5px;">
             📂 打开本地
           </button>
-          <input type="file" id="local-file-input" accept=".md,.markdown,.txt" style="display: none;" />
+          <input type="file" id="local-file-input" accept=".md,.markdown,.txt" style="display: none;" aria-label="选择本地 Markdown 文件" />
         </div>
         <div class="ty-files-actions" style="display: flex; gap: 6px; margin-bottom: 12px; padding: 0 4px;">
           <button class="ty-icon-btn" id="btn-open-folder" style="flex: 1; justify-content: center; border: 1px dashed var(--border-color); padding: 5px;" title="打开文件夹 (Ctrl+Shift+O)">
@@ -397,11 +397,11 @@ app.innerHTML = `
 
     <!-- 滚动容器与 ProseMirror 挂载点 -->
     <div class="ty-editor-scroller">
-      <div id="write"></div>
+      <div id="write" role="textbox" aria-multiline="true" aria-label="Markdown 编辑器"></div>
     </div>
 
     <!-- 源码模式全屏编辑器 -->
-    <textarea id="source-editor" spellcheck="false"></textarea>
+    <textarea id="source-editor" spellcheck="false" aria-label="Markdown 源码编辑器"></textarea>
 
     <!-- 底部状态栏 -->
     <footer class="ty-footer">
@@ -2246,7 +2246,7 @@ function openSettingsModal() {
   modalOverlay.id = "settings-modal-overlay";
 
   modalOverlay.innerHTML = `
-    <div class="ty-modal-card ty-settings-dialog">
+    <div class="ty-modal-card ty-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settings-dialog-title">
       <div class="ty-modal-header ty-settings-header">
         <div class="ty-modal-title">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2258,7 +2258,7 @@ function openSettingsModal() {
         <button class="ty-modal-close" id="btn-close-settings-x" aria-label="关闭">&times;</button>
       </div>
 
-      <div class="ty-settings-nav" id="settings-tabs-nav">
+      <div class="ty-settings-nav" id="settings-tabs-nav" role="tablist" aria-label="设置分类">
         <button class="ty-settings-tab-btn active" data-tab="charts">图表设置</button>
         <button class="ty-settings-tab-btn" data-tab="editor">字体排版</button>
         <button class="ty-settings-tab-btn" data-tab="appearance">外观主题</button>
@@ -2305,7 +2305,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">默认折线拐角风格</span>
               <span class="ty-settings-desc">新图表或未指定 curve 时默认连线形态</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-curve">
+            <select class="ty-settings-select" id="setting-select-curve" aria-label="默认折线拐角风格">
               <option value="step-round" ${currentSettings.mermaidDefaultCurve === "step-round" ? "selected" : ""}>正交圆角折线 (Rounded Step, 推荐)</option>
               <option value="step" ${currentSettings.mermaidDefaultCurve === "step" ? "selected" : ""}>正交直角折线 (Orthogonal Step)</option>
               <option value="basis" ${currentSettings.mermaidDefaultCurve === "basis" ? "selected" : ""}>平滑贝塞尔曲线 (Smooth Curve)</option>
@@ -2319,7 +2319,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">拖拽节点时自动吸附对齐到 10px 网格，连线更规整</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-grid" ${currentSettings.gridSnap ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-grid" ${currentSettings.gridSnap ? "checked" : ""} / aria-label="节点拖拽吸附网格">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2329,7 +2329,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">预览图复制分辨率</span>
               <span class="ty-settings-desc">在预览模式下一键复制图片到剪贴板的分辨率倍数</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-scale">
+            <select class="ty-settings-select" id="setting-select-scale" aria-label="预览图复制分辨率">
               <option value="1" ${currentSettings.exportScale === 1 ? "selected" : ""}>标准清晰度 (1x / 72 DPI)</option>
               <option value="2" ${currentSettings.exportScale === 2 ? "selected" : ""}>Retina 视网膜高清 (2x / 144 DPI, 推荐)</option>
               <option value="3" ${currentSettings.exportScale === 3 ? "selected" : ""}>出版印刷超清 (3x / 216 DPI)</option>
@@ -2341,7 +2341,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">Mermaid 主题</span>
               <span class="ty-settings-desc">设置 Mermaid 图表渲染色彩模式</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-mermaid-theme">
+            <select class="ty-settings-select" id="setting-select-mermaid-theme" aria-label="Mermaid 主题">
               <option value="auto" ${currentSettings.mermaidTheme === "auto" ? "selected" : ""}>跟随界面主题（默认）</option>
               <option value="light" ${currentSettings.mermaidTheme === "light" ? "selected" : ""}>始终浅色（推荐夜间使用）</option>
               <option value="dark" ${currentSettings.mermaidTheme === "dark" ? "selected" : ""}>始终深色</option>
@@ -2356,7 +2356,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">正文字体大小</span>
               <span class="ty-settings-desc">主编辑区域段落与正文的渲染字号</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-font-size">
+            <select class="ty-settings-select" id="setting-select-font-size" aria-label="正文字体大小">
               <option value="14px" ${currentSettings.fontSize === "14px" ? "selected" : ""}>14px (精致紧凑)</option>
               <option value="15px" ${currentSettings.fontSize === "15px" ? "selected" : ""}>15px (小巧)</option>
               <option value="16px" ${currentSettings.fontSize === "16px" ? "selected" : ""}>16px (默认推荐)</option>
@@ -2370,7 +2370,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">正文行间距</span>
               <span class="ty-settings-desc">段落文字的垂直行高比例</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-line-height">
+            <select class="ty-settings-select" id="setting-select-line-height" aria-label="正文行间距">
               <option value="1.5" ${currentSettings.lineHeight === "1.5" ? "selected" : ""}>1.5 (紧凑)</option>
               <option value="1.65" ${currentSettings.lineHeight === "1.65" ? "selected" : ""}>1.65 (标准 Typora)</option>
               <option value="1.8" ${currentSettings.lineHeight === "1.8" ? "selected" : ""}>1.8 (宽松舒适)</option>
@@ -2385,7 +2385,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">正文 · 西文</span>
               <span class="ty-settings-desc">英文字母与数字使用的字体</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-body-latin">
+            <select class="ty-settings-select" id="setting-select-body-latin" aria-label="正文 · 西文">
               ${BODY_LATIN_FONTS.map(
                 (font) =>
                   `<option value="${font.id}" ${
@@ -2404,7 +2404,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-body-latin"
               placeholder="例如：EB Garamond, Garamond"
-              value="${currentSettings.customBodyLatin.replace(/"/g, "&quot;")}" />
+              value="${currentSettings.customBodyLatin.replace(/"/g, "&quot;")}" / aria-label="自定义西文字体">
           </div>
 
           <div class="ty-settings-row">
@@ -2412,7 +2412,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">正文 · 中文</span>
               <span class="ty-settings-desc">中文字符使用的字体，与西文独立</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-body-cjk">
+            <select class="ty-settings-select" id="setting-select-body-cjk" aria-label="正文 · 中文">
               ${BODY_CJK_FONTS.map(
                 (font) =>
                   `<option value="${font.id}" ${
@@ -2431,7 +2431,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-body-cjk"
               placeholder="例如：Source Han Sans SC"
-              value="${currentSettings.customBodyCJK.replace(/"/g, "&quot;")}" />
+              value="${currentSettings.customBodyCJK.replace(/"/g, "&quot;")}" / aria-label="自定义中文字体">
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">代码字体</div>
@@ -2441,7 +2441,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">代码 · 西文</span>
               <span class="ty-settings-desc">代码块中英文代码使用的等宽字体</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-mono-latin">
+            <select class="ty-settings-select" id="setting-select-mono-latin" aria-label="代码 · 西文">
               ${MONO_LATIN_FONTS.map(
                 (font) =>
                   `<option value="${font.id}" ${
@@ -2460,7 +2460,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-mono-latin"
               placeholder="例如：JetBrains Mono"
-              value="${currentSettings.customMonoLatin.replace(/"/g, "&quot;")}" />
+              value="${currentSettings.customMonoLatin.replace(/"/g, "&quot;")}" / aria-label="自定义代码西文字体">
           </div>
 
           <div class="ty-settings-row">
@@ -2468,7 +2468,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">代码 · 中文</span>
               <span class="ty-settings-desc">代码块中注释等中文字符使用的字体</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-mono-cjk">
+            <select class="ty-settings-select" id="setting-select-mono-cjk" aria-label="代码 · 中文">
               ${MONO_CJK_FONTS.map(
                 (font) =>
                   `<option value="${font.id}" ${
@@ -2487,7 +2487,7 @@ function openSettingsModal() {
             </div>
             <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-mono-cjk"
               placeholder="例如：Sarasa Mono SC"
-              value="${currentSettings.customMonoCJK.replace(/"/g, "&quot;")}" />
+              value="${currentSettings.customMonoCJK.replace(/"/g, "&quot;")}" / aria-label="自定义代码中文字体">
           </div>
 
           <div class="ty-settings-row">
@@ -2496,7 +2496,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">输入 ( [ { 与引号时自动补全右半部分</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-autopair" ${currentSettings.autoPair ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-autopair" ${currentSettings.autoPair ? "checked" : ""} / aria-label="自动配对括号与引号">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2507,7 +2507,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">输入时把 -- 与 --- 转换为短横线/长横线</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-smartpunct" ${currentSettings.smartPunctuation ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-smartpunct" ${currentSettings.smartPunctuation ? "checked" : ""} / aria-label="智能标点">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2517,7 +2517,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">列表与引用缩进</span>
               <span class="ty-settings-desc">保存时使用的缩进空格数</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-indent">
+            <select class="ty-settings-select" id="setting-select-indent" aria-label="列表与引用缩进">
               <option value="2" ${currentSettings.indentSize === 2 ? "selected" : ""}>2 空格（默认）</option>
               <option value="3" ${currentSettings.indentSize === 3 ? "selected" : ""}>3 空格</option>
               <option value="4" ${currentSettings.indentSize === 4 ? "selected" : ""}>4 空格</option>
@@ -2529,7 +2529,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">行尾符</span>
               <span class="ty-settings-desc">保存文件时使用的换行风格</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-line-ending">
+            <select class="ty-settings-select" id="setting-select-line-ending" aria-label="行尾符">
               <option value="lf" ${currentSettings.lineEnding === "lf" ? "selected" : ""}>LF (Unix)</option>
               <option value="crlf" ${currentSettings.lineEnding === "crlf" ? "selected" : ""}>CRLF (Windows)</option>
             </select>
@@ -2541,7 +2541,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">保证文件以换行结尾（推荐）</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-finalnewline" ${currentSettings.finalNewline ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-finalnewline" ${currentSettings.finalNewline ? "checked" : ""} / aria-label="保存时保留末尾换行">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2554,7 +2554,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">正文中拼错的单词显示波浪下划线</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-spellcheck" ${currentSettings.behavior.spellcheck ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-spellcheck" ${currentSettings.behavior.spellcheck ? "checked" : ""} / aria-label="拼写检查">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2565,7 +2565,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">输入网址后按空格自动转为可点击链接</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-autolink" ${currentSettings.behavior.autoLink ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-autolink" ${currentSettings.behavior.autoLink ? "checked" : ""} / aria-label="自动链接">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2576,7 +2576,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">长代码行折行显示，而不是横向滚动</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-codewrap" ${currentSettings.behavior.codeWrap ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-codewrap" ${currentSettings.behavior.codeWrap ? "checked" : ""} / aria-label="代码块自动换行">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2587,7 +2587,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">启动时打开上次的文档与光标位置</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-restore" ${currentSettings.behavior.restoreSession ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-restore" ${currentSettings.behavior.restoreSession ? "checked" : ""} / aria-label="恢复上次会话">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2600,7 +2600,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">界面主题模式</span>
               <span class="ty-settings-desc">选择编辑器的色彩外观风格</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-theme">
+            <select class="ty-settings-select" id="setting-select-theme" aria-label="界面主题模式">
               <option value="light" ${currentSettings.theme === "light" ? "selected" : ""}>Typora 浅色明亮</option>
               <option value="night" ${currentSettings.theme === "night" ? "selected" : ""}>夜间深色模式 (Night)</option>
               <option value="system" ${currentSettings.theme === "system" ? "selected" : ""}>跟随系统自动切换</option>
@@ -2612,7 +2612,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">排版主题</span>
               <span class="ty-settings-desc">选择正文字体与排版风格（移植自 Typora 内置主题）</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-editor-theme">
+            <select class="ty-settings-select" id="setting-select-editor-theme" aria-label="排版主题">
               ${getAllThemes()
                 .map(
                   (theme) =>
@@ -2629,7 +2629,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">菜单栏语言 / Menu language</span>
               <span class="ty-settings-desc">设置桌面原生菜单栏语言（Web 端不受影响）</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-language">
+            <select class="ty-settings-select" id="setting-select-language" aria-label="菜单栏语言 / Menu language">
               <option value="zh" ${currentSettings.language === "zh" ? "selected" : ""}>中文（默认）</option>
               <option value="en" ${currentSettings.language === "en" ? "selected" : ""}>English</option>
             </select>
@@ -2654,7 +2654,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">自动保存模式</span>
               <span class="ty-settings-desc">默认关闭；开启后按下方方式自动写回原文件</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-autosave-mode">
+            <select class="ty-settings-select" id="setting-select-autosave-mode" aria-label="自动保存模式">
               <option value="off" ${currentSettings.autoSave.mode === "off" ? "selected" : ""}>关闭（手动保存）</option>
               <option value="onChange" ${currentSettings.autoSave.mode === "onChange" ? "selected" : ""}>每次修改后自动保存</option>
               <option value="interval" ${currentSettings.autoSave.mode === "interval" ? "selected" : ""}>按固定间隔自动保存</option>
@@ -2667,7 +2667,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">选择「按固定间隔」时生效，单位分钟</span>
             </div>
             <input class="ty-settings-input" type="number" id="setting-input-autosave-interval"
-              min="1" max="120" step="1" value="${currentSettings.autoSave.intervalMinutes}" />
+              min="1" max="120" step="1" value="${currentSettings.autoSave.intervalMinutes}" / aria-label="自动保存间隔">
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">历史副本</div>
@@ -2677,7 +2677,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">保存前留一份带时间戳的备份，便于回溯</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} />
+              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} / aria-label="保存历史副本">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2689,7 +2689,7 @@ function openSettingsModal() {
             </div>
             <div class="ty-settings-inline">
               <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-history-dir"
-                placeholder="默认：文档同级 .markweave-history" value="${currentSettings.autoSave.historyDir}" />
+                placeholder="默认：文档同级 .markweave-history" value="${currentSettings.autoSave.historyDir}" / aria-label="副本存放目录">
               <button class="ty-settings-action" id="setting-btn-history-dir">选择…</button>
             </div>
           </div>
@@ -2700,7 +2700,7 @@ function openSettingsModal() {
               <span class="ty-settings-desc">超出数量后自动删除最旧的副本</span>
             </div>
             <input class="ty-settings-input" type="number" id="setting-input-history-max"
-              min="1" max="200" step="1" value="${currentSettings.autoSave.maxHistory}" />
+              min="1" max="200" step="1" value="${currentSettings.autoSave.maxHistory}" / aria-label="保留副本数量">
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">导出</div>
@@ -2709,7 +2709,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">导出 Markdown 默认行为</span>
               <span class="ty-settings-desc">导出含 MarkWeave 排版图表时的默认处理机制</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-export-policy">
+            <select class="ty-settings-select" id="setting-select-export-policy" aria-label="导出 Markdown 默认行为">
               <option value="ask" ${currentSettings.exportPolicy === "ask" ? "selected" : ""}>检测到自定义排版时弹窗选择 (推荐)</option>
               <option value="markweave" ${currentSettings.exportPolicy === "markweave" ? "selected" : ""}>优先保留 MarkWeave 增强排版</option>
               <option value="compatible" ${currentSettings.exportPolicy === "compatible" ? "selected" : ""}>始终清洗为通用兼容 Mermaid</option>
@@ -2722,7 +2722,7 @@ function openSettingsModal() {
               <span class="ty-settings-label">纸张尺寸</span>
               <span class="ty-settings-desc">导出 PDF 时使用的页面大小</span>
             </div>
-            <select class="ty-settings-select" id="setting-select-paper">
+            <select class="ty-settings-select" id="setting-select-paper" aria-label="纸张尺寸">
               ${(["A4", "A3", "Letter", "Legal", "Tabloid"] as const)
                 .map(
                   (size) =>
@@ -2742,7 +2742,7 @@ function openSettingsModal() {
             <label class="ty-settings-toggle">
               <input type="checkbox" id="setting-pdf-landscape" ${
                 currentSettings.pdf.landscape ? "checked" : ""
-              } />
+              } / aria-label="横向排版">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2755,7 +2755,7 @@ function openSettingsModal() {
             <label class="ty-settings-toggle">
               <input type="checkbox" id="setting-pdf-background" ${
                 currentSettings.pdf.printBackground ? "checked" : ""
-              } />
+              } / aria-label="打印背景色">
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -2818,10 +2818,52 @@ function openSettingsModal() {
   // 说明文字收进问号标的二级提示，保持面板简洁
   const tooltipController = enhanceSettingsDescriptions(modalOverlay);
 
+  // 记录打开前的焦点，关闭后归还，保证键盘用户不会丢失位置
+  const previouslyFocused = document.activeElement as HTMLElement | null;
+
   const closeModal = () => {
     tooltipController.destroy();
     modalOverlay.remove();
+    document.removeEventListener("keydown", onDialogKeyDown, true);
+    previouslyFocused?.focus?.();
   };
+
+  /** Esc 关闭 + Tab 焦点循环，避免焦点跑出弹窗 */
+  const onDialogKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeModal();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const focusables = modalOverlay.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusables.length === 0) return;
+
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement;
+
+    if (!event.shiftKey && active === last) {
+      event.preventDefault();
+      first.focus();
+    } else if (event.shiftKey && active === first) {
+      event.preventDefault();
+      last.focus();
+    }
+  };
+
+  document.addEventListener("keydown", onDialogKeyDown, true);
+
+  // 打开后把焦点移到第一个可聚焦控件
+  requestAnimationFrame(() => {
+    const firstControl = modalOverlay.querySelector<HTMLElement>(
+      'button, input, select, textarea'
+    );
+    firstControl?.focus();
+  });
 
   modalOverlay.querySelector("#btn-close-settings-x")?.addEventListener("click", closeModal);
 

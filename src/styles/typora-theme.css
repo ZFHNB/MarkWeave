@@ -3110,3 +3110,68 @@ body.code-wrap .md-fences-content code {
 .theme-night .ty-drop-overlay {
   background: rgba(77, 170, 252, 0.1);
 }
+
+/* ================= 键盘可访问性：统一焦点样式 ================= */
+/*
+ * 只在键盘导航时显示焦点环（:focus-visible），
+ * 鼠标点击不会出现多余轮廓，兼顾视觉与可访问性。
+ */
+button:focus-visible,
+[role="button"]:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:not([tabindex="-1"]):focus-visible,
+.ty-settings-tab-btn:focus-visible,
+.ty-icon-btn:focus-visible,
+.ty-footer-btn:focus-visible,
+.ty-view-toggle:focus-visible,
+.ty-file-item:focus-visible,
+.ty-outline-item:focus-visible {
+  outline: 2px solid var(--primary-color);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* 深色主题下提高对比度 */
+.theme-night button:focus-visible,
+.theme-night [role="button"]:focus-visible,
+.theme-night a:focus-visible,
+.theme-night input:focus-visible,
+.theme-night select:focus-visible,
+.theme-night textarea:focus-visible,
+.theme-night [tabindex]:not([tabindex="-1"]):focus-visible {
+  outline-color: #7cb7ff;
+}
+
+/* 文本域内部已有自身样式，避免双重描边 */
+#source-editor:focus-visible,
+.ProseMirror:focus-visible {
+  outline: none;
+}
+
+/* 供屏幕阅读器朗读、视觉上隐藏的辅助文本 */
+.ty-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

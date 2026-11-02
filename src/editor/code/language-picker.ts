@@ -69,6 +69,7 @@ export class LanguagePicker {
     this.searchInput.type = "search";
     this.searchInput.className = "md-fences-lang-search";
     this.searchInput.placeholder = "搜索语言...";
+    this.searchInput.setAttribute("aria-label", "搜索代码块语言");
 
     this.searchInput.addEventListener("focus", () => {
       if (!this.isOpen) {
