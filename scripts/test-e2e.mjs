@@ -276,9 +276,9 @@ async function runTests() {
     E --> F[交付用户并100%通过E2E测试]`;
 
     await page.evaluate((newCode) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + newCode + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, updatedMermaidCode);
 
     await new Promise((r) => setTimeout(r, 800));
@@ -291,21 +291,21 @@ async function runTests() {
     console.log("\n--- 测试 12: 时序图 (Sequence Diagram) 支持 ---");
     const sequenceCode = `sequenceDiagram
     autonumber
-    Typemark User->>Editor: 输入 Markdown 图表代码
+    MarkWeave User->>Editor: 输入 Markdown 图表代码
     Editor->>Mermaid Core: 异步语法解析与 AST 变换
     Mermaid Core-->>Editor: 输出 SVG 矢量图形 DOM
-    Editor-->>Typemark User: 呈现高保真无缝图表`;
+    Editor-->>MarkWeave User: 呈现高保真无缝图表`;
 
     await page.evaluate((seqCode) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + seqCode + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, sequenceCode);
 
     await new Promise((r) => setTimeout(r, 800));
     await page.waitForSelector(".md-mermaid-block .md-diagram-preview svg", { timeout: 8000 });
     const seqSvg = await page.$eval(".md-mermaid-block .md-diagram-preview", (el) => el.innerHTML);
-    assert("成功渲染 Sequence Diagram (时序图)", seqSvg.includes("Typemark User") && seqSvg.includes("Mermaid Core"));
+    assert("成功渲染 Sequence Diagram (时序图)", seqSvg.includes("MarkWeave User") && seqSvg.includes("Mermaid Core"));
     await page.screenshot({ path: path.join(artifactsDir, "08-mermaid-sequence-diagram.png") });
 
     // 9.5 错误语法容错处理
@@ -314,9 +314,9 @@ async function runTests() {
     [Broken Syntax >>> ??? ::: &&&`;
 
     await page.evaluate((broken) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + broken + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, brokenCode);
 
     await new Promise((r) => setTimeout(r, 800));
@@ -329,9 +329,9 @@ async function runTests() {
     // 9.6 暗色主题下的 Mermaid 渲染 (Theme Night)
     console.log("\n--- 测试 14: 暗色主题 (Night Theme) 深度自适应 ---");
     await page.evaluate((validCode) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + validCode + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, updatedMermaidCode);
     await new Promise((r) => setTimeout(r, 800));
 
@@ -364,7 +364,7 @@ async function runTests() {
     await new Promise((r) => setTimeout(r, 800));
 
     // 检查源码是否被自动改写为 LR
-    const mdAfterLR = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdAfterLR = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert("Markdown 源码第一行自动更新为横向排布 (LR)", /```mermaid[\s\S]*?(?:graph|flowchart)\s+LR/i.test(mdAfterLR));
 
     await page.waitForSelector(".md-mermaid-block .md-diagram-preview svg", { timeout: 8000 });
@@ -528,7 +528,7 @@ async function runTests() {
     });
     assert("连线说明文字精确绑定在对应连线上，坐标规整无漂移", isLabelAccuratelyBound);
 
-    const mdWithStepCurve = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdWithStepCurve = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert(
       "源码成功注入直角折线风格配置 (curve: stepBefore)",
       mdWithStepCurve.includes('"curve":"stepBefore"') || mdWithStepCurve.includes('"curve": "stepBefore"')
@@ -559,7 +559,7 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 800));
 
-    const mdAfterReverse = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdAfterReverse = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert("箭头指向成功反转并在源码中更新为反向箭头 (<--)", mdAfterReverse.includes("<--"));
 
     // ==========================================
@@ -593,7 +593,7 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 800));
 
-    const mdWithNewLabel = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdWithNewLabel = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert("连线说明文字成功在源码中更新为新文字 (|逆向解析与AST建模|)", mdWithNewLabel.includes("逆向解析与AST建模"));
     await page.screenshot({ path: path.join(artifactsDir, "15-mermaid-edited-label-and-arrows.png") });
 
@@ -621,8 +621,8 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 600));
 
-    const mdAfterFullReset = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
-    assert("一键还原成功清除位置元数据", !/%%\s*\{typemark_positions:.*?\}\s*%%/.test(mdAfterFullReset));
+    const mdAfterFullReset = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
+    assert("一键还原成功清除位置元数据", !/%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%/.test(mdAfterFullReset));
     await page.screenshot({ path: path.join(artifactsDir, "13-mermaid-reset-layout.png") });
 
     // ==========================================
@@ -647,8 +647,8 @@ async function runTests() {
     }
     await new Promise((r) => setTimeout(r, 400));
 
-    const mdWithCustomPos = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
-    assert("成功产生自定义图表位置元数据", /typemark_positions/.test(mdWithCustomPos));
+    const mdWithCustomPos = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
+    assert("成功产生自定义图表位置元数据", /markweave_positions/.test(mdWithCustomPos));
 
     // 点击「↕ 纵向」按钮切换排布
     await page.evaluate(() => {
@@ -658,8 +658,8 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 800));
 
-    const mdAfterSwitchToTD = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
-    assert("切换纵向后自动清除旧方向冲突坐标", !/typemark_positions/.test(mdAfterSwitchToTD));
+    const mdAfterSwitchToTD = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
+    assert("切换纵向后自动清除旧方向冲突坐标", !/markweave_positions/.test(mdAfterSwitchToTD));
     assert("源码成功切换为纵向排布 (TD)", /flowchart\s+TD/i.test(mdAfterSwitchToTD));
     await page.screenshot({ path: path.join(artifactsDir, "16-mermaid-direction-td-after-custom.png") });
 
@@ -723,11 +723,11 @@ async function runTests() {
 
     // 验证通用兼容清洗函数
     const isCleanSuccessful = await page.evaluate(() => {
-      const raw = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const raw = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const clean = window.__MARKWEAVE_EXPORT__.cleanMermaidForCompatibility(raw);
       return (
-        (/typemark_positions/.test(raw) || /%%\{init:/.test(raw)) &&
-        !/typemark_positions/.test(clean) &&
+        (/markweave_positions/.test(raw) || /%%\{init:/.test(raw)) &&
+        !/markweave_positions/.test(clean) &&
         !/%%\{init:/.test(clean)
       );
     });

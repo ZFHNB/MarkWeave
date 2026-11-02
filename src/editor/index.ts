@@ -431,6 +431,3 @@ export class MarkWeaveEditor {
     this.view.destroy();
   }
 }
-
-export const TypemarkEditor = MarkWeaveEditor;
-export type TypemarkEditor = MarkWeaveEditor;

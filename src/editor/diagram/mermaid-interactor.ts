@@ -6,7 +6,7 @@
  * 3. 改变箭头指向 (➔ 正向 / ⬅ 反向 / ⮂ 双向 / — 无向)
  * 4. 修改箭头横线上的文字 (点击 edgeLabel 原地行内编辑并双向同步源码)
  * 5. 一键横纵排布切换 (TD ↕ ↔ LR) 与画布平移缩放 (Pan & Zoom)
- * 6. 纯文本坐标元数据持久化 (%% {typemark_positions: ...} %%) 与一键还原原生排版
+ * 6. 纯文本坐标元数据持久化 (%% {markweave_positions: ...} %%) 与一键还原原生排版
  */
 
 interface Point {
@@ -54,6 +54,18 @@ export function resolvePreviewModeOnAttach(
 ): "custom" | "standard" {
   return modeInitialized ? currentMode : defaultMode;
 }
+
+/**
+ * 图表坐标元数据的注释格式。
+ *
+ * 早期版本写入的是 `typemark_positions`，现已更名为 `markweave_positions`。
+ * 读取与清除同时兼容两种前缀，保证旧文档的拖拽布局不丢失；
+ * 新写入一律使用新名称。
+ */
+const POSITION_ANNOTATION_NAME = "markweave_positions";
+const POSITION_ANNOTATION_PATTERN_G = /%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?/g;
+const POSITION_ANNOTATION_PATTERN = /%%\s*\{(?:typemark|markweave)_positions:\s*(\{.*?\})\}\s*%%/;
+const POSITION_ANNOTATION_HEAD_PATTERN = /^(%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?)/;
 
 export class MermaidInteractor {
   private svg!: SVGSVGElement;
@@ -605,7 +617,7 @@ export class MermaidInteractor {
     let code = this.getCurrentCode();
 
     // 关键优化：切换方向时清除旧方向下的自定义坐标，避免旧坐标与新排布方向产生冲突与连线畸变
-    code = code.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
+    code = code.replace(POSITION_ANNOTATION_PATTERN_G, "").trim();
 
     const dirRegex = /^(\s*(?:flowchart|graph))\s+(TD|TB|LR|RL|BT)(.*)$/im;
 
@@ -672,7 +684,7 @@ export class MermaidInteractor {
       }
     } else {
       const newInit = `%%{init: {"flowchart": {"curve": "${curve}"}}}%%\n`;
-      const posMatch = /^(%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?)/.exec(code);
+      const posMatch = POSITION_ANNOTATION_HEAD_PATTERN.exec(code);
       if (posMatch) {
         updatedCode = posMatch[0] + newInit + code.slice(posMatch[0].length);
       } else {
@@ -735,7 +747,7 @@ export class MermaidInteractor {
     });
 
     const code = this.getCurrentCode();
-    const cleanCode = code.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
+    const cleanCode = code.replace(POSITION_ANNOTATION_PATTERN_G, "").trim();
     if (cleanCode !== code) {
       this.onSourceChange(cleanCode);
     }
@@ -1629,7 +1641,7 @@ export class MermaidInteractor {
     });
 
     const code = this.getCurrentCode();
-    const cleanCode = code.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
+    const cleanCode = code.replace(POSITION_ANNOTATION_PATTERN_G, "").trim();
 
     if (!hasMoved) {
       if (cleanCode !== code) {
@@ -1638,7 +1650,7 @@ export class MermaidInteractor {
       return;
     }
 
-    const annotation = `%% {typemark_positions: ${JSON.stringify(posRecord)}} %%`;
+    const annotation = `%% {${POSITION_ANNOTATION_NAME}: ${JSON.stringify(posRecord)}} %%`;
     const newCode = `${annotation}\n${cleanCode}`;
     if (newCode !== code) {
       this.onSourceChange(newCode);
@@ -1647,7 +1659,7 @@ export class MermaidInteractor {
 
   private applySavedPositions() {
     const code = this.getCurrentCode();
-    const match = /%%\s*\{typemark_positions:\s*(\{.*?\})\}\s*%%/.exec(code);
+    const match = POSITION_ANNOTATION_PATTERN.exec(code);
     if (!match) return;
 
     try {

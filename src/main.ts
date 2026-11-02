@@ -150,7 +150,7 @@ import {
 } from "./platform/pdf-options";
 
 // 预设文档 1: 欢迎与特性演示
-const docWelcome = `# 欢迎使用 MarkWeave (Typemark 对标 Typora 核心机制)
+const docWelcome = `# 欢迎使用 MarkWeave
 
 MarkWeave 是一款基于现代 Web 标准构建的 Markdown 即时渲染编辑器，并原生支持 Mermaid 图表的可视化拖拽、正交折线排版与双向源码同步。
 
@@ -197,7 +197,7 @@ const engine: TyporaEngine = {
   syntaxFolding: true,
   theme: "github"
 };
-console.log("Typemark Engine Initialized!");
+console.log("MarkWeave Engine Initialized!");
 \`\`\`
 
 ### 5. Mermaid 图表实时排版 (Flowchart / Sequence)
@@ -216,11 +216,11 @@ graph TD
 `;
 
 // 预设文档 2: 系统架构设计规范
-const docArchitecture = `# 系统架构设计规范 (Typemark Architecture)
+const docArchitecture = `# 系统架构设计规范 (MarkWeave Architecture)
 
 ## 1. 总体分层模型
 
-Typemark 继承了 Typora 的设计思想，采用解耦的分层设计：
+MarkWeave 继承了 Typora 的设计思想，采用解耦的分层设计：
 
 - **UI 展示层**：侧边栏大纲、文件列表、源码模式切换、主题切换
 - **编辑器内核**：ProseMirror State + Document Schema + Inline Syntax Folding
@@ -243,7 +243,7 @@ Markdown 纯文本 (完全保真)
 \`\`\`
 
 ## 3. 性能与体积考量
-相比传统 Electron 打包，Typemark 运行时无任何重型运行时开销，启动毫秒级响应。
+相比传统 Electron 打包，MarkWeave 运行时无任何重型运行时开销，启动毫秒级响应。
 `;
 
 // 预设文档 3: REA 逆向技术手记
@@ -267,7 +267,7 @@ Typora 的即时预览并不是左右分屏，而是在同一 contenteditable �
 
 // 工作区多文档管理状态与种子文档
 const seededDocuments: StoredDocument[] = [
-  createDocument("欢迎使用 Typemark.md", docWelcome),
+  createDocument("欢迎使用 MarkWeave.md", docWelcome),
   createDocument("系统架构设计规范.md", docArchitecture),
   createDocument("REA 逆向技术手记.md", docReaNotes),
 ];
@@ -369,7 +369,7 @@ app.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
           侧边栏
         </button>
-        <span class="ty-doc-title" id="doc-title">欢迎使用 Typemark.md</span>
+        <span class="ty-doc-title" id="doc-title">欢迎使用 MarkWeave.md</span>
       </div>
       <div class="ty-header-right">
         <span class="ty-save-status" id="save-status" aria-live="polite"></span>
@@ -572,7 +572,6 @@ const editor = new MarkWeaveEditor({
   },
 });
 
-(window as any).__TYPEMARK_EDITOR__ = editor;
 (window as any).__MARKWEAVE_EDITOR__ = editor;
 
 // 自动化测试钩子：把当前文档绑定到指定路径（等价于"打开过该文件"）
@@ -3562,7 +3561,7 @@ function currentFrontMatter(): FrontMatter {
 
 async function exportHtml(): Promise<void> {
   const currentDoc = documents.find((d) => d.id === activeDocId);
-  const rawTitle = currentDoc ? currentDoc.title : "Typemark 导出文档";
+  const rawTitle = currentDoc ? currentDoc.title : "MarkWeave 导出文档";
   const settings = loadSettings();
   const doc = editor.getDocument();
 
