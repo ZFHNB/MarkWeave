@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ENV_API_KEY,
+  ENV_API_KEY_ALIASES,
   REDACTION_MASK,
   classifyMineruError,
   looksLikeApiKey,
@@ -28,8 +29,28 @@ describe("resolveCredential", () => {
     expect(r.apiKey).toBeNull();
   });
 
-  it("uses the documented env var name", () => {
-    expect(ENV_API_KEY).toBe("MINERU_API_KEY");
+  it("uses the official env var name and keeps an alias", () => {
+    expect(ENV_API_KEY).toBe("MINERU_TOKEN");
+    expect(ENV_API_KEY_ALIASES).toContain("MINERU_API_KEY");
+  });
+
+  it("prefers the primary env var over the alias", () => {
+    const r = resolveCredential({
+      envValue: "primary-key-1234",
+      envAliasValue: "alias-key-5678",
+      keychainValue: null,
+    });
+    expect(r.apiKey).toBe("primary-key-1234");
+  });
+
+  it("falls back to the alias when the primary is empty", () => {
+    const r = resolveCredential({
+      envValue: "",
+      envAliasValue: "alias-key-5678",
+      keychainValue: null,
+    });
+    expect(r.apiKey).toBe("alias-key-5678");
+    expect(r.source).toBe("env");
   });
 });
 
@@ -154,5 +175,44 @@ describe("preflightCheck", () => {
     const f = preflightCheck({ mode: "cloud", apiKey: null, localReady: true });
     expect(f?.kind).toBe("not-configured");
     expect(f?.action).toBe("open-settings");
+  });
+});
+
+describe("official MinerU error codes", () => {
+  it("maps A0202 to an auth failure pointing at settings", () => {
+    const f = classifyMineruError({ code: "A0202", mode: "cloud" });
+    expect(f.kind).toBe("auth");
+    expect(f.action).toBe("open-settings");
+  });
+
+  it("maps A0211 to an expired key", () => {
+    const f = classifyMineruError({ code: "A0211", mode: "cloud" });
+    expect(f.kind).toBe("auth");
+    expect(f.message).toContain("过期");
+  });
+
+  it("maps file size and page limits to non-retryable parse errors", () => {
+    expect(classifyMineruError({ code: "-60005", mode: "cloud" }).retryable).toBe(false);
+    expect(classifyMineruError({ code: "-60006", mode: "cloud" }).retryable).toBe(false);
+    expect(classifyMineruError({ code: "-60005", mode: "cloud" }).message).toContain("200 MB");
+  });
+
+  it("maps quota codes to quota and suggests local mode", () => {
+    for (const code of ["-60018", "-60019"]) {
+      const f = classifyMineruError({ code, mode: "cloud" });
+      expect(f.kind).toBe("quota");
+      expect(f.action).toBe("switch-local");
+    }
+  });
+
+  it("maps a missing task to a retryable error", () => {
+    const f = classifyMineruError({ code: "-60012", mode: "cloud" });
+    expect(f.retryable).toBe(true);
+  });
+
+  it("maps corrupt-file codes to parse failures", () => {
+    for (const code of ["-60003", "-60004", "-60007"]) {
+      expect(classifyMineruError({ code, mode: "cloud" }).kind).toBe("parse");
+    }
   });
 });

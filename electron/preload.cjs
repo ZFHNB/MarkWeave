@@ -26,6 +26,12 @@ contextBridge.exposeInMainWorld("markweave", {
   removeHistory: (payload) => ipcRenderer.invoke("history:remove", payload),
   chooseDirectory: () => ipcRenderer.invoke("dialog:choose-directory"),
   detectPandoc: () => ipcRenderer.invoke("pandoc:detect"),
+  mineruSaveKey: (apiKey) => ipcRenderer.invoke("mineru:save-key", apiKey),
+  mineruLoadKey: () => ipcRenderer.invoke("mineru:load-key"),
+  mineruClearKey: () => ipcRenderer.invoke("mineru:clear-key"),
+  mineruDetectLocal: () => ipcRenderer.invoke("mineru:detect-local"),
+  mineruParseLocal: (payload) => ipcRenderer.invoke("mineru:parse-local", payload),
+  mineruParseCloud: (payload) => ipcRenderer.invoke("mineru:parse-cloud", payload),
   convertWithPandoc: (payload) => ipcRenderer.invoke("pandoc:convert", payload),
   openThemesFolder: () => ipcRenderer.invoke("themes:open-folder"),
   onMenuAction: (callback) => {

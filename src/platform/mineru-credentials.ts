@@ -20,9 +20,18 @@ export interface MineruSettings {
   /** 默认解析模式 */
   mode: MineruMode;
   cloud: MineruCloudSettings;
+  /** 解析结果存储位置 */
+  location: import("../workspace/mineru-location").OutputLocationSettings;
+  /** 是否已确认过「上传到云端」的隐私提示 */
+  cloudUploadConfirmed: boolean;
 }
 
-export const ENV_API_KEY = "MINERU_API_KEY";
+/**
+ * 官方约定的环境变量名是 MINERU_TOKEN；
+ * MINERU_API_KEY 作为兼容别名保留，两者都支持。
+ */
+export const ENV_API_KEY = "MINERU_TOKEN";
+export const ENV_API_KEY_ALIASES = ["MINERU_TOKEN", "MINERU_API_KEY"] as const;
 
 /** 日志、错误信息里用于替换敏感值的掩码 */
 export const REDACTION_MASK = "***";
@@ -34,6 +43,8 @@ export const REDACTION_MASK = "***";
 export interface CredentialLookup {
   envValue: string | null;
   keychainValue: string | null;
+  /** 兼容别名的值，优先级低于 envValue */
+  envAliasValue?: string | null;
 }
 
 export interface ResolvedCredential {
@@ -48,6 +59,9 @@ export interface ResolvedCredential {
 export function resolveCredential(lookup: CredentialLookup): ResolvedCredential {
   const env = lookup.envValue?.trim();
   if (env) return { apiKey: env, source: "env" };
+
+  const alias = lookup.envAliasValue?.trim();
+  if (alias) return { apiKey: alias, source: "env" };
 
   const stored = lookup.keychainValue?.trim();
   if (stored) return { apiKey: stored, source: "keychain" };
@@ -180,6 +194,56 @@ export function classifyMineruError(input: {
       action: "open-settings",
       retryable: false,
     };
+  }
+
+  // 官方文档定义的业务错误码（比 HTTP 状态更精确）
+  switch (code) {
+    case "A0202":
+    case "A0211":
+      return {
+        kind: "auth",
+        message: code === "A0211" ? "API Key 已过期" : "API Key 无效或缺失",
+        action: "open-settings",
+        retryable: false,
+      };
+    case "-60005":
+      return {
+        kind: "parse",
+        message: "文件超过大小限制（单个文件上限 200 MB）",
+        action: "none",
+        retryable: false,
+      };
+    case "-60006":
+      return {
+        kind: "parse",
+        message: "文件超过页数限制（单文件上限 200 页）",
+        action: "none",
+        retryable: false,
+      };
+    case "-60012":
+      return {
+        kind: "parse",
+        message: "任务不存在或已过期",
+        action: "retry",
+        retryable: true,
+      };
+    case "-60018":
+    case "-60019":
+      return {
+        kind: "quota",
+        message: "超出当日配额",
+        action: input.mode === "cloud" ? "switch-local" : "none",
+        retryable: false,
+      };
+    case "-60003":
+    case "-60004":
+    case "-60007":
+      return {
+        kind: "parse",
+        message: "文件读取失败，可能已损坏或受密码保护",
+        action: "none",
+        retryable: false,
+      };
   }
 
   if (status !== null && status >= 400) {

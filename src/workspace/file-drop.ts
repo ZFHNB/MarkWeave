@@ -9,8 +9,14 @@
  * 这里只做判断与归类，实际的读取在调用方。
  */
 
-/** 允许通过拖拽打开的扩展名 */
+/** 允许直接作为文档打开的扩展名 */
 export const DROPPABLE_EXTENSIONS = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
+
+/** 可交给 MinerU 解析为 Markdown 的扩展名 */
+export const PDF_EXTENSIONS = [".pdf"];
+
+/** 拖入的全部可接受扩展名（文档 + PDF） */
+export const ALL_DROPPABLE_EXTENSIONS = [...DROPPABLE_EXTENSIONS, ...PDF_EXTENSIONS];
 
 export interface DroppedFileInfo {
   /** 磁盘路径；浏览器环境为空 */
@@ -18,6 +24,8 @@ export interface DroppedFileInfo {
   name: string;
   /** 扩展名是否受支持 */
   supported: boolean;
+  /** 是否为需要解析的 PDF */
+  isPdf: boolean;
 }
 
 /** 判断扩展名是否可作为 Markdown 打开 */
@@ -25,6 +33,17 @@ export function isSupportedDocument(name: string): boolean {
   if (typeof name !== "string") return false;
   const lower = name.toLowerCase();
   return DROPPABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/** 判断是否为 PDF（需要走 MinerU 解析） */
+export function isPdfFile(name: string): boolean {
+  if (typeof name !== "string") return false;
+  return name.toLowerCase().endsWith(".pdf");
+}
+
+/** 拖入的文件是否可接受（文档或 PDF） */
+export function isDroppable(name: string): boolean {
+  return isSupportedDocument(name) || isPdfFile(name);
 }
 
 /**
@@ -39,7 +58,7 @@ export function classifyDroppedFiles(files: FileList | File[]): {
   const rejected: string[] = [];
 
   for (const file of Array.from(files)) {
-    if (!isSupportedDocument(file.name)) {
+    if (!isDroppable(file.name)) {
       rejected.push(file.name);
       continue;
     }
@@ -49,6 +68,7 @@ export function classifyDroppedFiles(files: FileList | File[]): {
       path: typeof rawPath === "string" && rawPath.trim() ? rawPath : null,
       name: file.name,
       supported: true,
+      isPdf: isPdfFile(file.name),
     });
   }
 
@@ -67,5 +87,5 @@ export function buildRejectedMessage(names: string[]): string {
   if (names.length === 0) return "";
   const listed = names.slice(0, 3).join("、");
   const more = names.length > 3 ? ` 等 ${names.length} 个文件` : "";
-  return `不支持的文件类型：${listed}${more}。仅支持 ${DROPPABLE_EXTENSIONS.join(" / ")}。`;
+  return `不支持的文件类型：${listed}${more}。仅支持 ${ALL_DROPPABLE_EXTENSIONS.join(" / ")}。`;
 }

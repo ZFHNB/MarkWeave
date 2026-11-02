@@ -101,6 +101,14 @@ import {
   type DroppedFileInfo,
 } from "./workspace/file-drop";
 import {
+  DEFAULT_OUTPUT_LOCATION,
+  LOCATION_MODE_LABELS,
+  normalizeOutputLocation,
+  resolveOutputLocation,
+  type OutputLocationMode,
+} from "./workspace/mineru-location";
+import type { MineruMode, MineruSettings } from "./platform/mineru-credentials";
+import {
   DEFAULT_EDITOR_BEHAVIOR,
   normalizeEditorBehavior,
   type EditorBehaviorSettings,
@@ -1346,6 +1354,16 @@ async function openDroppedFiles(files: DroppedFileInfo[]): Promise<void> {
   const api = getDesktopAPI();
 
   for (const info of files) {
+    // PDF：交给 MinerU 解析，不当作普通文档打开
+    if (info.isPdf) {
+      if (info.path) {
+        await parsePdfWithMineru(info.path);
+      } else {
+        showSaveStatus("PDF 解析需要桌面版", "error");
+      }
+      continue;
+    }
+
     if (api?.readFile && info.path) {
       // 桌面版：走标准打开流程
       const file = await api.readFile(info.path);
@@ -1383,6 +1401,208 @@ async function fileContentsOf(name: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/* ================= MinerU：PDF 解析流程 ================= */
+
+/** 当前正在解析的 PDF，避免重复触发 */
+let mineruBusy = false;
+
+/**
+ * 解析 PDF 并落盘为 Markdown。
+ *
+ * 流程：预检凭证/运行时 → 解析 → 按设置写入 → 打开结果。
+ * 默认不打断用户；只有开启「每次询问」时才弹保存对话框。
+ */
+async function parsePdfWithMineru(pdfPath: string): Promise<void> {
+  if (mineruBusy) {
+    showSaveStatus("已有 PDF 正在解析", "idle");
+    return;
+  }
+
+  const api = getDesktopAPI();
+  if (!api?.mineruParseCloud && !api?.mineruParseLocal) {
+    showSaveStatus("PDF 解析仅在桌面版可用", "error");
+    return;
+  }
+
+  const settings = loadSettings();
+  const mineru = settings.mineru;
+
+  mineruBusy = true;
+  showSaveStatus("正在解析 PDF…", "saving");
+
+  try {
+    // ---- 预检 ----
+    let mode = mineru.mode;
+
+    if (mode === "local") {
+      const local = await api.mineruDetectLocal?.();
+      if (!local?.available) {
+        const choice = window.confirm(
+          `${local?.detail ?? "本地 MinerU 未就绪"}\n\n是否改用云端模式解析？`
+        );
+        if (!choice) return;
+        mode = "cloud";
+      }
+    }
+
+    // ---- 云端：确认隐私与计费 ----
+    if (mode === "cloud") {
+      const loaded = await api.mineruLoadKey?.();
+      if (!loaded?.present || !loaded.apiKey) {
+        const goSettings = window.confirm(
+          "云端解析需要先配置 API Key。\n\n是否现在前往设置？"
+        );
+        if (goSettings) openSettingsModal();
+        showSaveStatus("未配置 API Key", "error");
+        return;
+      }
+
+      // 首次上传前提示文件将发送到云端
+      if (!mineru.cloudUploadConfirmed) {
+        const ok = window.confirm(
+          "云端解析会把该 PDF 上传至 MinerU 服务进行识别。\n\n" +
+            `文件：${extractFileName(pdfPath)}\n\n` +
+            "解析结果通过官方 API 返回；请确认文件不包含敏感信息。是否继续？"
+        );
+        if (!ok) {
+          showSaveStatus("已取消", "idle");
+          return;
+        }
+        const next = loadSettings();
+        next.mineru.cloudUploadConfirmed = true;
+        saveSettings(next);
+      }
+    }
+
+    // ---- 解析 ----
+    const started = Date.now();
+    const result =
+      mode === "local"
+        ? await api.mineruParseLocal?.({ pdfPath })
+        : await api.mineruParseCloud?.({
+            pdfPath,
+            enableOcr: true,
+            enableFormula: true,
+            language: "zh" === navigator.language.slice(0, 2) ? "ch" : "en",
+          });
+
+    if (!result?.ok || !result.markdown) {
+      handleMineruFailure(result, mode);
+      return;
+    }
+
+    const seconds = Math.round((Date.now() - started) / 1000);
+
+    // ---- 落盘 ----
+    const currentDoc = documents.find((d) => d.id === activeDocId);
+    const location = resolveOutputLocation(mineru.location, {
+      pdfPath,
+      notePath: currentDoc?.filePath ?? null,
+    });
+
+    let targetPath: string | null = null;
+
+    if (mineru.location.askEachTime) {
+      // 用户要求每次询问：走另存为对话框
+      const saved = await api.saveFile?.({
+        content: result.markdown,
+        suggestedName: location.fileName,
+      });
+      targetPath = saved?.path ?? null;
+      if (!targetPath) {
+        showSaveStatus("已取消", "idle");
+        return;
+      }
+    } else {
+      targetPath = `${location.directory}/${location.fileName}`;
+      const written = await api.writeFile?.({ path: targetPath, content: result.markdown });
+      if (!written) {
+        // 目录可能不存在，退回另存为对话框而不是静默失败
+        const saved = await api.saveFile?.({
+          content: result.markdown,
+          suggestedName: location.fileName,
+        });
+        targetPath = saved?.path ?? null;
+      }
+    }
+
+    if (!targetPath) {
+      showSaveStatus("保存解析结果失败", "error");
+      return;
+    }
+
+    // ---- 打开结果 ----
+    const file = await api.readFile?.(targetPath);
+    if (file) {
+      activeFilePath = targetPath;
+      handleFileOpened(file);
+      renderFileList();
+      rememberRecentFile(file.path, extractFileName(file.path));
+    }
+
+    showSaveStatus(`已解析（${seconds}s）`, "saved");
+    pendingMineruResult = { path: targetPath, seconds };
+  } finally {
+    mineruBusy = false;
+  }
+}
+
+/**
+ * 最近一次解析结果。
+ * 保存位置默认不打断用户，这里保留一份记录，
+ * 用户之后可以据此在资源管理器中定位或另存。
+ */
+let pendingMineruResult: { path: string; seconds: number } | null = null;
+
+/** 打开最近一次解析结果所在的文件夹 */
+async function revealLastMineruResult(): Promise<void> {
+  const api = getDesktopAPI();
+  if (!pendingMineruResult || !api?.revealInFolder) return;
+  await api.revealInFolder(pendingMineruResult.path);
+}
+
+/** 统一把解析失败转成可读提示 */
+function handleMineruFailure(
+  result: { error?: string; kind?: string; retryable?: boolean } | undefined,
+  mode: "local" | "cloud"
+): void {
+  const kind = result?.kind ?? "unknown";
+  const message = result?.error ?? "解析失败";
+
+  const hint: Record<string, string> = {
+    auth: "API Key 无效或已过期。",
+    quota: "超出配额，可尝试本地模式或稍后重试。",
+    network: "网络连接失败，请检查网络后重试。",
+    "not-configured": "尚未配置 API Key。",
+    "local-not-ready": "本地 MinerU 环境未就绪。",
+    parse: "该 PDF 无法解析。",
+  };
+
+  const suggestion = hint[kind] ?? "";
+  const action =
+    kind === "auth" || kind === "not-configured" || kind === "local-not-ready"
+      ? "\n\n是否前往设置？"
+      : "";
+
+  showSaveStatus("PDF 解析失败", "error");
+
+  if (action) {
+    if (window.confirm(`${message}\n\n${suggestion}${action}`)) {
+      openSettingsModal();
+    }
+    return;
+  }
+
+  const retryHint =
+    mode === "cloud" && !result?.retryable
+      ? "\n\n可尝试切换到本地模式。"
+      : result?.retryable
+      ? "\n\n可稍后重试。"
+      : "";
+
+  window.alert(`${message}${suggestion ? "\n\n" + suggestion : ""}${retryHint}`);
 }
 
 /* ================= 外部修改检测 ================= */
@@ -2070,6 +2290,7 @@ export interface MarkWeaveSettings {
   autoSave: AutoSaveSettings;
   behavior: EditorBehaviorSettings;
   markdownSyntax: MarkdownSyntaxOptions;
+  mineru: MineruSettings;
 }
 
 function loadPdfOptions(): PdfOptions {
@@ -2079,6 +2300,35 @@ function loadPdfOptions(): PdfOptions {
     return normalizePdfOptions(JSON.parse(raw));
   } catch {
     return DEFAULT_PDF_OPTIONS;
+  }
+}
+
+const DEFAULT_MINERU_SETTINGS: MineruSettings & { cloudUploadConfirmed: boolean } = {
+  mode: "local",
+  cloud: { endpoint: "", hasApiKey: false, keySource: "none" },
+  location: { ...DEFAULT_OUTPUT_LOCATION },
+  cloudUploadConfirmed: false,
+};
+
+/** MinerU 设置的本地存档（密钥本身不在这里，走 safeStorage） */
+function loadMineruSettings(): MineruSettings {
+  try {
+    const raw = localStorage.getItem("markweave_mineru");
+    if (!raw) return { ...DEFAULT_MINERU_SETTINGS };
+
+    const parsed = JSON.parse(raw) as any;
+    return {
+      mode: parsed.mode === "cloud" ? "cloud" : "local",
+      cloud: {
+        endpoint: typeof parsed.cloud?.endpoint === "string" ? parsed.cloud.endpoint : "",
+        hasApiKey: parsed.cloud?.hasApiKey === true,
+        keySource: "none",
+      },
+      location: normalizeOutputLocation(parsed.location),
+      cloudUploadConfirmed: parsed.cloudUploadConfirmed === true,
+    };
+  } catch {
+    return { ...DEFAULT_MINERU_SETTINGS };
   }
 }
 
@@ -2152,6 +2402,7 @@ function loadSettings(): MarkWeaveSettings {
     autoSave: loadAutoSaveSettings(),
     behavior: loadEditorBehavior(),
     markdownSyntax: loadMarkdownSyntax(),
+    mineru: loadMineruSettings(),
   };
 }
 
@@ -2184,6 +2435,19 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_autosave", JSON.stringify(settings.autoSave));
   localStorage.setItem("markweave_editor_behavior", JSON.stringify(settings.behavior));
   localStorage.setItem("markweave_markdown_syntax", JSON.stringify(settings.markdownSyntax));
+  localStorage.setItem(
+    "markweave_mineru",
+    JSON.stringify({
+      mode: settings.mineru.mode,
+      cloud: {
+        endpoint: settings.mineru.cloud.endpoint,
+        // 只记录是否已配置，密钥本体在 safeStorage
+        hasApiKey: settings.mineru.cloud.hasApiKey,
+      },
+      location: settings.mineru.location,
+      cloudUploadConfirmed: settings.mineru.cloudUploadConfirmed,
+    })
+  );
 
   applySettings(settings);
 }
@@ -2712,7 +2976,98 @@ function openSettingsModal() {
 
         <!-- Tab 4: 存储与导出 -->
         <div class="ty-settings-panel" id="tab-panel-storage">
-          <div class="ty-settings-section-title">自动保存</div>
+          <div class="ty-settings-section-title">PDF 解析 (MinerU)</div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">默认解析模式</span>
+              <span class="ty-settings-desc">本地无需网络与费用；云端需要 API Key，速度更快</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-mineru-mode" aria-label="默认解析模式">
+              <option value="local" ${currentSettings.mineru.mode === "local" ? "selected" : ""}>本地解析</option>
+              <option value="cloud" ${currentSettings.mineru.mode === "cloud" ? "selected" : ""}>云端 API</option>
+            </select>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">本地环境状态</span>
+              <span class="ty-settings-desc" id="mineru-local-status">检查中…</span>
+            </div>
+            <button class="ty-settings-action" id="btn-mineru-detect">重新检测</button>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">云端 API Key</span>
+              <span class="ty-settings-desc" id="mineru-key-status">未配置</span>
+            </div>
+            <div class="ty-settings-inline">
+              <input class="ty-settings-input ty-settings-input-wide" type="password" id="setting-input-mineru-key"
+                placeholder="粘贴 API Key" aria-label="MinerU 云端 API Key" autocomplete="off" />
+              <button class="ty-settings-action" id="btn-mineru-save-key">保存</button>
+              <button class="ty-settings-action" id="btn-mineru-clear-key">清除</button>
+            </div>
+          </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">解析结果存放位置</div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">保存位置</span>
+              <span class="ty-settings-desc">解析完成后自动保存，不打断当前操作</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-mineru-location" aria-label="解析结果保存位置">
+              ${(["same-as-pdf", "fixed-folder", "same-as-note", "subfolder-of-note"] as OutputLocationMode[])
+                .map(
+                  (mode) =>
+                    `<option value="${mode}" ${
+                      currentSettings.mineru.location.mode === mode ? "selected" : ""
+                    }>${LOCATION_MODE_LABELS[mode]}</option>`
+                )
+                .join("")}
+            </select>
+          </div>
+
+          <div class="ty-settings-row" id="row-mineru-fixed" style="display: ${
+            currentSettings.mineru.location.mode === "fixed-folder" ? "flex" : "none"
+          };">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">固定文件夹</span>
+              <span class="ty-settings-desc">所有解析结果都保存到这里</span>
+            </div>
+            <div class="ty-settings-inline">
+              <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-mineru-folder"
+                placeholder="D:/parsed" aria-label="固定文件夹"
+                value="${currentSettings.mineru.location.fixedFolder.replace(/"/g, "&quot;")}" />
+              <button class="ty-settings-action" id="btn-mineru-folder">选择…</button>
+            </div>
+          </div>
+
+          <div class="ty-settings-row" id="row-mineru-subfolder" style="display: ${
+            currentSettings.mineru.location.mode === "subfolder-of-note" ? "flex" : "none"
+          };">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">子文件夹名称</span>
+              <span class="ty-settings-desc">在笔记所在目录下创建的子目录</span>
+            </div>
+            <input class="ty-settings-input" type="text" id="setting-input-mineru-subfolder"
+              aria-label="子文件夹名称"
+              value="${currentSettings.mineru.location.subfolderName.replace(/"/g, "&quot;")}" />
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">每次解析后询问保存位置</span>
+              <span class="ty-settings-desc">开启后每次解析完成都会弹出保存对话框</span>
+            </div>
+            <label class="ty-settings-toggle">
+              <input type="checkbox" id="setting-toggle-mineru-ask" ${currentSettings.mineru.location.askEachTime ? "checked" : ""} aria-label="每次解析后询问保存位置" />
+              <span class="ty-toggle-slider"></span>
+            </label>
+          </div>
+
+          <div class="ty-settings-section-title" style="margin-top: 18px;">自动保存</div>
           <div class="ty-settings-row">
             <div class="ty-settings-info">
               <span class="ty-settings-label">自动保存模式</span>
@@ -2958,6 +3313,96 @@ function openSettingsModal() {
   bindCustomFontToggle("#setting-select-mono-latin", "#row-custom-mono-latin");
   bindCustomFontToggle("#setting-select-mono-cjk", "#row-custom-mono-cjk");
 
+  /* ---- MinerU 交互 ---- */
+
+  const mineruLocalStatus = modalOverlay.querySelector<HTMLElement>("#mineru-local-status");
+  const mineruKeyStatus = modalOverlay.querySelector<HTMLElement>("#mineru-key-status");
+
+  const refreshLocalStatus = async () => {
+    const api = getDesktopAPI();
+    if (!api?.mineruDetectLocal) {
+      if (mineruLocalStatus) mineruLocalStatus.textContent = "仅桌面版支持";
+      return;
+    }
+    if (mineruLocalStatus) mineruLocalStatus.textContent = "检查中…";
+    const info = await api.mineruDetectLocal();
+    if (mineruLocalStatus) {
+      mineruLocalStatus.textContent = info.available
+        ? `就绪：${info.command}${info.version ? " " + info.version : ""}`
+        : info.detail;
+    }
+  };
+
+  const refreshKeyStatus = async () => {
+    const api = getDesktopAPI();
+    if (!api?.mineruLoadKey) {
+      if (mineruKeyStatus) mineruKeyStatus.textContent = "仅桌面版支持";
+      return;
+    }
+    const loaded = await api.mineruLoadKey();
+    if (mineruKeyStatus) {
+      if (!loaded.present) {
+        mineruKeyStatus.textContent = "未配置";
+      } else if (loaded.source === "env") {
+        mineruKeyStatus.textContent = `来自环境变量 ${loaded.masked ?? ""}`;
+      } else {
+        mineruKeyStatus.textContent = `已加密保存 ${loaded.masked ?? ""}`;
+      }
+    }
+  };
+
+  void refreshLocalStatus();
+  void refreshKeyStatus();
+
+  modalOverlay.querySelector("#btn-mineru-detect")?.addEventListener("click", () => {
+    void refreshLocalStatus();
+  });
+
+  // 保存密钥：只进 safeStorage，不进 localStorage
+  modalOverlay.querySelector("#btn-mineru-save-key")?.addEventListener("click", async () => {
+    const api = getDesktopAPI();
+    const input = modalOverlay.querySelector<HTMLInputElement>("#setting-input-mineru-key");
+    const value = input?.value.trim();
+    if (!api?.mineruSaveKey || !value) return;
+
+    const saved = await api.mineruSaveKey(value);
+    if (saved.ok) {
+      if (input) input.value = "";
+      await refreshKeyStatus();
+    } else if (saved.error === "encryption-unavailable") {
+      window.alert("当前系统不支持安全存储，无法保存 API Key。");
+    } else {
+      window.alert("保存失败，请查看日志。");
+    }
+  });
+
+  // 清除密钥
+  modalOverlay.querySelector("#btn-mineru-clear-key")?.addEventListener("click", async () => {
+    const api = getDesktopAPI();
+    if (!api?.mineruClearKey) return;
+    if (!window.confirm("确定要清除已保存的 API Key 吗？")) return;
+    await api.mineruClearKey();
+    await refreshKeyStatus();
+  });
+
+  // 固定文件夹选择
+  modalOverlay.querySelector("#btn-mineru-folder")?.addEventListener("click", async () => {
+    const api = getDesktopAPI();
+    if (!api?.chooseDirectory) return;
+    const dir = await api.chooseDirectory();
+    const input = modalOverlay.querySelector<HTMLInputElement>("#setting-input-mineru-folder");
+    if (dir && input) input.value = dir;
+  });
+
+  // 保存位置下拉：切换时显示对应输入项
+  modalOverlay.querySelector("#setting-select-mineru-location")?.addEventListener("change", (e) => {
+    const value = (e.target as HTMLSelectElement).value;
+    const fixed = modalOverlay.querySelector<HTMLElement>("#row-mineru-fixed");
+    const sub = modalOverlay.querySelector<HTMLElement>("#row-mineru-subfolder");
+    if (fixed) fixed.style.display = value === "fixed-folder" ? "flex" : "none";
+    if (sub) sub.style.display = value === "subfolder-of-note" ? "flex" : "none";
+  });
+
   // 选择历史副本目录
   modalOverlay.querySelector("#setting-btn-history-dir")?.addEventListener("click", async () => {
     const api = getDesktopAPI();
@@ -3069,6 +3514,14 @@ function openSettingsModal() {
     const restoreSession = (modalOverlay.querySelector("#setting-toggle-restore") as HTMLInputElement)?.checked ?? true;
     const softBreaksAsHardBreaks = (modalOverlay.querySelector("#setting-toggle-softbreak") as HTMLInputElement)?.checked ?? false;
     const syntaxAutoLink = (modalOverlay.querySelector("#setting-toggle-syntax-autolink") as HTMLInputElement)?.checked ?? true;
+
+    const mineruMode = ((modalOverlay.querySelector("#setting-select-mineru-mode") as HTMLSelectElement)?.value === "cloud"
+      ? "cloud"
+      : "local") as MineruMode;
+    const mineruLocationMode = ((modalOverlay.querySelector("#setting-select-mineru-location") as HTMLSelectElement)?.value as OutputLocationMode) || "same-as-pdf";
+    const mineruFixedFolder = (modalOverlay.querySelector("#setting-input-mineru-folder") as HTMLInputElement)?.value || "";
+    const mineruSubfolder = (modalOverlay.querySelector("#setting-input-mineru-subfolder") as HTMLInputElement)?.value || "attachments";
+    const mineruAsk = (modalOverlay.querySelector("#setting-toggle-mineru-ask") as HTMLInputElement)?.checked ?? false;
     const autoSaveMode = ((modalOverlay.querySelector("#setting-select-autosave-mode") as HTMLSelectElement)?.value as AutoSaveSettings["mode"]) || "off";
     const autoSaveInterval = parseInt((modalOverlay.querySelector("#setting-input-autosave-interval") as HTMLInputElement)?.value || "5", 10) || 5;
     const historyDir = (modalOverlay.querySelector("#setting-input-history-dir") as HTMLInputElement)?.value || "";
@@ -3103,6 +3556,18 @@ function openSettingsModal() {
       finalNewline,
       behavior: normalizeEditorBehavior({ spellcheck, autoLink, codeWrap, restoreSession }),
       markdownSyntax: { softBreaksAsHardBreaks, autoLink: syntaxAutoLink },
+      mineru: {
+        mode: mineruMode,
+        // hasApiKey 由界面上的保存/清除按钮单独维护，这里沿用已有值
+        cloud: { ...loadMineruSettings().cloud },
+        location: normalizeOutputLocation({
+          mode: mineruLocationMode,
+          fixedFolder: mineruFixedFolder,
+          subfolderName: mineruSubfolder,
+          askEachTime: mineruAsk,
+        }),
+        cloudUploadConfirmed: loadMineruSettings().cloudUploadConfirmed,
+      },
       autoSave: normalizeAutoSaveSettings({
         mode: autoSaveMode,
         intervalMinutes: autoSaveInterval,
@@ -3136,6 +3601,12 @@ btnOpenSettings?.addEventListener("click", openSettingsModal);
 btnSaveMd.addEventListener("click", downloadMarkdown);
 
 // 顶部「保存」按钮：优先写回原文件，未命名文档走「另存为」
+// 点击可操作的状态提示：定位最近的解析结果
+saveStatusEl?.addEventListener("click", () => {
+  if (!saveStatusEl.classList.contains("is-actionable")) return;
+  void revealLastMineruResult();
+});
+
 btnSaveFile?.addEventListener("click", () => {
   const doc = documents.find((d) => d.id === activeDocId);
   if (doc?.filePath) {
@@ -3238,6 +3709,8 @@ function showSaveStatus(text: string, tone: "idle" | "saving" | "saved" | "error
   saveStatusEl.textContent = text;
   saveStatusEl.dataset.tone = tone;
   saveStatusEl.classList.add("is-visible");
+  // 只有「解析完成」这类带后续动作的提示才可点击
+  saveStatusEl.classList.toggle("is-actionable", Boolean(pendingMineruResult) && tone === "saved");
 
   if (statusResetTimer) clearTimeout(statusResetTimer);
   if (tone === "saved" || tone === "error") {

@@ -10,8 +10,9 @@ import {
 } from "../src/platform/mineru-local";
 
 describe("command candidates", () => {
-  it("prefers the current mineru command over the legacy one", () => {
-    expect(LOCAL_COMMANDS[0]).toBe("mineru");
+  it("prefers mineru-kit, then mineru, then the legacy command", () => {
+    expect(LOCAL_COMMANDS[0]).toBe("mineru-kit");
+    expect(LOCAL_COMMANDS).toContain("mineru");
     expect(LOCAL_COMMANDS).toContain("magic-pdf");
   });
 });
@@ -74,23 +75,44 @@ describe("evaluateLocalRuntime", () => {
 });
 
 describe("buildLocalArgs", () => {
-  it("passes input and output paths", () => {
+  it("uses the stateless parse form for mineru-kit", () => {
     const args = buildLocalArgs({
-      command: "mineru",
+      command: "mineru-kit",
       inputPath: "C:/in/a.pdf",
-      outputDir: "C:/out",
+      outputDir: "C:/out/a.md",
     });
-    expect(args).toEqual(["-p", "C:/in/a.pdf", "-o", "C:/out"]);
+    expect(args).toEqual(["parse", "C:/in/a.pdf", "-o", "C:/out/a.md"]);
   });
 
-  it("adds the auto mode flag for the legacy command", () => {
+  it("requires all pages for the 4.x library mode", () => {
+    // 库模式默认只取前 10 页，不显式指定会静默截断
+    const args = buildLocalArgs({
+      command: "mineru",
+      inputPath: "a.pdf",
+      outputDir: "out",
+    });
+    expect(args).toContain("--pages");
+    expect(args[args.indexOf("--pages") + 1]).toBe("all");
+    expect(args[0]).toBe("a.pdf");
+  });
+
+  it("skips the page flag when only the first pages are wanted", () => {
+    const args = buildLocalArgs({
+      command: "mineru",
+      inputPath: "a.pdf",
+      outputDir: "out",
+      allPages: false,
+    });
+    expect(args).not.toContain("--pages");
+  });
+
+  it("uses the legacy -p form for magic-pdf", () => {
     const args = buildLocalArgs({
       command: "magic-pdf",
       inputPath: "a.pdf",
       outputDir: "out",
     });
-    expect(args).toContain("-m");
-    expect(args[args.indexOf("-m") + 1]).toBe("auto");
+    expect(args).toEqual(["-p", "a.pdf", "-o", "out", "-m", "auto"]);
   });
 });
 
@@ -99,12 +121,18 @@ describe("candidateMarkdownPaths", () => {
     const paths = candidateMarkdownPaths("C:/out", "paper");
     expect(paths).toContain("C:/out/paper/paper.md");
     expect(paths).toContain("C:/out/paper/auto/paper.md");
-    expect(paths.length).toBeGreaterThanOrEqual(3);
+    expect(paths.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("accepts a direct .md output path", () => {
+    const paths = candidateMarkdownPaths("C:/out/paper.md", "paper");
+    expect(paths[0]).toBe("C:/out/paper.md");
   });
 
   it("normalizes trailing separators", () => {
     const bs = "\\";
-    expect(candidateMarkdownPaths(`C:${bs}out${bs}`, "paper")[0]).toBe("C:/out/paper/paper.md");
+    // 无扩展名的目录输入，第一个候选是 "C:/out.md"
+    expect(candidateMarkdownPaths(`C:${bs}out${bs}`, "paper")).toContain("C:/out/paper/paper.md");
   });
 });
 

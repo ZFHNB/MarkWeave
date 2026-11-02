@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu } = require("electron");
+const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, safeStorage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -462,6 +462,362 @@ function classifyPandocFailure(result) {
  * payload: { markdown, format, outputPath, metadata }
  * 未提供 outputPath 时弹出保存对话框。
  */
+/* ================= MinerU：密钥安全存储 ================= */
+
+/**
+ * 密钥存放位置：%userData%/mineru-credentials.bin
+ *
+ * 用 Electron 的 safeStorage 加密后写盘（Windows 走 DPAPI，
+ * macOS 走 Keychain，Linux 走 libsecret）。
+ * 明文密钥在任何情况下都不落盘，也不写入 localStorage。
+ */
+function credentialFilePath() {
+  return path.join(app.getPath("userData"), "mineru-credentials.bin");
+}
+
+ipcMain.handle("mineru:save-key", async (_event, apiKey) => {
+  if (typeof apiKey !== "string" || !apiKey.trim()) {
+    return { ok: false, error: "empty" };
+  }
+  if (!safeStorage.isEncryptionAvailable()) {
+    return { ok: false, error: "encryption-unavailable" };
+  }
+
+  try {
+    const encrypted = safeStorage.encryptString(apiKey.trim());
+    await fs.promises.writeFile(credentialFilePath(), encrypted, { mode: 0o600 });
+    return { ok: true };
+  } catch (err) {
+    console.error("保存 MinerU 密钥失败:", err && err.message);
+    return { ok: false, error: "write-failed" };
+  }
+});
+
+ipcMain.handle("mineru:load-key", async () => {
+  const file = credentialFilePath();
+  if (!fs.existsSync(file)) {
+    return { present: false, apiKey: null, source: "none" };
+  }
+
+  // 环境变量优先，便于 CI 与临时覆盖
+  const envKey =
+    (process.env.MINERU_TOKEN || process.env.MINERU_API_KEY || "").trim();
+  if (envKey) {
+    return { present: true, apiKey: envKey, source: "env", masked: mask(envKey) };
+  }
+
+  if (!safeStorage.isEncryptionAvailable()) {
+    return { present: false, apiKey: null, source: "none", error: "encryption-unavailable" };
+  }
+
+  try {
+    const encrypted = await fs.promises.readFile(file);
+    const apiKey = safeStorage.decryptString(encrypted);
+    return { present: true, apiKey, source: "keychain", masked: mask(apiKey) };
+  } catch (err) {
+    console.error("读取 MinerU 密钥失败:", err && err.message);
+    return { present: false, apiKey: null, source: "none", error: "decrypt-failed" };
+  }
+});
+
+ipcMain.handle("mineru:clear-key", async () => {
+  try {
+    await fs.promises.rm(credentialFilePath(), { force: true });
+    return { ok: true };
+  } catch (err) {
+    console.error("清除 MinerU 密钥失败:", err && err.message);
+    return { ok: false, error: "remove-failed" };
+  }
+});
+
+/** 只保留首尾 4 位，用于界面展示 */
+function mask(value) {
+  const v = String(value || "").trim();
+  if (v.length <= 8) return "***";
+  return `${v.slice(0, 4)}…${v.slice(-4)}`;
+}
+
+/* ================= MinerU：本地运行时探测 ================= */
+
+const MINERU_LOCAL_CANDIDATES = ["mineru-kit", "mineru", "magic-pdf"];
+
+function runCommand(command, args, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    execFile(
+      command,
+      args,
+      { timeout: timeoutMs, windowsHide: true, maxBuffer: 2 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        resolve({
+          ok: !error,
+          stdout: String(stdout || ""),
+          stderr: String(stderr || ""),
+          errorCode: error && error.code ? String(error.code) : null,
+        });
+      }
+    );
+  });
+}
+
+ipcMain.handle("mineru:detect-local", async () => {
+  for (const command of MINERU_LOCAL_CANDIDATES) {
+    const result = await runCommand(command, ["--version"]);
+    if (result.ok || /\d+\.\d+/.test(result.stdout || result.stderr || "")) {
+      const output = `${result.stdout}\n${result.stderr}`;
+      const versionMatch = output.match(/(\d+\.\d+\.\d+(?:[-+][\w.]+)?)/);
+      return {
+        available: true,
+        command,
+        version: versionMatch ? versionMatch[1] : null,
+        detail: `已检测到 ${command}${versionMatch ? " " + versionMatch[1] : ""}`,
+      };
+    }
+  }
+
+  return {
+    available: false,
+    command: null,
+    version: null,
+    detail: "未检测到本地 MinerU。可用 `pip install -U mineru` 安装，或切换到云端模式。",
+  };
+});
+
+/**
+ * 本地解析：运行一次命令行解析，返回产出的 Markdown。
+ * 只读取输出文件，不执行任何来自 PDF 的代码。
+ */
+ipcMain.handle("mineru:parse-local", async (_event, payload) => {
+  if (!payload || typeof payload.pdfPath !== "string") {
+    return { ok: false, error: "缺少 PDF 路径" };
+  }
+
+  const pdfPath = payload.pdfPath;
+  if (!fs.existsSync(pdfPath)) {
+    return { ok: false, error: "PDF 文件不存在" };
+  }
+
+  const command = payload.command || "mineru-kit";
+  let tmpDir = null;
+
+  try {
+    tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "markweave-mineru-"));
+    const base = path.basename(pdfPath).replace(/\.[^.]+$/, "");
+    const outPath = path.join(tmpDir, `${base}.md`);
+
+    let args;
+    if (command === "mineru-kit") {
+      args = ["parse", pdfPath, "-o", outPath];
+    } else if (command === "magic-pdf") {
+      args = ["-p", pdfPath, "-o", tmpDir, "-m", "auto"];
+    } else {
+      args = [pdfPath, "--pages", "all", "-o", outPath];
+    }
+
+    const result = await runCommand(command, args, payload.timeoutMs || 10 * 60 * 1000);
+    if (!result.ok) {
+      return {
+        ok: false,
+        error: (result.stderr || result.stdout || "本地解析失败").slice(0, 500),
+        command,
+      };
+    }
+
+    // 输出路径因命令而异，逐一尝试
+    const candidates = [
+      outPath,
+      path.join(tmpDir, base, `${base}.md`),
+      path.join(tmpDir, base, "auto", `${base}.md`),
+      path.join(tmpDir, base, `${base}.md`),
+      path.join(tmpDir, base, "ocr", `${base}.md`),
+    ];
+
+    for (const candidate of candidates) {
+      if (fs.existsSync(candidate)) {
+        const markdown = await fs.promises.readFile(candidate, "utf8");
+        return { ok: true, markdown, command, source: candidate };
+      }
+    }
+
+    return { ok: false, error: "解析完成但未找到 Markdown 输出", command };
+  } catch (err) {
+    console.error("本地 MinerU 解析失败:", err && err.message);
+    return { ok: false, error: String(err && err.message ? err.message : err) };
+  } finally {
+    if (tmpDir) {
+      fs.promises.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
+  }
+});
+
+/* ================= MinerU：云端解析代理 ================= */
+
+/**
+ * 云端解析在主进程发起：密钥不进入渲染进程，
+ * 也避免渲染层的跨域限制。
+ */
+ipcMain.handle("mineru:parse-cloud", async (_event, payload) => {
+  if (!payload || typeof payload.pdfPath !== "string") {
+    return { ok: false, error: "缺少 PDF 路径", kind: "parse" };
+  }
+
+  // 读取密钥：环境变量优先，其次加密存储
+  const envKey = (process.env.MINERU_TOKEN || process.env.MINERU_API_KEY || "").trim();
+  let apiKey = envKey;
+
+  if (!apiKey && fs.existsSync(credentialFilePath()) && safeStorage.isEncryptionAvailable()) {
+    try {
+      apiKey = safeStorage.decryptString(await fs.promises.readFile(credentialFilePath())).trim();
+    } catch {
+      return { ok: false, error: "无法读取已保存的 API Key", kind: "auth" };
+    }
+  }
+
+  if (!apiKey) {
+    return { ok: false, error: "尚未配置 API Key", kind: "not-configured" };
+  }
+
+  try {
+    const bytes = await fs.promises.readFile(payload.pdfPath);
+    const fileName = path.basename(payload.pdfPath);
+
+    // 1) 申请上传地址
+    const reqRes = await fetch("https://mineru.net/api/v4/file-urls/batch", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        files: [{ name: fileName, is_ocr: payload.enableOcr !== false }],
+        enable_formula: payload.enableFormula !== false,
+        language: payload.language || "ch",
+      }),
+    });
+    const reqJson = await reqRes.json();
+
+    if (reqJson.code !== 0) {
+      return {
+        ok: false,
+        error: reqJson.msg || "申请上传地址失败",
+        code: String(reqJson.code),
+        kind: classifyKind(String(reqJson.code), reqRes.status),
+      };
+    }
+
+    const batchId = reqJson.data.batch_id;
+    const uploadUrl = reqJson.data.file_urls[0];
+
+    // 2) 上传：切勿设置 Content-Type，否则 OSS 签名校验失败
+    const putRes = await fetch(uploadUrl, { method: "PUT", body: bytes });
+    if (!putRes.ok) {
+      return { ok: false, error: `上传失败（HTTP ${putRes.status}）`, kind: "network" };
+    }
+
+    // 3) 轮询
+    const deadline = Date.now() + (payload.timeoutMs || 10 * 60 * 1000);
+    let zipUrl = null;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, payload.pollIntervalMs || 3000));
+      const res = await fetch(`https://mineru.net/api/v4/extract-results/batch/${batchId}`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      const json = await res.json();
+      const item = json?.data?.extract_result?.[0];
+      if (!item) continue;
+
+      if (item.state === "failed") {
+        return {
+          ok: false,
+          error: item.err_msg || "解析失败",
+          kind: "parse",
+        };
+      }
+      if (item.state === "done") {
+        zipUrl = item.full_zip_url;
+        break;
+      }
+    }
+
+    if (!zipUrl) {
+      return { ok: false, error: "解析超时", kind: "network", retryable: true };
+    }
+
+    // 4) 下载并解压 full.md
+    const zipRes = await fetch(zipUrl);
+    const zipBuf = Buffer.from(await zipRes.arrayBuffer());
+    const markdown = await extractMarkdownFromZipBuffer(zipBuf);
+
+    return { ok: true, markdown, zipUrl };
+  } catch (err) {
+    const message = String(err && err.message ? err.message : err);
+    return {
+      ok: false,
+      error: message,
+      // 网络层异常通常是 fetch 抛出
+      kind: /fetch failed|ENOTFOUND|ECONN/i.test(message) ? "network" : "unknown",
+      retryable: true,
+    };
+  }
+});
+
+/** 官方业务码 → 界面动作类别 */
+function classifyKind(code, status) {
+  if (code === "A0202" || code === "A0211" || status === 401) return "auth";
+  if (code === "-60018" || code === "-60019" || status === 429) return "quota";
+  if (/^-6000[3-7]$/.test(code)) return "parse";
+  return "unknown";
+}
+
+/**
+ * 从 zip 字节里取出 full.md。
+ * 主进程没有 DecompressionStream 的类型约束问题，直接用 zlib 解压。
+ */
+async function extractMarkdownFromZipBuffer(buf) {
+  const zlib = require("zlib");
+
+  // 定位 EOCD
+  let eocd = -1;
+  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 65558; i--) {
+    if (buf.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error("结果包不是合法 zip");
+
+  const count = buf.readUInt16LE(eocd + 10);
+  let offset = buf.readUInt32LE(eocd + 16);
+
+  let chosen = null;
+  let fallback = null;
+
+  for (let i = 0; i < count; i++) {
+    if (buf.readUInt32LE(offset) !== 0x02014b50) break;
+    const method = buf.readUInt16LE(offset + 10);
+    const compSize = buf.readUInt32LE(offset + 20);
+    const nameLen = buf.readUInt16LE(offset + 28);
+    const extraLen = buf.readUInt16LE(offset + 30);
+    const commentLen = buf.readUInt16LE(offset + 32);
+    const localOffset = buf.readUInt32LE(offset + 42);
+    const name = buf.subarray(offset + 46, offset + 46 + nameLen).toString("utf8");
+
+    if (name.toLowerCase().endsWith(".md")) {
+      const localNameLen = buf.readUInt16LE(localOffset + 26);
+      const localExtraLen = buf.readUInt16LE(localOffset + 28);
+      const dataStart = localOffset + 30 + localNameLen + localExtraLen;
+      const raw = buf.subarray(dataStart, dataStart + compSize);
+      const text =
+        method === 0 ? raw.toString("utf8") : zlib.inflateRawSync(raw).toString("utf8");
+
+      if (/^full\.md$/i.test(name)) chosen = text;
+      else if (fallback === null) fallback = text;
+    }
+
+    offset += 46 + nameLen + extraLen + commentLen;
+  }
+
+  const result = chosen ?? fallback;
+  if (result === null) throw new Error("结果包中没有 Markdown 文件");
+  return result;
+}
+
 ipcMain.handle("pandoc:convert", async (_event, payload) => {
   if (!payload || typeof payload.markdown !== "string") {
     return { ok: false, error: "缺少输入内容" };

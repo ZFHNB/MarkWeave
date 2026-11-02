@@ -3200,3 +3200,13 @@ textarea:focus-visible,
 .theme-night .ty-update-status[data-state="error"] {
   color: #fc8181;
 }
+
+/* 可点击的状态提示：解析完成后可定位结果文件 */
+.ty-save-status.is-actionable {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.ty-save-status.is-actionable:hover {
+  text-decoration: underline;
+}

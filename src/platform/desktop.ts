@@ -69,6 +69,42 @@ export interface MarkWeaveDesktopAPI {
   onCloseRequested?: (callback: () => void) => () => void;
   confirmClose?: () => void;
   detectPandoc?: () => Promise<{ available: boolean; version: string | null; error: string | null }>;
+  mineruSaveKey?: (apiKey: string) => Promise<{ ok: boolean; error?: string }>;
+  mineruLoadKey?: () => Promise<{
+    present: boolean;
+    apiKey: string | null;
+    source: "env" | "keychain" | "none";
+    masked?: string;
+    error?: string;
+  }>;
+  mineruClearKey?: () => Promise<{ ok: boolean; error?: string }>;
+  mineruDetectLocal?: () => Promise<{
+    available: boolean;
+    command: string | null;
+    version: string | null;
+    detail: string;
+  }>;
+  mineruParseLocal?: (payload: {
+    pdfPath: string;
+    command?: string;
+    timeoutMs?: number;
+  }) => Promise<{ ok: boolean; markdown?: string; error?: string; command?: string; source?: string }>;
+  mineruParseCloud?: (payload: {
+    pdfPath: string;
+    enableOcr?: boolean;
+    enableFormula?: boolean;
+    language?: "ch" | "en";
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+  }) => Promise<{
+    ok: boolean;
+    markdown?: string;
+    zipUrl?: string;
+    error?: string;
+    kind?: string;
+    code?: string;
+    retryable?: boolean;
+  }>;
   convertWithPandoc?: (payload: {
     markdown: string;
     format: string;
