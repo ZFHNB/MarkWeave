@@ -76,6 +76,12 @@ import {
 import { toStandaloneHtml } from "./export/html-export";
 import { PANDOC_FORMATS, getFormat } from "./export/pandoc";
 import {
+  buildRejectedMessage,
+  classifyDroppedFiles,
+  dragContainsFiles,
+  type DroppedFileInfo,
+} from "./workspace/file-drop";
+import {
   DEFAULT_EDITOR_BEHAVIOR,
   normalizeEditorBehavior,
   type EditorBehaviorSettings,
@@ -1233,6 +1239,130 @@ async function openWorkspaceFile(path: string): Promise<void> {
     handleFileOpened(file);
     renderFileList();
     rememberRecentFile(file.path, extractFileName(file.path));
+  }
+}
+
+/* ================= 拖入文件打开 ================= */
+/**
+ * 拖拽打开文档。
+ *
+ * 桌面版能从 File 对象拿到磁盘路径，走与「打开文件」完全相同的流程
+ * （含外部修改检测、最近文件记录）；Web 版退化为读取内容的内存文档。
+ */
+
+let dragDepth = 0;
+let dropOverlay: HTMLElement | null = null;
+
+function ensureDropOverlay(): HTMLElement {
+  if (dropOverlay && document.body.contains(dropOverlay)) return dropOverlay;
+
+  const el = document.createElement("div");
+  el.className = "ty-drop-overlay";
+  el.innerHTML = `
+    <div class="ty-drop-hint">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+        <polyline points="7 10 12 15 17 10"></polyline>
+        <line x1="12" y1="15" x2="12" y2="3"></line>
+      </svg>
+      <div class="ty-drop-title">松开以打开文档</div>
+      <div class="ty-drop-sub">支持 .md / .markdown / .txt</div>
+    </div>
+  `;
+  document.body.appendChild(el);
+  dropOverlay = el;
+  return el;
+}
+
+function showDropOverlay() {
+  ensureDropOverlay().classList.add("is-visible");
+}
+
+function hideDropOverlay() {
+  dragDepth = 0;
+  dropOverlay?.classList.remove("is-visible");
+}
+
+/** 拖动进入窗口：只在携带文件时响应 */
+window.addEventListener("dragenter", (event) => {
+  if (!dragContainsFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  dragDepth += 1;
+  showDropOverlay();
+});
+
+window.addEventListener("dragover", (event) => {
+  if (!dragContainsFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  // 必须设置 dropEffect，否则浏览器不会触发 drop
+  if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+});
+
+window.addEventListener("dragleave", (event) => {
+  if (!dragContainsFiles(event.dataTransfer)) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  // 子元素间移动也会触发 dragleave，用计数避免闪烁
+  if (dragDepth === 0) hideDropOverlay();
+});
+
+window.addEventListener("drop", (event) => {
+  if (!dragContainsFiles(event.dataTransfer)) return;
+  event.preventDefault();
+  hideDropOverlay();
+
+  const droppedList = Array.from(event.dataTransfer?.files ?? []);
+  pendingDropFiles = droppedList;
+  const { accepted, rejected } = classifyDroppedFiles(droppedList);
+  if (rejected.length > 0) {
+    showSaveStatus(buildRejectedMessage(rejected), "error");
+  }
+  if (accepted.length === 0) return;
+
+  void openDroppedFiles(accepted);
+});
+
+/** 依次打开拖入的文档；只保留最后一个为活动标签 */
+async function openDroppedFiles(files: DroppedFileInfo[]): Promise<void> {
+  const api = getDesktopAPI();
+
+  for (const info of files) {
+    if (api?.readFile && info.path) {
+      // 桌面版：走标准打开流程
+      const file = await api.readFile(info.path);
+      if (file) {
+        activeFilePath = info.path;
+        handleFileOpened(file);
+        renderFileList();
+        rememberRecentFile(file.path, extractFileName(file.path));
+
+        // 登记外部修改检测基线
+        const opened = documents.find((d) => d.filePath === file.path);
+        if (opened) await refreshTrackedFile(opened.id, file.path);
+      }
+      continue;
+    }
+
+    // 浏览器版：读取内容后作为内存文档打开
+    const dropped = (await fileContentsOf(info.name)) ?? null;
+    if (dropped !== null) {
+      handleFileOpened({ path: info.path ?? info.name, content: dropped });
+    }
+  }
+}
+
+/**
+ * 浏览器环境读取拖入文件的内容。
+ * Electron 下不会走到这里（有 path 就走 IPC 了）。
+ */
+let pendingDropFiles: File[] = [];
+async function fileContentsOf(name: string): Promise<string | null> {
+  const file = pendingDropFiles.find((f) => f.name === name);
+  if (!file) return null;
+  try {
+    return await file.text();
+  } catch {
+    return null;
   }
 }
 

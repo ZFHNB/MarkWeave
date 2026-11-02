@@ -1,0 +1,71 @@
+/**
+ * 文件拖入的支持逻辑。
+ *
+ * 两种运行环境的差异：
+ * - Electron：`File` 对象带 `path` 字段，可以直接拿到磁盘路径，
+ *   走已有的 openWorkspaceFile（支持外部修改检测、最近文件等）。
+ * - 浏览器：只能读 `File` 内容，没有磁盘路径，作为内存文档打开。
+ *
+ * 这里只做判断与归类，实际的读取在调用方。
+ */
+
+/** 允许通过拖拽打开的扩展名 */
+export const DROPPABLE_EXTENSIONS = [".md", ".markdown", ".mdown", ".mkd", ".txt"];
+
+export interface DroppedFileInfo {
+  /** 磁盘路径；浏览器环境为空 */
+  path: string | null;
+  name: string;
+  /** 扩展名是否受支持 */
+  supported: boolean;
+}
+
+/** 判断扩展名是否可作为 Markdown 打开 */
+export function isSupportedDocument(name: string): boolean {
+  if (typeof name !== "string") return false;
+  const lower = name.toLowerCase();
+  return DROPPABLE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
+/**
+ * 从 DataTransfer 的文件列表里提取可用于打开的文件。
+ * 不支持的扩展名会被过滤掉，并在 `rejected` 里给出名称。
+ */
+export function classifyDroppedFiles(files: FileList | File[]): {
+  accepted: DroppedFileInfo[];
+  rejected: string[];
+} {
+  const accepted: DroppedFileInfo[] = [];
+  const rejected: string[] = [];
+
+  for (const file of Array.from(files)) {
+    if (!isSupportedDocument(file.name)) {
+      rejected.push(file.name);
+      continue;
+    }
+    // Electron 在 File 上挂了一个非标准的 path 字段
+    const rawPath = (file as File & { path?: string }).path;
+    accepted.push({
+      path: typeof rawPath === "string" && rawPath.trim() ? rawPath : null,
+      name: file.name,
+      supported: true,
+    });
+  }
+
+  return { accepted, rejected };
+}
+
+/** 拖拽事件里是否携带文件（而不是普通文本选区） */
+export function dragContainsFiles(dataTransfer: DataTransfer | null): boolean {
+  if (!dataTransfer) return false;
+  const types = Array.from(dataTransfer.types ?? []);
+  return types.includes("Files");
+}
+
+/** 拖入被拒文件时的提示文案 */
+export function buildRejectedMessage(names: string[]): string {
+  if (names.length === 0) return "";
+  const listed = names.slice(0, 3).join("、");
+  const more = names.length > 3 ? ` 等 ${names.length} 个文件` : "";
+  return `不支持的文件类型：${listed}${more}。仅支持 ${DROPPABLE_EXTENSIONS.join(" / ")}。`;
+}
