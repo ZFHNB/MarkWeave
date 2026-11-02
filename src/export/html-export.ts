@@ -25,6 +25,10 @@ export interface HtmlExportOptions {
   mermaidSvgs?: string[];
   /** 内联的 KaTeX 字体声明（由 katex-fonts 模块按需生成） */
   katexFontCss?: string;
+  /** 是否在正文前生成目录（front matter 的 toc 字段） */
+  toc?: boolean;
+  /** 目录最大标题层级，默认 3 */
+  tocDepth?: number;
 }
 
 const THEME_CSS: Record<string, string> = {
@@ -65,6 +69,13 @@ export function buildExportCss(
     // 编辑器内的自定义节点（任务列表、图表、公式块）在导出时补齐样式
     `
 .md-diagram-preview svg { max-width: 100%; height: auto; }
+.markweave-toc { margin: 0 0 2em; padding: 12px 18px; border-left: 3px solid var(--border-color, #ddd); }
+.markweave-toc ul { list-style: none; margin: 0; padding: 0; }
+.markweave-toc li { margin: 3px 0; }
+.markweave-toc .toc-level-2 { padding-left: 1em; }
+.markweave-toc .toc-level-3 { padding-left: 2em; }
+.markweave-toc a { color: inherit; text-decoration: none; }
+.markweave-toc a:hover { text-decoration: underline; }
 .md-diagram-error { color: #b00; font-family: monospace; }
 .task-list { list-style: none; padding-left: 1.2em; }
 .task-list .task-item { list-style: none; }
@@ -83,8 +94,64 @@ body { background: ${isDark ? "#363b40" : "#fff"}; }
   ].join("\n");
 }
 
+/** 从文档标题生成目录 HTML（front matter 里 toc: true 时使用） */
+export function buildTocHtml(doc: PMNode, maxDepth = 3): string {
+  const items: { level: number; text: string; id: string }[] = [];
+
+  doc.forEach((node) => {
+    if (node.type.name !== "heading") return;
+    const level = (node.attrs.level as number) || 1;
+    if (level > maxDepth) return;
+    const text = node.textContent.trim();
+    if (!text) return;
+    items.push({ level, text, id: slugify(text) });
+  });
+
+  if (items.length === 0) return "";
+
+  const entries = items
+    .map(
+      (item) =>
+        `<li class="toc-level-${item.level}"><a href="#${escapeHtml(item.id)}">${escapeHtml(
+          item.text
+        )}</a></li>`
+    )
+    .join("\n");
+
+  return `<nav class="markweave-toc">\n<ul>\n${entries}\n</ul>\n</nav>`;
+}
+
+/** 标题转锚点：保留字母数字与中文，其余变连字符 */
+export function slugify(text: string): string {
+  const base = text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-+|-+$/g, "");
+  return base || `section-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * 给正文里的标题补上锚点 id，使其与目录链接对应。
+ * 与 buildTocHtml 使用同一套 slug 规则和顺序。
+ */
+function addHeadingAnchors(doc: PMNode, html: string): string {
+  const ids: string[] = [];
+  doc.forEach((node) => {
+    if (node.type.name !== "heading") return;
+    const text = node.textContent.trim();
+    if (text) ids.push(slugify(text));
+  });
+
+  let index = 0;
+  return html.replace(/<h([1-6])>/g, (_match, level: string) => {
+    const id = ids[index++] ?? "";
+    return id ? `<h${level} id="${escapeHtml(id)}">` : `<h${level}>`;
+  });
+}
+
 function bodyHtml(doc: PMNode, mermaidSvgs: string[] = []): string {
-  let html = toHtml(doc, false);
+  let html = addHeadingAnchors(doc, toHtml(doc, false));
   if (!mermaidSvgs.length) return html;
 
   // 按文档顺序把 mermaid 代码块替换为已渲染的 SVG
@@ -102,6 +169,8 @@ export function toStandaloneHtml(doc: PMNode, options: HtmlExportOptions = {}): 
   const title = options.title || "MarkWeave Document";
   const css = buildExportCss(options.themeId, options.dark, options.katexFontCss);
 
+  const tocHtml = options.toc ? buildTocHtml(doc, options.tocDepth ?? 3) : "";
+
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -115,6 +184,7 @@ ${css}
 </head>
 <body class="markweave-export">
 <article id="write">
+${tocHtml}
 ${bodyHtml(doc, options.mermaidSvgs ?? [])}
 </article>
 </body>

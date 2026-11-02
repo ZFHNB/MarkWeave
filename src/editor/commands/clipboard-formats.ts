@@ -129,7 +129,8 @@ function serializeBlock(node: PMNode, inList = false): string {
     case "toc_block":
       return `<nav class="toc"></nav>`;
     case "yaml_frontmatter":
-      return `<pre class="front-matter">---\n${escapeHtml(node.attrs.content || "")}\n---</pre>`;
+      // 导出时 front matter 已转成文档元数据，不再作为正文出现
+      return "";
     case "footnote_definition":
       return `<div class="footnote-def"><sup>${escapeHtml(node.attrs.id || "")}</sup> ${escapeHtml(
         node.attrs.content || ""

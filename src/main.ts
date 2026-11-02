@@ -76,6 +76,13 @@ import {
 import { toStandaloneHtml } from "./export/html-export";
 import { PANDOC_FORMATS, getFormat } from "./export/pandoc";
 import {
+  buildExportMeta,
+  frontMatterFromNode,
+  resolveHtmlTitle,
+  resolvePaperSize,
+  type FrontMatter,
+} from "./export/front-matter";
+import {
   buildRejectedMessage,
   classifyDroppedFiles,
   dragContainsFiles,
@@ -123,6 +130,7 @@ import {
 } from "./platform/themes";
 import {
   DEFAULT_PDF_OPTIONS,
+  PAPER_SIZES_MICRONS,
   normalizePdfOptions,
   toElectronPdfOptions,
   type PdfOptions,
@@ -3364,12 +3372,27 @@ btnExportHtml.addEventListener("click", () => {
  * 导出独立 HTML：内联排版主题、KaTeX 样式与预渲染的 Mermaid 图，
  * 生成的文件可离线直接打开。
  */
+/** 读取当前文档的 YAML front matter（没有则返回空对象） */
+function currentFrontMatter(): FrontMatter {
+  const doc = editor.getDocument();
+  let content: string | null = null;
+  doc.forEach((node) => {
+    if (content === null && node.type.name === "yaml_frontmatter") {
+      content = node.attrs.content ?? "";
+    }
+  });
+  return frontMatterFromNode(content);
+}
+
 async function exportHtml(): Promise<void> {
   const currentDoc = documents.find((d) => d.id === activeDocId);
   const rawTitle = currentDoc ? currentDoc.title : "Typemark 导出文档";
-  const title = rawTitle.replace(/\.md$/, "");
   const settings = loadSettings();
   const doc = editor.getDocument();
+
+  // front matter 里的 title 优先于文件名
+  const front = currentFrontMatter();
+  const title = resolveHtmlTitle(front, rawTitle.replace(/\.md$/, ""));
 
   let mermaidSvgs: string[] = [];
   try {
@@ -3395,6 +3418,9 @@ async function exportHtml(): Promise<void> {
     dark: document.body.classList.contains("theme-night"),
     mermaidSvgs,
     katexFontCss,
+    // front matter 里 toc: true 时生成目录
+    toc: front.toc === true,
+    tocDepth: front.tocDepth ?? 3,
   });
 
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
@@ -3436,7 +3462,11 @@ async function openPandocExportDialog(): Promise<void> {
   }
 
   const currentDoc = documents.find((d) => d.id === activeDocId);
-  const baseTitle = (currentDoc?.title ?? "document").replace(/\.md$/i, "");
+  const front = currentFrontMatter();
+  const baseTitle = resolveHtmlTitle(
+    front,
+    (currentDoc?.title ?? "document").replace(/\.md$/i, "")
+  );
 
   const overlay = document.createElement("div");
   overlay.className = "ty-modal-overlay";
@@ -3505,7 +3535,7 @@ async function openPandocExportDialog(): Promise<void> {
       markdown,
       format: selected,
       suggestedName: `${baseTitle}.${format.extension}`,
-      metadata: { title: baseTitle },
+      metadata: buildExportMeta(front, baseTitle).metadata,
     });
 
     if (result?.ok) {
@@ -3522,14 +3552,23 @@ async function openPandocExportDialog(): Promise<void> {
 async function exportPdf(): Promise<void> {
   const api = getDesktopAPI();
   const currentDoc = documents.find((d) => d.id === activeDocId);
-  const title = currentDoc ? currentDoc.title.replace(/\.md$/, "") : "document";
+  const front = currentFrontMatter();
+  const title = resolveHtmlTitle(
+    front,
+    currentDoc ? currentDoc.title.replace(/\.md$/, "") : "document"
+  );
 
   if (!api?.printToPdf) {
     window.print();
     return;
   }
 
-  const options = loadSettings().pdf;
+  const settings = loadSettings();
+  // front matter 的 papersize 覆盖设置里的默认纸张
+  const frontPaper = resolvePaperSize(front, Object.keys(PAPER_SIZES_MICRONS));
+  const options = frontPaper
+    ? normalizePdfOptions({ ...settings.pdf, paper: frontPaper as PaperSize })
+    : settings.pdf;
   const suggestedName = currentDoc?.filePath
     ? joinPath(currentDoc.filePath.replace(/[\/][^\/]+$/, ""), `${title}.pdf`)
     : `${title}.pdf`;

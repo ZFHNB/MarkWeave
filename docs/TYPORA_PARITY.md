@@ -141,7 +141,7 @@ General（窗口样式/主题/字数/字体/左侧面板/语言）、Editor（�
 1. 独立 HTML：内联主题 CSS、KaTeX、Mermaid SVG、图片内嵌。
 2. PDF：分页、页眉页脚、纸张、页码、页边距、目录侧栏、深浅主题。
 3. ✅ Pandoc 桥：检测安装（含 PANDOC_PATH 覆盖）、导出 Word/EPUB/LaTeX 等 10 种格式。
-4. 导出模板与 YAML 覆盖（待办）。
+4. ✅ 导出模板与 YAML 覆盖：title/author/date/toc/toc_depth/papersize 接入 HTML、PDF、Pandoc 导出。
 
 ### P7 — 外观与偏好
 1. 内置主题移植（github/newsprint/night/pixyll/whitey）+ 自定义主题文件夹。
