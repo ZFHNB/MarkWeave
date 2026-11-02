@@ -208,7 +208,24 @@ const buildInfo = {
 if (wantDir || onlyDir) {
   const dirTarget = path.join(versionDir, `MarkWeave-${version}-win-x64`);
   log(`复制目录版 → ${path.relative(root, dirTarget)}`);
-  fs.rmSync(dirTarget, { recursive: true, force: true });
+
+  // Windows 上若旧产物仍在运行（或被杀软占用），rmSync 会抛 EPERM。
+  // 静默失败会让后续 in-place 复制产出半新半旧的目录，因此这里显式报错并给指引。
+  try {
+    fs.rmSync(dirTarget, { recursive: true, force: true });
+  } catch (err) {
+    if (err && err.code === "EPERM") {
+      console.error(
+        `
+无法覆盖 ${path.relative(root, dirTarget)}：文件被占用。
+` +
+          "请先关闭正在运行的 MarkWeave，然后重新执行打包。"
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
+
   copyDir(unpacked, dirTarget);
 
   const exe = path.join(dirTarget, "MarkWeave.exe");

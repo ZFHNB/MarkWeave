@@ -78,6 +78,13 @@ export interface MarkWeaveDesktopAPI {
     error?: string;
   }>;
   mineruClearKey?: () => Promise<{ ok: boolean; error?: string }>;
+  mineruTestConnection?: (apiKey?: string) => Promise<{
+    ok: boolean;
+    kind: string;
+    message: string;
+    status?: number;
+    elapsedMs?: number;
+  }>;
   mineruDetectLocal?: () => Promise<{
     available: boolean;
     command: string | null;

@@ -520,6 +520,113 @@ ipcMain.handle("mineru:load-key", async () => {
   }
 });
 
+/**
+ * 测试云端连接：向官方接口发一个只读请求，验证密钥与网络。
+ *
+ * 用 `/api/v4/extract-results/batch/<不存在 id>`：
+ * 有效密钥会得到业务错误（任务不存在），无效密钥得到鉴权错误。
+ * 这样不会消耗解析额度，也不需要上传文件。
+ */
+ipcMain.handle("mineru:test-connection", async (_event, candidateKey) => {
+  const apiKey =
+    (typeof candidateKey === "string" && candidateKey.trim()) ||
+    (process.env.MINERU_TOKEN || process.env.MINERU_API_KEY || "").trim() ||
+    (fs.existsSync(credentialFilePath()) && safeStorage.isEncryptionAvailable()
+      ? (() => {
+          try {
+            return safeStorage
+              .decryptString(fs.readFileSync(credentialFilePath()))
+              .trim();
+          } catch {
+            return "";
+          }
+        })()
+      : "");
+
+  if (!apiKey) {
+    return { ok: false, kind: "not-configured", message: "尚未配置 API Key" };
+  }
+
+  const startedAt = Date.now();
+
+  try {
+    const res = await fetch(
+      "https://mineru.net/api/v4/extract-results/batch/00000000-0000-0000-0000-000000000000",
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+
+    const elapsed = Date.now() - startedAt;
+    const text = await res.text();
+
+    let json = null;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      // 非 JSON 响应
+    }
+
+    // 鉴权失败
+    if (res.status === 401 || res.status === 403) {
+      const msgCode = json && (json.msgCode || json.code);
+      return {
+        ok: false,
+        kind: "auth",
+        status: res.status,
+        message:
+          msgCode === "A0211" || msgCode === "A0202"
+            ? "API Key 无效或已过期"
+            : "鉴权失败，请检查 API Key",
+        elapsedMs: elapsed,
+      };
+    }
+
+    if (res.status === 429) {
+      return { ok: false, kind: "quota", status: res.status, message: "请求过于频繁", elapsedMs: elapsed };
+    }
+
+    if (!res.ok) {
+      return {
+        ok: false,
+        kind: "unknown",
+        status: res.status,
+        message: (json && json.msg) || `HTTP ${res.status}`,
+        elapsedMs: elapsed,
+      };
+    }
+
+    // 200 且返回业务码：只要不是鉴权错误，就说明密钥可用
+    if (json && typeof json.code === "number" && json.code !== 0) {
+      return {
+        ok: true,
+        kind: "authenticated",
+        status: res.status,
+        message: `连接正常（已鉴权）`,
+        elapsedMs: elapsed,
+      };
+    }
+
+    return {
+      ok: true,
+      kind: "authenticated",
+      status: res.status,
+      message: "连接正常",
+      elapsedMs: elapsed,
+    };
+  } catch (err) {
+    const message = String(err && err.message ? err.message : err);
+    const isTimeout = /timeout|aborted/i.test(message);
+    return {
+      ok: false,
+      kind: isTimeout ? "network" : "network",
+      message: isTimeout ? "连接超时，请检查网络" : `网络错误：${message.slice(0, 120)}`,
+      elapsedMs: Date.now() - startedAt,
+    };
+  }
+});
+
 ipcMain.handle("mineru:clear-key", async () => {
   try {
     await fs.promises.rm(credentialFilePath(), { force: true });

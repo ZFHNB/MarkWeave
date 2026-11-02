@@ -2992,20 +2992,25 @@ function openSettingsModal() {
           <div class="ty-settings-row">
             <div class="ty-settings-info">
               <span class="ty-settings-label">本地环境状态</span>
-              <span class="ty-settings-desc" id="mineru-local-status">检查中…</span>
+              <span class="ty-settings-desc">首次使用需安装 MinerU 并下载模型</span>
             </div>
-            <button class="ty-settings-action" id="btn-mineru-detect">重新检测</button>
+            <div class="ty-settings-inline">
+              <span class="ty-mineru-status" id="mineru-local-status" aria-live="polite">检查中…</span>
+              <button class="ty-settings-action" id="btn-mineru-detect">重新检测</button>
+            </div>
           </div>
 
           <div class="ty-settings-row">
             <div class="ty-settings-info">
               <span class="ty-settings-label">云端 API Key</span>
-              <span class="ty-settings-desc" id="mineru-key-status">未配置</span>
+              <span class="ty-settings-desc">密钥加密保存在本机，不会写入文档或配置</span>
             </div>
             <div class="ty-settings-inline">
-              <input class="ty-settings-input ty-settings-input-wide" type="password" id="setting-input-mineru-key"
+              <span class="ty-mineru-status" id="mineru-key-status" aria-live="polite">未配置</span>
+              <input class="ty-settings-input" type="password" id="setting-input-mineru-key"
                 placeholder="粘贴 API Key" aria-label="MinerU 云端 API Key" autocomplete="off" />
               <button class="ty-settings-action" id="btn-mineru-save-key">保存</button>
+              <button class="ty-settings-action" id="btn-mineru-test-key">测试连接</button>
               <button class="ty-settings-action" id="btn-mineru-clear-key">清除</button>
             </div>
           </div>
@@ -3329,7 +3334,9 @@ function openSettingsModal() {
     if (mineruLocalStatus) {
       mineruLocalStatus.textContent = info.available
         ? `就绪：${info.command}${info.version ? " " + info.version : ""}`
-        : info.detail;
+        : "未就绪（未检测到本地命令）";
+      mineruLocalStatus.dataset.state = info.available ? "ok" : "warn";
+      mineruLocalStatus.title = info.detail;
     }
   };
 
@@ -3343,10 +3350,17 @@ function openSettingsModal() {
     if (mineruKeyStatus) {
       if (!loaded.present) {
         mineruKeyStatus.textContent = "未配置";
+        mineruKeyStatus.dataset.state = "warn";
       } else if (loaded.source === "env") {
-        mineruKeyStatus.textContent = `来自环境变量 ${loaded.masked ?? ""}`;
+        mineruKeyStatus.textContent = `环境变量 ${loaded.masked ?? ""}`;
+        mineruKeyStatus.dataset.state = "ok";
       } else {
-        mineruKeyStatus.textContent = `已加密保存 ${loaded.masked ?? ""}`;
+        mineruKeyStatus.textContent = `已保存 ${loaded.masked ?? ""}`;
+        mineruKeyStatus.dataset.state = "ok";
+      }
+      if (loaded.error) {
+        mineruKeyStatus.textContent = `读取失败（${loaded.error}）`;
+        mineruKeyStatus.dataset.state = "error";
       }
     }
   };
@@ -3373,6 +3387,68 @@ function openSettingsModal() {
       window.alert("当前系统不支持安全存储，无法保存 API Key。");
     } else {
       window.alert("保存失败，请查看日志。");
+    }
+  });
+
+  // 测试连接：先用输入框里的新密钥，没有则用已保存的
+  modalOverlay.querySelector("#btn-mineru-test-key")?.addEventListener("click", async () => {
+    const api = getDesktopAPI();
+    const btn = modalOverlay.querySelector<HTMLButtonElement>("#btn-mineru-test-key");
+    const input = modalOverlay.querySelector<HTMLInputElement>("#setting-input-mineru-key");
+    if (!api?.mineruTestConnection) {
+      if (mineruKeyStatus) {
+        mineruKeyStatus.textContent = "仅桌面版支持";
+        mineruKeyStatus.dataset.state = "error";
+      }
+      return;
+    }
+
+    const candidate = input?.value.trim();
+
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "测试中…";
+    }
+    if (mineruKeyStatus) {
+      mineruKeyStatus.textContent = "正在连接…";
+      mineruKeyStatus.dataset.state = "";
+    }
+
+    try {
+      const result = await api.mineruTestConnection(candidate || undefined);
+
+      if (mineruKeyStatus) {
+        const elapsed = result.elapsedMs ? ` · ${Math.round(result.elapsedMs)}ms` : "";
+        mineruKeyStatus.textContent = result.ok
+          ? `连接正常${elapsed}`
+          : `${result.message}${elapsed}`;
+        mineruKeyStatus.dataset.state = result.ok ? "ok" : "error";
+        mineruKeyStatus.title = result.message;
+      }
+
+      // 测试成功且输入框里有密钥：提示是否一并保存
+      if (result.ok && candidate && !candidate.includes("…")) {
+        const loaded = await api.mineruLoadKey?.();
+        if (!loaded?.present || loaded.source !== "env") {
+          const saveIt = window.confirm("连接正常。是否保存这个 API Key？");
+          if (saveIt) {
+            const saved = await api.mineruSaveKey?.(candidate);
+            if (saved?.ok) {
+              if (input) input.value = "";
+              await refreshKeyStatus();
+              if (mineruKeyStatus) {
+                mineruKeyStatus.textContent = "已保存并验证";
+                mineruKeyStatus.dataset.state = "ok";
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = "测试连接";
+      }
     }
   });
 

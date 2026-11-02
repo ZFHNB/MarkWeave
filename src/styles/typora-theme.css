@@ -3210,3 +3210,32 @@ textarea:focus-visible,
 .ty-save-status.is-actionable:hover {
   text-decoration: underline;
 }
+
+/* MinerU 状态文字：独立于说明文字，不会被二级提示收走 */
+.ty-mineru-status {
+  font-size: 12px;
+  color: var(--meta-mark-color);
+  max-width: 220px;
+  text-align: right;
+  line-height: 1.4;
+}
+
+.ty-mineru-status[data-state="ok"] {
+  color: #2f855a;
+}
+
+.ty-mineru-status[data-state="warn"] {
+  color: #b7791f;
+}
+
+.ty-mineru-status[data-state="error"] {
+  color: #c53030;
+}
+
+.theme-night .ty-mineru-status[data-state="ok"] {
+  color: #68d391;
+}
+
+.theme-night .ty-mineru-status[data-state="error"] {
+  color: #fc8181;
+}

@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld("markweave", {
   mineruSaveKey: (apiKey) => ipcRenderer.invoke("mineru:save-key", apiKey),
   mineruLoadKey: () => ipcRenderer.invoke("mineru:load-key"),
   mineruClearKey: () => ipcRenderer.invoke("mineru:clear-key"),
+  mineruTestConnection: (apiKey) => ipcRenderer.invoke("mineru:test-connection", apiKey),
   mineruDetectLocal: () => ipcRenderer.invoke("mineru:detect-local"),
   mineruParseLocal: (payload) => ipcRenderer.invoke("mineru:parse-local", payload),
   mineruParseCloud: (payload) => ipcRenderer.invoke("mineru:parse-cloud", payload),
