@@ -1,10 +1,24 @@
 "use strict";
 
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 contextBridge.exposeInMainWorld("markweave", {
   isDesktop: true,
   openFile: () => ipcRenderer.invoke("file:open-dialog"),
+  /**
+   * 取拖入文件的磁盘路径。
+   *
+   * Electron 32 起移除了非标准的 `File.path`，必须改用 webUtils。
+   * 这里包一层是因为 webUtils 只能在 preload 里访问。
+   * 拿不到（例如拖入的是内存中的 File）时返回 null。
+   */
+  getPathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || null;
+    } catch {
+      return null;
+    }
+  },
   saveFile: (payload) => ipcRenderer.invoke("file:save", payload),
   readFile: (filePath) => ipcRenderer.invoke("file:read", filePath),
   writeFile: (payload) => ipcRenderer.invoke("file:write", payload),

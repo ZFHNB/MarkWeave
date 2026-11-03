@@ -114,13 +114,31 @@ async function main() {
   check("工具栏不再有更多格式按钮", !header.oldButtons.includes("btn-export-pandoc"));
   check("工具栏不再有表格按钮", !header.oldButtons.includes("btn-insert-table"));
   check("文件菜单按钮存在", header.hasFileMenu);
+  check(
+    "侧边栏底部偏好设置按钮已移除",
+    !(await page.evaluate(() => Boolean(document.getElementById("btn-open-settings")))),
+    ""
+  );
   check("偏好设置按钮紧邻主题按钮", header.hasSettings && header.hasThemeToggle);
 
   // 主题按钮只剩图标（无文字）
-  const themeBtnText = await page.evaluate(
-    () => document.getElementById("btn-toggle-theme")?.textContent?.trim() ?? ""
-  );
-  check("主题按钮只显示图标，不含文字", themeBtnText === "", `实际: "${themeBtnText}"`);
+  const headerTexts = await page.evaluate(() => {
+    const ids = ["btn-toggle-theme", "btn-save-file", "btn-toggle-source", "btn-open-settings-quick"];
+    return ids.map((id) => ({
+      id,
+      text: document.getElementById(id)?.textContent?.trim() ?? "",
+    }));
+  });
+  for (const item of headerTexts) {
+    check(`按钮 ${item.id} 只显示图标`, item.text === "", `实际: "${item.text}"`);
+  }
+
+  const fileMenuLeft = await page.evaluate(() => {
+    const left = document.querySelector(".ty-header-left");
+    const first = left?.querySelector("button");
+    return first?.id ?? "";
+  });
+  check("文件按钮位于工具栏最左侧", fileMenuLeft === "btn-file-menu", `实际: ${fileMenuLeft}`);
 
   // ---------- 2. 主题图标随状态切换 ----------
   const iconState = await page.evaluate(() => {

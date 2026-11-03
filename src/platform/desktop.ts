@@ -40,6 +40,13 @@ export interface CustomThemePayload {
 export interface MarkWeaveDesktopAPI {
   isDesktop?: boolean;
   openFile: () => Promise<OpenFileResult | null>;
+  /**
+   * 取拖入文件的磁盘路径。
+   *
+   * Electron 32+ 移除了 `File.path`，必须通过主进程的 webUtils 获取。
+   * 浏览器环境或取不到时返回 null。
+   */
+  getPathForFile?: (file: File) => string | null;
   saveFile: (payload: SaveFilePayload) => Promise<SaveFileResult | null>;
   readFile?: (filePath: string) => Promise<OpenFileResult | null>;
   writeFile?: (payload: { path: string; content: string }) => Promise<{ path: string } | null>;

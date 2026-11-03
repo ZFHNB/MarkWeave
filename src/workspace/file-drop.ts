@@ -49,8 +49,16 @@ export function isDroppable(name: string): boolean {
 /**
  * 从 DataTransfer 的文件列表里提取可用于打开的文件。
  * 不支持的扩展名会被过滤掉，并在 `rejected` 里给出名称。
+ *
+ * @param resolvePath 取得文件磁盘路径的方法。
+ *   Electron 32 起 `File.path` 已被移除，调用方应传入
+ *   `webUtils.getPathForFile` 的包装（见 preload.cjs）。
+ *   不传时退回到读取 `File.path`（旧版 Electron / 浏览器）。
  */
-export function classifyDroppedFiles(files: FileList | File[]): {
+export function classifyDroppedFiles(
+  files: FileList | File[],
+  resolvePath?: (file: File) => string | null
+): {
   accepted: DroppedFileInfo[];
   rejected: string[];
 } {
@@ -62,10 +70,23 @@ export function classifyDroppedFiles(files: FileList | File[]): {
       rejected.push(file.name);
       continue;
     }
-    // Electron 在 File 上挂了一个非标准的 path 字段
-    const rawPath = (file as File & { path?: string }).path;
+
+    let rawPath: string | null = null;
+    if (resolvePath) {
+      try {
+        rawPath = resolvePath(file);
+      } catch {
+        rawPath = null;
+      }
+    }
+    // 兼容旧版 Electron：File 上曾有一个非标准的 path 字段
+    if (!rawPath) {
+      const legacy = (file as File & { path?: string }).path;
+      if (typeof legacy === "string") rawPath = legacy;
+    }
+
     accepted.push({
-      path: typeof rawPath === "string" && rawPath.trim() ? rawPath : null,
+      path: typeof rawPath === "string" && rawPath.trim() ? rawPath.trim() : null,
       name: file.name,
       supported: true,
       isPdf: isPdfFile(file.name),

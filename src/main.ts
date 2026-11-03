@@ -374,16 +374,6 @@ app.innerHTML = `
         <div id="file-list-items"></div>
       </div>
     </div>
-    <!-- 侧边栏底部设置 (Sidebar Footer) -->
-    <div class="ty-sidebar-footer">
-      <button class="ty-sidebar-footer-btn" id="btn-open-settings" title="偏好设置 (Settings)">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="12" cy="12" r="3"></circle>
-          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-        </svg>
-        <span>偏好设置</span>
-      </button>
-    </div>
   </aside>
 
   <!-- 主编辑区 -->
@@ -391,24 +381,21 @@ app.innerHTML = `
     <!-- 顶部轻量工具栏 -->
     <header class="ty-header-bar">
       <div class="ty-header-left">
-        <button class="ty-icon-btn" id="btn-toggle-sidebar" title="切换侧边栏">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
-          侧边栏
-        </button>
         <button class="ty-icon-btn ty-menu-trigger" id="btn-file-menu" title="文件菜单" aria-haspopup="menu" aria-expanded="false">
           文件
+        </button>
+        <button class="ty-icon-btn" id="btn-toggle-sidebar" title="切换侧边栏" aria-label="切换侧边栏">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
         </button>
         <span class="ty-doc-title" id="doc-title">欢迎使用 MarkWeave.md</span>
       </div>
       <div class="ty-header-right">
         <span class="ty-save-status" id="save-status" aria-live="polite"></span>
-        <button class="ty-icon-btn ty-save-btn" id="btn-save-file" title="保存文件 (Ctrl+S)">
+        <button class="ty-icon-btn ty-save-btn" id="btn-save-file" title="保存文件 (Ctrl+S)" aria-label="保存文件">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-          保存
         </button>
-        <button class="ty-icon-btn" id="btn-toggle-source" title="切换源码模式 (Ctrl+/)">
+        <button class="ty-icon-btn" id="btn-toggle-source" title="切换源码模式 (Ctrl+/)" aria-label="切换源码模式">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-          源码模式
         </button>
         <button class="ty-icon-btn ty-theme-toggle" id="btn-toggle-theme" title="切换明亮/暗色主题" aria-label="切换明亮/暗色主题">
           <svg class="ty-theme-icon ty-theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
@@ -1363,7 +1350,11 @@ window.addEventListener("drop", (event) => {
 
   const droppedList = Array.from(event.dataTransfer?.files ?? []);
   pendingDropFiles = droppedList;
-  const { accepted, rejected } = classifyDroppedFiles(droppedList);
+  // Electron 32+ 已移除 File.path，必须经 preload 的 webUtils 取真实路径
+  const dropApi = getDesktopAPI();
+  const { accepted, rejected } = classifyDroppedFiles(droppedList, (file) =>
+    dropApi?.getPathForFile?.(file) ?? null
+  );
   if (rejected.length > 0) {
     showSaveStatus(buildRejectedMessage(rejected), "error");
   }
@@ -1381,8 +1372,11 @@ async function openDroppedFiles(files: DroppedFileInfo[]): Promise<void> {
     if (info.isPdf) {
       if (info.path) {
         await parsePdfWithMineru(info.path);
+      } else if (!api) {
+        showSaveStatus("PDF 解析需要桌面版，浏览器里请用「文件 → 导入 PDF」", "error");
       } else {
-        showSaveStatus("PDF 解析需要访问本地文件，请使用桌面版", "error");
+        // 桌面版但拿不到路径：多半是从网页/压缩包里拖出来的虚拟文件
+        showSaveStatus("无法读取该 PDF 的磁盘路径，请改用「文件 → 导入 PDF 并解析」", "error");
       }
       continue;
     }
@@ -3714,9 +3708,6 @@ function openSettingsModal() {
     saveSettings(s);
   },
 };
-
-const btnOpenSettings = document.getElementById("btn-open-settings");
-btnOpenSettings?.addEventListener("click", openSettingsModal);
 
 // 顶部「保存」按钮：优先写回原文件，未命名文档走「另存为」
 // 点击可操作的状态提示：定位最近的解析结果

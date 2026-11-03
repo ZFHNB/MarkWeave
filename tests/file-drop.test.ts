@@ -132,3 +132,50 @@ describe("PDF drop routing", () => {
     expect(buildRejectedMessage(["x.png"])).toContain(".pdf");
   });
 });
+
+describe("path resolution via webUtils", () => {
+  // Electron 32+ 移除了 File.path，必须通过 resolvePath 回调取路径
+  it("uses the resolver when provided", () => {
+    const resolver = (file: File) => (file.name.endsWith(".pdf") ? "D:/docs/doc.pdf" : null);
+    const { accepted } = classifyDroppedFiles([makeFile("doc.pdf")], resolver);
+    expect(accepted[0].path).toBe("D:/docs/doc.pdf");
+  });
+
+  it("resolves pdf paths so they can be parsed", () => {
+    // 这正是用户报的 bug：拿不到路径时只能退回浏览器模式并提示"仅桌面版"
+    const resolver = () => "D:/papers/2024.pdf";
+    const { accepted } = classifyDroppedFiles([makeFile("2024.pdf")], resolver);
+    expect(accepted[0].path).not.toBeNull();
+    expect(accepted[0].isPdf).toBe(true);
+  });
+
+  it("falls back to the legacy File.path when no resolver is given", () => {
+    const { accepted } = classifyDroppedFiles([makeFile("a.md", "C:/x/a.md")]);
+    expect(accepted[0].path).toBe("C:/x/a.md");
+  });
+
+  it("prefers the resolver over the legacy field", () => {
+    const { accepted } = classifyDroppedFiles(
+      [makeFile("a.md", "C:/legacy/a.md")],
+      () => "D:/real/a.md"
+    );
+    expect(accepted[0].path).toBe("D:/real/a.md");
+  });
+
+  it("returns null when the resolver throws", () => {
+    const { accepted } = classifyDroppedFiles([makeFile("a.md")], () => {
+      throw new Error("not supported");
+    });
+    expect(accepted[0].path).toBeNull();
+  });
+
+  it("trims whitespace from resolved paths", () => {
+    const { accepted } = classifyDroppedFiles([makeFile("a.md")], () => "  D:/a.md  ");
+    expect(accepted[0].path).toBe("D:/a.md");
+  });
+
+  it("treats an empty resolver result as missing", () => {
+    const { accepted } = classifyDroppedFiles([makeFile("a.md")], () => "");
+    expect(accepted[0].path).toBeNull();
+  });
+});
