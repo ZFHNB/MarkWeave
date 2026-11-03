@@ -5,6 +5,8 @@ import {
   buildRejectedMessage,
   classifyDroppedFiles,
   dragContainsFiles,
+  isDroppable,
+  isPdfFile,
   isSupportedDocument,
 } from "../src/workspace/file-drop";
 
@@ -97,5 +99,36 @@ describe("buildRejectedMessage", () => {
     for (const ext of DROPPABLE_EXTENSIONS) {
       expect(msg).toContain(ext);
     }
+  });
+});
+
+describe("PDF drop routing", () => {
+  it("recognises pdf files", () => {
+    expect(isPdfFile("paper.pdf")).toBe(true);
+    expect(isPdfFile("PAPER.PDF")).toBe(true);
+    expect(isPdfFile("paper.md")).toBe(false);
+  });
+
+  it("accepts pdf alongside markdown", () => {
+    expect(isDroppable("a.pdf")).toBe(true);
+    expect(isDroppable("a.md")).toBe(true);
+    expect(isDroppable("a.png")).toBe(false);
+  });
+
+  it("marks pdf entries during classification", () => {
+    const { accepted, rejected } = classifyDroppedFiles([
+      makeFile("doc.pdf", "C:/docs/doc.pdf"),
+      makeFile("note.md", "C:/docs/note.md"),
+      makeFile("img.png"),
+    ]);
+
+    expect(accepted).toHaveLength(2);
+    expect(accepted[0]).toMatchObject({ name: "doc.pdf", isPdf: true });
+    expect(accepted[1]).toMatchObject({ name: "note.md", isPdf: false });
+    expect(rejected).toEqual(["img.png"]);
+  });
+
+  it("mentions pdf in the rejection message", () => {
+    expect(buildRejectedMessage(["x.png"])).toContain(".pdf");
   });
 });

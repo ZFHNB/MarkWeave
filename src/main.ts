@@ -98,6 +98,7 @@ import {
   buildRejectedMessage,
   classifyDroppedFiles,
   dragContainsFiles,
+  isPdfFile,
   type DroppedFileInfo,
 } from "./workspace/file-drop";
 import {
@@ -335,7 +336,7 @@ app.innerHTML = `
           <button class="ty-icon-btn" id="btn-open-file" style="flex: 1; justify-content: center; border: 1px dashed var(--border-color); padding: 5px;">
             📂 打开本地
           </button>
-          <input type="file" id="local-file-input" accept=".md,.markdown,.txt" style="display: none;" aria-label="选择本地 Markdown 文件" />
+          <input type="file" id="local-file-input" accept=".md,.markdown,.txt,.pdf" style="display: none;" aria-label="选择本地 Markdown 或 PDF 文件" />
         </div>
         <div class="ty-files-actions" style="display: flex; gap: 6px; margin-bottom: 12px; padding: 0 4px;">
           <button class="ty-icon-btn" id="btn-open-folder" style="flex: 1; justify-content: center; border: 1px dashed var(--border-color); padding: 5px;" title="打开文件夹 (Ctrl+Shift+O)">
@@ -1204,9 +1205,15 @@ async function handleOpenFile() {
   const api = getDesktopAPI();
   if (api) {
     const file = await api.openFile();
-    if (file) {
-      handleFileOpened(file);
+    if (!file) return;
+
+    // 通过菜单打开 PDF 时走解析流程，而不是当作文本载入
+    if (isPdfFile(file.path)) {
+      await parsePdfWithMineru(file.path);
+      return;
     }
+
+    handleFileOpened(file);
   } else {
     localFileInput.click();
   }
@@ -1359,7 +1366,7 @@ async function openDroppedFiles(files: DroppedFileInfo[]): Promise<void> {
       if (info.path) {
         await parsePdfWithMineru(info.path);
       } else {
-        showSaveStatus("PDF 解析需要桌面版", "error");
+        showSaveStatus("PDF 解析需要访问本地文件，请使用桌面版", "error");
       }
       continue;
     }
@@ -1442,7 +1449,10 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
         const choice = window.confirm(
           `${local?.detail ?? "本地 MinerU 未就绪"}\n\n是否改用云端模式解析？`
         );
-        if (!choice) return;
+        if (!choice) {
+          showSaveStatus("已取消", "idle");
+          return;
+        }
         mode = "cloud";
       }
     }
@@ -1454,8 +1464,8 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
         const goSettings = window.confirm(
           "云端解析需要先配置 API Key。\n\n是否现在前往设置？"
         );
-        if (goSettings) openSettingsModal();
         showSaveStatus("未配置 API Key", "error");
+        if (goSettings) openSettingsModal();
         return;
       }
 

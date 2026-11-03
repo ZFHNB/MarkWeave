@@ -215,10 +215,12 @@ function createWindow() {
 // IPC Handlers
 ipcMain.handle("file:open-dialog", async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: "Open Markdown File",
+    title: "打开文件",
     filters: [
-      { name: "Markdown / Text Files", extensions: ["md", "markdown", "txt"] },
-      { name: "All Files", extensions: ["*"] }
+      { name: "Markdown / 文本 / PDF", extensions: ["md", "markdown", "txt", "pdf"] },
+      { name: "Markdown 文件", extensions: ["md", "markdown"] },
+      { name: "PDF 文件", extensions: ["pdf"] },
+      { name: "所有文件", extensions: ["*"] }
     ],
     properties: ["openFile"]
   });
