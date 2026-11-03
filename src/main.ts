@@ -1,5 +1,17 @@
 import "./styles/typora-theme.css";
 import { MarkWeaveEditor } from "./editor";
+import {
+  alertDialog,
+  confirmDialog,
+  escapeHtml,
+  openDialog,
+  openMenu,
+  openMenuAt,
+  promptDialog,
+  takeMenuRowRect,
+  toast,
+  type MenuItem,
+} from "./ui/components";
 import type { HeadingItem } from "./editor/outline";
 import {
   buildOutlineTree,
@@ -35,7 +47,9 @@ import {
 import type { FlatFile } from "./workspace/file-tree";
 import {
   type FolderWorkspace,
+  clearRecentFiles,
   loadLastFolder,
+  loadRecentFiles,
   openFolderWorkspace,
   refreshFolderWorkspace,
   rememberLastFolder,
@@ -381,6 +395,9 @@ app.innerHTML = `
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
           侧边栏
         </button>
+        <button class="ty-icon-btn ty-menu-trigger" id="btn-file-menu" title="文件菜单" aria-haspopup="menu" aria-expanded="false">
+          文件
+        </button>
         <span class="ty-doc-title" id="doc-title">欢迎使用 MarkWeave.md</span>
       </div>
       <div class="ty-header-right">
@@ -393,25 +410,12 @@ app.innerHTML = `
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
           源码模式
         </button>
-        <button class="ty-icon-btn" id="btn-insert-table" title="插入表格 (Ctrl+Alt+T)">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg>
-          表格
+        <button class="ty-icon-btn ty-theme-toggle" id="btn-toggle-theme" title="切换明亮/暗色主题" aria-label="切换明亮/暗色主题">
+          <svg class="ty-theme-icon ty-theme-icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="ty-theme-icon ty-theme-icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
         </button>
-        <button class="ty-icon-btn" id="btn-toggle-theme" title="切换明亮/暗色主题">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          主题
-        </button>
-        <button class="ty-icon-btn" id="btn-save-md" title="导出为 Markdown 文件">
-          导出 Markdown
-        </button>
-        <button class="ty-icon-btn" id="btn-export-html" title="导出为 HTML">
-          导出 HTML
-        </button>
-        <button class="ty-icon-btn" id="btn-export-pdf" title="打印/导出 PDF">
-          打印 PDF
-        </button>
-        <button class="ty-icon-btn" id="btn-export-pandoc" title="用 Pandoc 导出为 Word / EPUB 等格式">
-          更多格式
+        <button class="ty-icon-btn" id="btn-open-settings-quick" title="偏好设置 (Ctrl+,)" aria-label="偏好设置">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
     </header>
@@ -460,16 +464,13 @@ const btnToggleSource = document.getElementById("btn-toggle-source")!;
 const btnViewToggle = document.getElementById("btn-view-toggle") as HTMLButtonElement;
 const viewToggleIcon = document.getElementById("view-toggle-icon") as HTMLElement;
 const viewToggleLabel = document.getElementById("view-toggle-label") as HTMLElement;
-const btnInsertTable = document.getElementById("btn-insert-table")!;
 const btnToggleTheme = document.getElementById("btn-toggle-theme")!;
 const btnFocusMode = document.getElementById("btn-focus-mode")!;
 const btnTypewriterMode = document.getElementById("btn-typewriter-mode")!;
-const btnSaveMd = document.getElementById("btn-save-md")!;
+const btnFileMenu = document.getElementById("btn-file-menu") as HTMLButtonElement;
+const btnOpenSettingsQuick = document.getElementById("btn-open-settings-quick")!;
 const btnSaveFile = document.getElementById("btn-save-file") as HTMLButtonElement;
 const saveStatusEl = document.getElementById("save-status") as HTMLElement;
-const btnExportHtml = document.getElementById("btn-export-html")!;
-const btnExportPdf = document.getElementById("btn-export-pdf")!;
-const btnExportPandoc = document.getElementById("btn-export-pandoc") as HTMLButtonElement;
 const btnNewFile = document.getElementById("btn-new-file")!;
 const btnOpenFile = document.getElementById("btn-open-file")!;
 const localFileInput = document.getElementById("local-file-input") as HTMLInputElement;
@@ -926,13 +927,17 @@ function renderFileList() {
       startRename();
     });
 
-    deleteBtn.addEventListener("click", (e) => {
+    deleteBtn.addEventListener("click", async (e) => {
       e.stopPropagation();
       if (documents.length <= 1) {
-        window.alert("工作区至少需要保留一篇文档");
+        toast("工作区至少需要保留一篇文档", "error");
         return;
       }
-      const confirmed = window.confirm(`确定要删除文档 "${doc.title}" 吗？`);
+      const confirmed = await confirmDialog(`确定要删除文档「${doc.title}」吗？`, {
+        title: "删除文档",
+        confirmLabel: "删除",
+        danger: true,
+      });
       if (!confirmed) return;
 
       const isDeletingActive = doc.id === activeDocId;
@@ -1203,6 +1208,8 @@ function handleFileOpened(file: DesktopFile) {
     sourceEditor.value = current.content;
   }
   renderFileList();
+  // 同步标签页：无论来自磁盘打开还是 PDF 解析结果，表现保持一致
+  syncTabsFromDocuments();
   flushSave();
 
   if (current.filePath) {
@@ -1264,7 +1271,7 @@ function applyWorkspace(workspace: FolderWorkspace | null): void {
 async function handleOpenFolder(): Promise<void> {
   const api = getDesktopAPI();
   if (!api?.openFolder) {
-    window.alert("「打开文件夹」仅桌面版可用，Web 版请使用「打开本地」。");
+    toast("「打开文件夹」仅桌面版可用", "info");
     return;
   }
   const workspace = await openFolderWorkspace();
@@ -1310,7 +1317,7 @@ function ensureDropOverlay(): HTMLElement {
         <line x1="12" y1="15" x2="12" y2="3"></line>
       </svg>
       <div class="ty-drop-title">松开以打开文档</div>
-      <div class="ty-drop-sub">支持 .md / .markdown / .txt</div>
+      <div class="ty-drop-sub">支持 .md / .markdown / .txt，拖入 PDF 会自动解析</div>
     </div>
   `;
   document.body.appendChild(el);
@@ -1455,8 +1462,9 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
     if (mode === "local") {
       const local = await api.mineruDetectLocal?.();
       if (!local?.available) {
-        const choice = window.confirm(
-          `${local?.detail ?? "本地 MinerU 未就绪"}\n\n是否改用云端模式解析？`
+        const choice = await confirmDialog(
+          `${local?.detail ?? "本地 MinerU 未就绪"}\n\n是否改用云端模式解析？`,
+          { title: "本地环境未就绪", confirmLabel: "改用云端" }
         );
         if (!choice) {
           showSaveStatus("已取消", "idle");
@@ -1470,8 +1478,9 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
     if (mode === "cloud") {
       const loaded = await api.mineruLoadKey?.();
       if (!loaded?.present || !loaded.apiKey) {
-        const goSettings = window.confirm(
-          "云端解析需要先配置 API Key。\n\n是否现在前往设置？"
+        const goSettings = await confirmDialog(
+          "云端解析需要先配置 API Key。\n\n是否现在前往设置？",
+          { title: "未配置 API Key", confirmLabel: "前往设置" }
         );
         showSaveStatus("未配置 API Key", "error");
         if (goSettings) openSettingsModal();
@@ -1480,10 +1489,11 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
 
       // 首次上传前提示文件将发送到云端
       if (!mineru.cloudUploadConfirmed) {
-        const ok = window.confirm(
+        const ok = await confirmDialog(
           "云端解析会把该 PDF 上传至 MinerU 服务进行识别。\n\n" +
             `文件：${extractFileName(pdfPath)}\n\n` +
-            "解析结果通过官方 API 返回；请确认文件不包含敏感信息。是否继续？"
+            "解析结果通过官方 API 返回；请确认文件不包含敏感信息。是否继续？",
+          { title: "上传到云端", confirmLabel: "继续上传" }
         );
         if (!ok) {
           showSaveStatus("已取消", "idle");
@@ -1508,7 +1518,7 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
           });
 
     if (!result?.ok || !result.markdown) {
-      handleMineruFailure(result, mode);
+      await handleMineruFailure(result, mode);
       return;
     }
 
@@ -1563,6 +1573,8 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
 
     showSaveStatus(`已解析（${seconds}s）`, "saved");
     pendingMineruResult = { path: targetPath, seconds };
+    // 解析结果已落盘，给用户一个「另存为」的出口
+    toast("PDF 已解析为 Markdown，可继续编辑或另存", "success");
   } finally {
     mineruBusy = false;
   }
@@ -1583,10 +1595,10 @@ async function revealLastMineruResult(): Promise<void> {
 }
 
 /** 统一把解析失败转成可读提示 */
-function handleMineruFailure(
+async function handleMineruFailure(
   result: { error?: string; kind?: string; retryable?: boolean } | undefined,
   mode: "local" | "cloud"
-): void {
+): Promise<void> {
   const kind = result?.kind ?? "unknown";
   const message = result?.error ?? "解析失败";
 
@@ -1608,7 +1620,12 @@ function handleMineruFailure(
   showSaveStatus("PDF 解析失败", "error");
 
   if (action) {
-    if (window.confirm(`${message}\n\n${suggestion}${action}`)) {
+    if (
+      await confirmDialog(`${message}\n\n${suggestion}${action}`, {
+        title: "解析失败",
+        confirmLabel: "前往设置",
+      })
+    ) {
       openSettingsModal();
     }
     return;
@@ -1621,7 +1638,10 @@ function handleMineruFailure(
       ? "\n\n可稍后重试。"
       : "";
 
-  window.alert(`${message}${suggestion ? "\n\n" + suggestion : ""}${retryHint}`);
+  void alertDialog(
+    `${message}${suggestion ? "\n\n" + suggestion : ""}${retryHint}`,
+    "解析失败"
+  );
 }
 
 /* ================= 外部修改检测 ================= */
@@ -1658,8 +1678,9 @@ async function pollExternalChanges(): Promise<void> {
       continue;
     }
 
-    const reload = window.confirm(
-      `「${doc.title}」已在外部被修改。是否重新载入磁盘内容？（选择取消则保留当前编辑）`
+    const reload = await confirmDialog(
+      `「${doc.title}」已在外部被修改。是否重新载入磁盘内容？（选择取消则保留当前编辑）`,
+      { title: "文件已被外部修改", confirmLabel: "重新载入" }
     );
     if (!reload) {
       trackedFiles.set(docId, markLocalWrite(tracked, stat));
@@ -1686,12 +1707,12 @@ async function pollExternalChanges(): Promise<void> {
 
 async function handleCreateWorkspaceFile(): Promise<void> {
   if (!workspaceRoot) return;
-  const name = window.prompt("新建文档名称", "未命名.md");
+  const name = await promptDialog("新建文档名称", "未命名.md", { title: "新建文档" });
   if (name === null) return;
   const existing = workspaceFiles.map((f) => f.name);
   const result = await createMarkdownFile(workspaceRoot, name, existing);
   if (!result.ok || !result.path) {
-    window.alert(`新建失败：${result.error ?? "未知错误"}`);
+    await alertDialog(`新建失败：${result.error ?? "未知错误"}`, "新建失败");
     return;
   }
   await refreshWorkspace();
@@ -1700,25 +1721,25 @@ async function handleCreateWorkspaceFile(): Promise<void> {
 
 async function renameWorkspaceFile(file: FlatFile): Promise<void> {
   if (!workspaceRoot) return;
-  const next = window.prompt("重命名文件", file.name);
+  const next = await promptDialog("重命名文件", file.name, { title: "重命名" });
   if (next === null) return;
   const trimmed = next.trim();
   if (!trimmed || trimmed === file.name) return;
   if (!isValidFileName(trimmed)) {
-    window.alert("文件名包含非法字符");
+    await alertDialog("文件名包含非法字符（不能含有 \ / : * ? \" < > |）", "重命名失败");
     return;
   }
 
   const target = normalizeMarkdownFileName(trimmed);
   if (workspaceFiles.some((f) => f.path !== file.path && f.name === target)) {
-    window.alert("同名文件已存在");
+    await alertDialog("同名文件已存在", "重命名失败");
     return;
   }
 
   const toPath = joinPath(workspaceRoot, target);
   const result = await renamePath(file.path, toPath);
   if (!result.ok) {
-    window.alert(`重命名失败：${result.error ?? "未知错误"}`);
+    await alertDialog(`重命名失败：${result.error ?? "未知错误"}`, "重命名失败");
     return;
   }
 
@@ -1736,12 +1757,16 @@ async function renameWorkspaceFile(file: FlatFile): Promise<void> {
 }
 
 async function deleteWorkspaceFile(file: FlatFile): Promise<void> {
-  const confirmed = window.confirm(`确定要将「${file.relativePath}」移入回收站吗？`);
+  const confirmed = await confirmDialog(`确定要将「${file.relativePath}」移入回收站吗？`, {
+    title: "删除文件",
+    confirmLabel: "移入回收站",
+    danger: true,
+  });
   if (!confirmed) return;
 
   const result = await trashPath(file.path);
   if (!result.ok) {
-    window.alert(`删除失败：${result.error ?? "未知错误"}`);
+    await alertDialog(`删除失败：${result.error ?? "未知错误"}`, "删除失败");
     return;
   }
 
@@ -1995,7 +2020,6 @@ function handleOpenInsertTable() {
   });
 }
 
-btnInsertTable.addEventListener("click", handleOpenInsertTable);
 
 /** 按偏好处理行尾符与末尾换行后，再进行磁盘写入 */
 function prepareContentForDisk(content: string): string {
@@ -2097,6 +2121,12 @@ async function handleSaveAs() {
 }
 
 window.addEventListener("keydown", (e) => {
+  // 偏好设置 (Ctrl+,)
+  if ((e.ctrlKey || e.metaKey) && e.key === ",") {
+    e.preventDefault();
+    openSettingsModal();
+    return;
+  }
   // 快速打开 (Ctrl+P)
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === "p") {
     e.preventDefault();
@@ -2170,81 +2200,66 @@ function doDownloadFile(content: string, filename: string) {
 }
 
 function showExportModal(rawContent: string, defaultFilename: string) {
-  document.querySelector(".ty-modal-overlay")?.remove();
-
-  const overlay = document.createElement("div");
-  overlay.className = "ty-modal-overlay";
-  overlay.innerHTML = `
-    <div class="ty-modal-card">
-      <div class="ty-modal-header">
-        <span class="ty-modal-icon">📦</span>
-        <h3>导出 Markdown 格式选项</h3>
-      </div>
+  const handle = openDialog({
+    title: "导出 Markdown 格式选项",
+    maxWidth: 560,
+    body: `
       <p class="ty-modal-desc">
-        系统检测到当前文档中包含通过 <strong>MarkWeave</strong> 自定义拖拽排版的 Mermaid 图表。请根据您的使用场景选择导出方式：
+        当前文档包含 MarkWeave 自定义拖拽排版的 Mermaid 图表。请选择导出方式：
       </p>
       <div class="ty-export-options">
         <label class="ty-export-option-card selected" id="opt-card-markweave">
           <input type="radio" name="export-mode" value="markweave" checked />
           <div class="ty-export-option-content">
-            <div class="ty-export-option-title">🎨 导出 MarkWeave 增强格式（保留排版操作）</div>
-            <div class="ty-export-option-desc">完整保留您对图表组件拖拽的位置微调与排版元数据。未来在 MarkWeave 中打开可无损恢复您调整的布局，继续可视化编辑。</div>
+            <div class="ty-export-option-title">保留 MarkWeave 增强格式</div>
+            <div class="ty-export-option-desc">
+              完整保留你对图表组件拖拽的位置微调与排版元数据。
+              再次用 MarkWeave 打开可无损恢复布局，继续可视化编辑。
+            </div>
           </div>
         </label>
         <label class="ty-export-option-card" id="opt-card-compat">
           <input type="radio" name="export-mode" value="compatible" />
           <div class="ty-export-option-content">
-            <div class="ty-export-option-title">🌐 导出通用兼容格式 (Clean Mermaid)</div>
-            <div class="ty-export-option-desc">自动清洗并剥离专有排版注释，转换为纯净的标准 Mermaid 语法。确保在 GitHub、Typora、Notion、Obsidian 等第三方平台 100% 正常渲染。</div>
+            <div class="ty-export-option-title">导出通用兼容格式</div>
+            <div class="ty-export-option-desc">
+              剥离专有排版注释，转换为标准 Mermaid 语法。
+              确保在 GitHub、Typora、Notion、Obsidian 等平台正常渲染。
+            </div>
           </div>
         </label>
       </div>
-      <div class="ty-modal-footer">
-        <button class="ty-btn" id="btn-cancel-export">取消</button>
-        <button class="ty-btn ty-btn-primary" id="btn-confirm-export">确认导出</button>
-      </div>
-    </div>
-  `;
+    `,
+    actions: [
+      { label: "取消" },
+      {
+        label: "确认导出",
+        variant: "primary",
+        onClick: () => {
+          const isCompat =
+            handle.query<HTMLInputElement>('input[value="compatible"]')?.checked ?? false;
+          const content = isCompat ? cleanMermaidForCompatibility(rawContent) : rawContent;
+          doDownloadFile(content, defaultFilename);
+        },
+      },
+    ],
+  });
 
-  document.body.appendChild(overlay);
+  const cardMarkweave = handle.query<HTMLElement>("#opt-card-markweave");
+  const cardCompat = handle.query<HTMLElement>("#opt-card-compat");
+  const radioMarkweave = handle.query<HTMLInputElement>('input[value="markweave"]');
+  const radioCompat = handle.query<HTMLInputElement>('input[value="compatible"]');
 
-  const cardMarkweave = overlay.querySelector("#opt-card-markweave") as HTMLElement;
-  const cardCompat = overlay.querySelector("#opt-card-compat") as HTMLElement;
-  const radioMarkweave = overlay.querySelector('input[value="markweave"]') as HTMLInputElement;
-  const radioCompat = overlay.querySelector('input[value="compatible"]') as HTMLInputElement;
-  const btnCancel = overlay.querySelector("#btn-cancel-export") as HTMLButtonElement;
-  const btnConfirm = overlay.querySelector("#btn-confirm-export") as HTMLButtonElement;
-
-  cardMarkweave.addEventListener("click", () => {
-    radioMarkweave.checked = true;
+  cardMarkweave?.addEventListener("click", () => {
+    if (radioMarkweave) radioMarkweave.checked = true;
     cardMarkweave.classList.add("selected");
-    cardCompat.classList.remove("selected");
+    cardCompat?.classList.remove("selected");
   });
 
-  cardCompat.addEventListener("click", () => {
-    radioCompat.checked = true;
+  cardCompat?.addEventListener("click", () => {
+    if (radioCompat) radioCompat.checked = true;
     cardCompat.classList.add("selected");
-    cardMarkweave.classList.remove("selected");
-  });
-
-  const close = () => {
-    overlay.remove();
-  };
-
-  btnCancel.addEventListener("click", close);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
-  });
-
-  btnConfirm.addEventListener("click", () => {
-    const isCompat = radioCompat.checked;
-    close();
-    if (isCompat) {
-      const cleanContent = cleanMermaidForCompatibility(rawContent);
-      doDownloadFile(cleanContent, defaultFilename);
-    } else {
-      doDownloadFile(rawContent, defaultFilename);
-    }
+    cardMarkweave?.classList.remove("selected");
   });
 }
 
@@ -3403,9 +3418,9 @@ function openSettingsModal() {
       if (input) input.value = "";
       await refreshKeyStatus();
     } else if (saved.error === "encryption-unavailable") {
-      window.alert("当前系统不支持安全存储，无法保存 API Key。");
+      await alertDialog("当前系统不支持安全存储，无法保存 API Key。", "无法保存");
     } else {
-      window.alert("保存失败，请查看日志。");
+      await alertDialog("保存失败，请查看日志。", "保存失败");
     }
   });
 
@@ -3449,7 +3464,10 @@ function openSettingsModal() {
       if (result.ok && candidate && !candidate.includes("…")) {
         const loaded = await api.mineruLoadKey?.();
         if (!loaded?.present || loaded.source !== "env") {
-          const saveIt = window.confirm("连接正常。是否保存这个 API Key？");
+          const saveIt = await confirmDialog("连接正常。是否保存这个 API Key？", {
+            title: "验证通过",
+            confirmLabel: "保存",
+          });
           if (saveIt) {
             const saved = await api.mineruSaveKey?.(candidate);
             if (saved?.ok) {
@@ -3475,7 +3493,14 @@ function openSettingsModal() {
   modalOverlay.querySelector("#btn-mineru-clear-key")?.addEventListener("click", async () => {
     const api = getDesktopAPI();
     if (!api?.mineruClearKey) return;
-    if (!window.confirm("确定要清除已保存的 API Key 吗？")) return;
+    if (
+      !(await confirmDialog("确定要清除已保存的 API Key 吗？", {
+        title: "清除 API Key",
+        confirmLabel: "清除",
+        danger: true,
+      }))
+    )
+      return;
     await api.mineruClearKey();
     await refreshKeyStatus();
   });
@@ -3692,8 +3717,6 @@ function openSettingsModal() {
 
 const btnOpenSettings = document.getElementById("btn-open-settings");
 btnOpenSettings?.addEventListener("click", openSettingsModal);
-
-btnSaveMd.addEventListener("click", downloadMarkdown);
 
 // 顶部「保存」按钮：优先写回原文件，未命名文档走「另存为」
 // 点击可操作的状态提示：定位最近的解析结果
@@ -4016,6 +4039,495 @@ async function writeHistoryCopy(docId: string): Promise<void> {
   await mirrorDraft(docId);
 }
 
+/* ================= 恢复历史版本 ================= */
+
+interface SnapshotEntry {
+  slot: number;
+  name: string;
+  path: string;
+  content: string;
+  /** 字符数，给用户一个大致规模印象 */
+  chars: number;
+}
+
+/** 槽位语义：1 = 当前草稿，2+ = 历史版本 */
+function slotLabel(slot: number): string {
+  if (slot === 1) return "当前草稿（未保存的编辑）";
+  if (slot === 2) return "上一次保存前";
+  if (slot === 3) return "更早一版";
+  return `历史版本 ${slot - 1}`;
+}
+
+/** 列出当前文档所有可恢复的快照 */
+async function listSnapshotEntries(docId: string): Promise<SnapshotEntry[]> {
+  const api = getDesktopAPI();
+  const doc = documents.find((d) => d.id === docId);
+  if (!api?.listHistory || !api.readFile || !doc?.filePath) return [];
+
+  const dir = resolveHistoryDir(doc.filePath, autoSaveSettings);
+  const files = await api.listHistory(dir);
+  const snapshots = listSnapshots(files, doc.filePath);
+
+  const entries: SnapshotEntry[] = [];
+  for (const snap of snapshots) {
+    const full = joinPath(dir, snap.name);
+    const file = await api.readFile(full);
+    if (!file) continue;
+    entries.push({
+      slot: snap.slot,
+      name: snap.name,
+      path: full,
+      content: file.content,
+      chars: file.content.length,
+    });
+  }
+  return entries;
+}
+
+/**
+ * 把某份快照的内容载入编辑器。
+ *
+ * 只改编辑器内容、标记为未保存，不写盘——用户确认后可以再 Ctrl+S，
+ * 也可以继续改。这样「恢复」本身永远不会破坏当前文件。
+ */
+function applySnapshotContent(content: string): void {
+  editor.setMarkdown(content, { resetHistory: true });
+  if (isSourceMode) sourceEditor.value = content;
+
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (doc) {
+    doc.content = content;
+    doc.dirty = true;
+    doc.updatedAt = Date.now();
+    syncTitle(doc.title);
+  }
+  flushSave();
+}
+
+/** 打开「恢复历史版本」对话框 */
+async function openRestoreDialog(): Promise<void> {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc?.filePath) {
+    await alertDialog("当前文档还没有保存到磁盘，没有历史版本可恢复。", "无可恢复内容");
+    return;
+  }
+
+  const entries = await listSnapshotEntries(doc.id);
+  if (entries.length === 0) {
+    await alertDialog(
+      "还没有生成快照。\n\n快照会在你编辑文档时自动创建，" +
+        "保存在文档同级的 .markweave-history 目录里。",
+      "没有可恢复的版本"
+    );
+    return;
+  }
+
+  const current = editor.getMarkdown();
+
+  const rows = entries
+    .map((entry) => {
+      const same = entry.content === current;
+      const preview = entry.content
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 120);
+      return `
+        <button class="ty-snapshot-row${entry.slot === 1 ? " is-draft" : ""}"
+                data-slot="${entry.slot}">
+          <div class="ty-snapshot-head">
+            <span class="ty-snapshot-label">${escapeHtml(slotLabel(entry.slot))}</span>
+            <span class="ty-snapshot-meta">${escapeHtml(entry.name)} · ${entry.chars} 字符${
+        same ? " · 与当前相同" : ""
+      }</span>
+          </div>
+          <div class="ty-snapshot-preview">${escapeHtml(preview) || "<em>（空）</em>"}</div>
+        </button>`;
+    })
+    .join("");
+
+  const handle = openDialog({
+    title: "恢复历史版本",
+    maxWidth: 620,
+    body: `
+      <p class="ty-modal-desc">
+        选择要恢复的版本。内容会载入编辑器并标记为未保存，
+        确认无误后再按 Ctrl+S 写回原文件。
+      </p>
+      <div class="ty-snapshot-list">${rows}</div>
+    `,
+    actions: [{ label: "取消" }],
+  });
+
+  handle.overlay.querySelectorAll<HTMLElement>(".ty-snapshot-row").forEach((row) => {
+    row.addEventListener("click", async () => {
+      const slot = Number(row.dataset.slot);
+      const entry = entries.find((e) => e.slot === slot);
+      if (!entry) return;
+
+      if (entry.content === current) {
+        toast("所选版本与当前内容相同", "info");
+        return;
+      }
+
+      const ok = await confirmDialog(
+        `用「${slotLabel(slot)}」覆盖编辑器里的当前内容？\n\n` +
+          "当前未保存的修改会被替换（草稿镜像里仍有备份）。",
+        { title: "确认恢复", confirmLabel: "恢复此版本" }
+      );
+      if (!ok) return;
+
+      applySnapshotContent(entry.content);
+      handle.close();
+      toast(`已恢复到「${slotLabel(slot)}」，记得保存`, "success");
+    });
+  });
+}
+
+/* ================= 文件菜单 ================= */
+
+/** 打开「最近文件」对话框 */
+function openRecentFilesDialog(): void {
+  const recent = loadRecentFiles();
+  const currentDoc = documents.find((d) => d.id === activeDocId);
+
+  if (recent.length === 0) {
+    void alertDialog("还没有打开过文件。", "最近文件");
+    return;
+  }
+
+  const rows = recent
+    .map(
+      (entry) => `
+      <button class="ty-recent-item" data-path="${escapeHtml(entry.path)}"
+              title="${escapeHtml(entry.path)}">
+        <span class="ty-recent-name">${escapeHtml(entry.title)}</span>
+        <span class="ty-recent-path">${escapeHtml(entry.path)}</span>
+      </button>`
+    )
+    .join("");
+
+  const handle = openDialog({
+    title: `最近打开的文件（${recent.length}）`,
+    maxWidth: 620,
+    body: `<div class="ty-recent-list">${rows}</div>`,
+    actions: [
+      {
+        label: "清空列表",
+        variant: "danger",
+        close: false,
+        onClick: async () => {
+          const ok = await confirmDialog("确定要清空最近文件列表吗？\n\n（不会删除任何文件）", {
+            title: "清空最近文件",
+            confirmLabel: "清空",
+            danger: true,
+          });
+          if (!ok) return;
+          clearRecentFiles();
+          handle.close();
+          toast("已清空最近文件列表", "success");
+        },
+      },
+      { label: "关闭" },
+    ],
+  });
+
+  handle.overlay.querySelectorAll<HTMLElement>(".ty-recent-item").forEach((row) => {
+    row.addEventListener("click", () => {
+      const path = row.dataset.path;
+      if (!path) return;
+      handle.close();
+      void openWorkspaceFile(path);
+    });
+  });
+
+  void currentDoc;
+}
+
+/** 在资源管理器中定位当前文件 */
+async function revealCurrentFile(): Promise<void> {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc?.filePath) {
+    await alertDialog("当前文档还没有保存到磁盘。", "无法定位");
+    return;
+  }
+  const ok = await revealPath(doc.filePath);
+  if (!ok) toast("无法打开文件所在位置", "error");
+}
+
+/** 在侧边栏中显示当前文件 */
+function showCurrentFileInSidebar(): void {
+  const doc = documents.find((d) => d.id === activeDocId);
+  const sidebarTab = document.querySelector<HTMLElement>('.ty-sidebar-tab[data-tab="files"]');
+  sidebar.classList.remove("collapsed");
+  sidebarTab?.click();
+
+  if (doc?.filePath) {
+    activeFilePath = doc.filePath;
+    renderFileList();
+
+    // 滚动到对应行
+    requestAnimationFrame(() => {
+      const row = fileListContainer.querySelector<HTMLElement>(
+        `[data-workspace-path="${CSS.escape(doc.filePath!)}"]`
+      );
+      row?.scrollIntoView({ block: "nearest" });
+    });
+  }
+}
+
+/** 把当前文档移到另一个目录 */
+async function moveCurrentFile(): Promise<void> {
+  const api = getDesktopAPI();
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc?.filePath || !api?.chooseDirectory || !api.renamePath) {
+    await alertDialog("当前文档还没有保存到磁盘，无法移动。", "无法移动");
+    return;
+  }
+
+  const targetDir = await api.chooseDirectory();
+  if (!targetDir) return;
+
+  const name = extractFileName(doc.filePath);
+  const toPath = joinPath(targetDir, name);
+
+  if (toPath.replace(/\\/g, "/") === doc.filePath.replace(/\\/g, "/")) {
+    toast("已在该目录下", "info");
+    return;
+  }
+
+  const result = await api.renamePath({ from: doc.filePath, to: toPath });
+  if (!result?.path) {
+    await alertDialog(
+      `移动失败：${result?.error ?? "未知错误"}\n\n目标目录已存在同名文件时也会失败。`,
+      "移动失败"
+    );
+    return;
+  }
+
+  documents = markDocumentSaved(documents, doc.id, result.path);
+  const updated = documents.find((d) => d.id === doc.id);
+  if (updated) {
+    updated.title = extractFileName(result.path);
+    if (doc.id === activeDocId) syncTitle(updated.title);
+    await refreshTrackedFile(doc.id, result.path);
+  }
+  if (activeFilePath === doc.filePath) activeFilePath = result.path;
+  resetSessionBaseline(doc.id);
+
+  renderFileList();
+  flushSave();
+  toast("已移动到新位置", "success");
+}
+
+/** 删除当前文件（移入回收站） */
+async function deleteCurrentFile(): Promise<void> {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc?.filePath) {
+    await alertDialog("当前文档还没有保存到磁盘。", "无法删除");
+    return;
+  }
+
+  const ok = await confirmDialog(
+    `确定要把「${doc.title}」移入回收站吗？\n\n${doc.filePath}`,
+    { title: "删除文件", confirmLabel: "移入回收站", danger: true }
+  );
+  if (!ok) return;
+
+  const result = await trashPath(doc.filePath);
+  if (!result.ok) {
+    await alertDialog(`删除失败：${result.error ?? "未知错误"}`, "删除失败");
+    return;
+  }
+
+  // 从工作区移除这份文档；只剩一篇时保留空白文档
+  if (documents.length > 1) {
+    documents = documents.filter((d) => d.id !== doc.id);
+    tabState = closeTab(tabState, doc.id);
+    const next = documents[0];
+    activeDocId = next.id;
+    syncTitle(next.title);
+    editor.setMarkdown(next.content, { resetHistory: true });
+    renderTabs();
+  } else {
+    doc.dirty = false;
+    doc.filePath = undefined;
+    doc.title = "未命名文档.md";
+    doc.content = "";
+    syncTitle(doc.title);
+    editor.setMarkdown("", { resetHistory: true });
+  }
+
+  activeFilePath = null;
+  renderFileList();
+  flushSave();
+  toast("已移入回收站", "success");
+}
+
+/** 保存全部打开的文档 */
+async function saveAllDocuments(): Promise<void> {
+  const dirty = documents.filter((d) => d.dirty && d.filePath);
+  if (dirty.length === 0) {
+    toast("没有需要保存的修改", "info");
+    return;
+  }
+
+  let saved = 0;
+  for (const doc of dirty) {
+    await writeHistoryCopy(doc.id);
+    if (await writeDocumentToDisk(doc.id)) saved += 1;
+  }
+  toast(saved > 0 ? `已保存 ${saved} 个文件` : "保存失败", saved > 0 ? "success" : "error");
+}
+
+/** 打开文档属性对话框 */
+async function openDocumentProperties(): Promise<void> {
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc) return;
+
+  const content = isSourceMode ? sourceEditor.value : editor.getMarkdown();
+  const stats = computeSelectionStats(content, false);
+  const api = getDesktopAPI();
+  const info = await api?.getInfo?.();
+
+  const rows: [string, string][] = [
+    ["标题", doc.title],
+    ["路径", doc.filePath ?? "（尚未保存）"],
+    ["字符数", String(stats.chars)],
+    ["词数", String(stats.words)],
+    ["行数", String(content.split("\n").length)],
+    ["状态", doc.dirty ? "有未保存的修改" : "已保存"],
+  ];
+
+  if (doc.filePath) {
+    const stat = await getFileStat(doc.filePath);
+    if (stat) {
+      rows.push(["磁盘大小", `${(stat.size / 1024).toFixed(1)} KB`]);
+      rows.push(["最后修改", new Date(stat.mtime).toLocaleString("zh-CN")]);
+    }
+  }
+  if (info) rows.push(["应用版本", `v${info.version}`]);
+
+  openDialog({
+    title: "文档属性",
+    maxWidth: 560,
+    body: `
+      <dl class="ty-props-list">
+        ${rows
+          .map(
+            ([k, v]) =>
+              `<dt>${escapeHtml(k)}</dt><dd title="${escapeHtml(v)}">${escapeHtml(v)}</dd>`
+          )
+          .join("")}
+      </dl>
+    `,
+    actions: [{ label: "关闭", variant: "primary" }],
+  });
+}
+
+/** 导入 PDF 并解析（文件菜单入口） */
+async function importPdfFromMenu(): Promise<void> {
+  const api = getDesktopAPI();
+  if (!api?.openFile) {
+    await alertDialog("PDF 导入需要桌面版。", "仅桌面版可用");
+    return;
+  }
+
+  const file = await api.openFile();
+  if (!file) return;
+
+  if (!isPdfFile(file.path)) {
+    // 用户选了非 PDF：按普通文档打开，不报错
+    handleFileOpened(file);
+    return;
+  }
+  await parsePdfWithMineru(file.path);
+}
+
+/** 构建文件菜单的条目 */
+function buildFileMenuItems(): MenuItem[] {
+  const doc = documents.find((d) => d.id === activeDocId);
+  const hasPath = Boolean(doc?.filePath);
+  const recent = loadRecentFiles();
+  const isDesktopApp = Boolean(getDesktopAPI());
+
+  const items: MenuItem[] = [
+    { label: "新建文件", shortcut: "Ctrl+N", onClick: () => handleNewFile() },
+    { label: "打开文件…", shortcut: "Ctrl+O", onClick: () => void handleOpenFile() },
+    { label: "打开文件夹…", shortcut: "Ctrl+Shift+O", onClick: () => void handleOpenFolder() },
+    { kind: "separator" },
+    { label: "快速打开…", shortcut: "Ctrl+P", onClick: () => ensureQuickOpen().open() },
+    { label: "打开最近文件", onClick: openRecentFilesDialog, disabled: recent.length === 0 },
+    { label: "重新打开关闭的文件", shortcut: "Ctrl+Shift+T", onClick: reopenLastTab },
+    { kind: "separator" },
+    { label: "保存", shortcut: "Ctrl+S", onClick: () => void handleSave() },
+    { label: "另存为…", shortcut: "Ctrl+Shift+S", onClick: () => void handleSaveAs() },
+    { label: "保存全部文件", onClick: () => void saveAllDocuments() },
+    { kind: "separator" },
+    { label: "恢复历史版本…", onClick: () => void openRestoreDialog(), disabled: !hasPath },
+    { kind: "separator" },
+    {
+      label: "导入 PDF 并解析…",
+      onClick: () => void importPdfFromMenu(),
+      disabled: !isDesktopApp,
+    },
+    {
+      label: "导出",
+      onClick: () => openExportSubmenu(takeMenuRowRect() ?? undefined),
+    },
+    { kind: "separator" },
+    { label: "文档属性…", onClick: () => void openDocumentProperties() },
+    {
+      label: "打开文件所在位置",
+      onClick: () => void revealCurrentFile(),
+      disabled: !hasPath,
+    },
+    {
+      label: "在侧边栏中显示",
+      onClick: () => showCurrentFileInSidebar(),
+    },
+    { label: "移动到…", onClick: () => void moveCurrentFile(), disabled: !hasPath },
+    {
+      label: "删除…",
+      onClick: () => void deleteCurrentFile(),
+      disabled: !hasPath,
+    },
+    { kind: "separator" },
+    { label: "偏好设置…", shortcut: "Ctrl+,", onClick: () => openSettingsModal() },
+  ];
+
+  return items;
+}
+
+/**
+ * 导出二级菜单。
+ *
+ * 一级菜单点击后会立即关闭，因此这里用点击时记录的行坐标定位，
+ * 而不是事后去 DOM 里找那一行。
+ */
+function openExportSubmenu(anchorRect?: DOMRect): void {
+  const items: MenuItem[] = [
+    { kind: "heading", label: "Markdown 与网页" },
+    { label: "Markdown (.md)", onClick: () => downloadMarkdown() },
+    { label: "HTML", onClick: () => void exportHtml() },
+    { kind: "separator" },
+    { kind: "heading", label: "打印与文档" },
+    { label: "PDF", shortcut: "Ctrl+Shift+P", onClick: () => void exportPdf() },
+    {
+      label: "Word / EPUB / LaTeX…",
+      onClick: () => void openPandocExportDialog(),
+    },
+  ];
+
+  openMenuAt(anchorRect ?? btnFileMenu.getBoundingClientRect(), items, undefined, "end");
+}
+
+/** 绑定文件菜单按钮 */
+btnFileMenu?.addEventListener("click", () => {
+  openMenu(btnFileMenu, buildFileMenuItems());
+});
+
+btnOpenSettingsQuick?.addEventListener("click", () => openSettingsModal());
+
 /** 自动保存入口：按设置决定是否真正落盘 */
 async function runAutoSave(reason: "change" | "interval" | "manual"): Promise<void> {
   if (reason === "change" && !shouldSaveOnChange(autoSaveSettings, true)) return;
@@ -4156,6 +4668,16 @@ getDesktopAPI()?.onCloseRequested?.(() => {
 // 自动化测试钩子：在页面内触发一次关闭流程（不真正退出进程）
 (window as any).__MARKWEAVE_TEST_CLOSE__ = () => handleCloseRequest();
 
+// 自动化测试钩子：弹出统一的确认框，用于验证样式一致性
+(window as any).__MARKWEAVE_TEST_CONFIRM__ = () =>
+  confirmDialog("这是一个用于验证样式的确认框。", {
+    title: "统一对话框验证",
+    confirmLabel: "确定",
+  });
+
+// 自动化测试钩子：列出当前文档可恢复的快照
+(window as any).__MARKWEAVE_TEST_SNAPSHOTS__ = () => listSnapshotEntries(activeDocId);
+
 // Web 版：使用浏览器原生离校提示
 window.addEventListener("beforeunload", (event) => {
   if (!hasUnsavedContent()) return;
@@ -4213,11 +4735,6 @@ btnFocusMode.addEventListener("click", () => {
 btnTypewriterMode.addEventListener("click", () => {
   document.body.classList.toggle("mode-typewriter");
   btnTypewriterMode.classList.toggle("active");
-});
-
-// 导出为独立 HTML
-btnExportHtml.addEventListener("click", () => {
-  void exportHtml();
 });
 
 /**
@@ -4294,31 +4811,24 @@ async function exportHtml(): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-// 导出 PDF：桌面版走 printToPDF（支持纸张/边距），Web 版回退到系统打印
-btnExportPdf.addEventListener("click", () => {
-  void exportPdf();
-});
-
-/* ================= Pandoc 导出（Word / EPUB 等） ================= */
-btnExportPandoc?.addEventListener("click", () => {
-  void openPandocExportDialog();
-});
-
 /** 打开格式选择对话框，并在选择后执行转换 */
 async function openPandocExportDialog(): Promise<void> {
   const api = getDesktopAPI();
 
   if (!api?.convertWithPandoc) {
-    window.alert("Pandoc 导出仅在桌面版可用。");
+    await alertDialog("Pandoc 导出仅在桌面版可用。", "仅桌面版");
     return;
   }
+  // 收窄后的引用，供闭包使用
+  const pandocConvert = api.convertWithPandoc;
 
   // 先检测 pandoc 是否可用，避免用户选完格式才失败
   const detected = await api.detectPandoc?.();
   if (detected && !detected.available) {
-    window.alert(
+    await alertDialog(
       `未检测到 pandoc。\n\n${detected.error ?? ""}\n\n` +
-        "请先安装 pandoc（https://pandoc.org/installing.html），安装后重启本程序。"
+        "请先安装 pandoc（https://pandoc.org/installing.html），安装后重启本程序。",
+      "未找到 pandoc"
     );
     return;
   }
@@ -4329,10 +4839,6 @@ async function openPandocExportDialog(): Promise<void> {
     front,
     (currentDoc?.title ?? "document").replace(/\.md$/i, "")
   );
-
-  const overlay = document.createElement("div");
-  overlay.className = "ty-modal-overlay";
-  overlay.id = "pandoc-export-overlay";
 
   const formatCards = PANDOC_FORMATS.map(
     (f) => `
@@ -4346,54 +4852,49 @@ async function openPandocExportDialog(): Promise<void> {
       </label>`
   ).join("");
 
-  overlay.innerHTML = `
-    <div class="ty-modal-card ty-pandoc-dialog">
-      <div class="ty-modal-header ty-settings-header">
-        <div class="ty-modal-title">导出为其他格式</div>
-        <button class="ty-modal-close" id="pandoc-close" aria-label="关闭">&times;</button>
-      </div>
+  const handle = openDialog({
+    title: "导出为其他格式",
+    maxWidth: 560,
+    body: `
       <p class="ty-modal-desc">
         通过 pandoc 转换，适合输出到 Word、EPUB、LaTeX 等格式。
         ${detected?.version ? `<br /><span class="ty-pandoc-version">${detected.version}</span>` : ""}
       </p>
       <div class="ty-pandoc-formats">${formatCards}</div>
-      <div class="ty-modal-footer">
-        <button class="ty-btn" id="pandoc-cancel">取消</button>
-        <button class="ty-btn ty-btn-primary" id="pandoc-confirm">导出</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-
-  const close = () => overlay.remove();
-
-  overlay.querySelector("#pandoc-close")?.addEventListener("click", close);
-  overlay.querySelector("#pandoc-cancel")?.addEventListener("click", close);
-  overlay.addEventListener("click", (e) => {
-    if (e.target === overlay) close();
+    `,
+    actions: [
+      { label: "取消" },
+      {
+        label: "导出",
+        variant: "primary",
+        onClick: () => {
+          const selected =
+            handle.query<HTMLInputElement>('input[name="pandoc-format"]:checked')?.value ??
+            "docx";
+          void runPandocExport(selected);
+        },
+      },
+    ],
   });
 
   // 卡片选中态
-  overlay.querySelectorAll<HTMLElement>(".ty-export-option-card").forEach((card) => {
+  handle.overlay.querySelectorAll<HTMLElement>(".ty-export-option-card").forEach((card) => {
     card.addEventListener("click", () => {
-      overlay
+      handle.overlay
         .querySelectorAll(".ty-export-option-card")
         .forEach((c) => c.classList.remove("selected"));
       card.classList.add("selected");
     });
   });
 
-  overlay.querySelector("#pandoc-confirm")?.addEventListener("click", async () => {
-    const selected =
-      overlay.querySelector<HTMLInputElement>('input[name="pandoc-format"]:checked')?.value ??
-      "docx";
+  /** 执行实际的 pandoc 转换 */
+  async function runPandocExport(selected: string): Promise<void> {
     const format = getFormat(selected);
 
-    close();
     showSaveStatus("导出中…", "saving");
 
     const markdown = isSourceMode ? sourceEditor.value : editor.getMarkdown();
-    const result = await api.convertWithPandoc?.({
+    const result = await pandocConvert({
       markdown,
       format: selected,
       suggestedName: `${baseTitle}.${format.extension}`,
@@ -4402,13 +4903,14 @@ async function openPandocExportDialog(): Promise<void> {
 
     if (result?.ok) {
       showSaveStatus("已导出", "saved");
+      toast(`已导出为 ${format.label}`, "success");
     } else if (result?.canceled) {
       showSaveStatus("已取消", "idle");
     } else {
       showSaveStatus("导出失败", "error");
-      window.alert(`导出失败：${result?.error ?? "未知错误"}`);
+      await alertDialog(`导出失败：${result?.error ?? "未知错误"}`, "导出失败");
     }
-  });
+  }
 }
 
 async function exportPdf(): Promise<void> {
@@ -4441,7 +4943,7 @@ async function exportPdf(): Promise<void> {
   });
 
   if (!result) {
-    window.alert("PDF 导出失败");
+    void alertDialog("PDF 导出失败", "导出失败");
   }
 }
 
@@ -4456,17 +4958,59 @@ if (desktopAPI) {
       case "open-file":
         void handleOpenFile();
         break;
+      case "open-folder":
+        void handleOpenFolder();
+        break;
+      case "quick-open":
+        ensureQuickOpen().open();
+        break;
+      case "open-recent":
+        openRecentFilesDialog();
+        break;
+      case "reopen-closed":
+        reopenLastTab();
+        break;
       case "save":
         void handleSave();
         break;
       case "save-as":
         void handleSaveAs();
         break;
+      case "save-all":
+        void saveAllDocuments();
+        break;
+      case "restore-snapshot":
+        void openRestoreDialog();
+        break;
+      case "import-pdf":
+        void importPdfFromMenu();
+        break;
+      case "export-markdown":
+        downloadMarkdown();
+        break;
       case "export-html":
         void exportHtml();
         break;
       case "export-pdf":
         void exportPdf();
+        break;
+      case "export-pandoc":
+        void openPandocExportDialog();
+        break;
+      case "doc-properties":
+        void openDocumentProperties();
+        break;
+      case "reveal-file":
+        void revealCurrentFile();
+        break;
+      case "show-in-sidebar":
+        showCurrentFileInSidebar();
+        break;
+      case "move-file":
+        void moveCurrentFile();
+        break;
+      case "delete-file":
+        void deleteCurrentFile();
         break;
       case "preferences":
         openSettingsModal();

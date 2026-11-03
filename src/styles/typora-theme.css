@@ -3239,3 +3239,327 @@ textarea:focus-visible,
 .theme-night .ty-mineru-status[data-state="error"] {
   color: #fc8181;
 }
+
+/* ================= 统一对话框 / 轻提示 / 菜单 ================= */
+
+.ty-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.ty-dialog-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ty-btn-danger {
+  color: #c53030;
+  border-color: rgba(197, 48, 48, 0.4);
+}
+
+.ty-btn-danger:hover {
+  background: rgba(197, 48, 48, 0.08);
+  border-color: #c53030;
+}
+
+.theme-night .ty-btn-danger {
+  color: #fc8181;
+  border-color: rgba(252, 129, 129, 0.4);
+}
+
+.theme-night .ty-btn-danger:hover {
+  background: rgba(252, 129, 129, 0.12);
+}
+
+/* 轻提示：右下角堆叠 */
+.ty-toast-host {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 12000;
+  pointer-events: none;
+}
+
+.ty-toast {
+  padding: 9px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #fff;
+  background: rgba(45, 45, 50, 0.94);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  max-width: 420px;
+}
+
+.ty-toast.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ty-toast-success {
+  background: rgba(47, 133, 90, 0.96);
+}
+
+.ty-toast-error {
+  background: rgba(197, 48, 48, 0.96);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ty-toast {
+    transition: none;
+  }
+}
+
+/* 下拉菜单 */
+.ty-menu-popup {
+  position: fixed;
+  min-width: 200px;
+  max-width: 320px;
+  padding: 5px;
+  background: var(--bg-color);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.2);
+  z-index: 11500;
+  animation: tyMenuIn 0.12s ease-out;
+}
+
+@keyframes tyMenuIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ty-menu-popup {
+    animation: none;
+  }
+}
+
+.ty-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-color);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ty-menu-item:hover:not(:disabled) {
+  background: var(--item-hover-bg-color);
+}
+
+.ty-menu-item:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ty-menu-item:focus-visible {
+  outline: none;
+  background: var(--item-hover-bg-color);
+  box-shadow: inset 0 0 0 1px var(--primary-color);
+}
+
+.ty-menu-check {
+  flex: 0 0 12px;
+  font-size: 11px;
+  color: var(--primary-color);
+}
+
+.ty-menu-label {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ty-menu-shortcut {
+  flex: 0 0 auto;
+  font-size: 11px;
+  opacity: 0.55;
+  padding-left: 16px;
+}
+
+.ty-menu-separator {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--border-color);
+}
+
+.ty-menu-heading {
+  padding: 6px 10px 3px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.5;
+}
+
+.ty-menu-anchor-active {
+  background: var(--item-hover-bg-color) !important;
+}
+
+/* 最近文件列表 */
+.ty-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+
+.ty-recent-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-color);
+}
+
+.ty-recent-item:hover {
+  background: var(--item-hover-bg-color);
+}
+
+.ty-recent-name {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ty-recent-path {
+  font-size: 11px;
+  opacity: 0.55;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ================= 工具栏：主题切换图标 ================= */
+
+.ty-theme-toggle {
+  position: relative;
+}
+
+.ty-theme-toggle .ty-theme-icon {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* 明亮模式显示月亮（点击切到暗色），暗色模式显示太阳 */
+.ty-theme-icon-sun {
+  display: none;
+}
+
+body.theme-night .ty-theme-icon-moon {
+  display: none;
+}
+
+body.theme-night .ty-theme-icon-sun {
+  display: block;
+}
+
+/* 文件菜单按钮：文字样式，和图标按钮区分开 */
+.ty-menu-trigger {
+  font-size: 12.5px;
+  padding: 4px 10px;
+}
+
+/* 文档属性表 */
+.ty-props-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.ty-props-list dt {
+  color: var(--meta-mark-color);
+  white-space: nowrap;
+}
+
+.ty-props-list dd {
+  margin: 0;
+  color: var(--text-color);
+  word-break: break-all;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 恢复历史版本列表 */
+.ty-snapshot-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 48vh;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.ty-snapshot-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--code-bg-color);
+  text-align: left;
+  cursor: pointer;
+  color: var(--text-color);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.ty-snapshot-row:hover {
+  border-color: var(--primary-color);
+  background: rgba(66, 133, 244, 0.06);
+}
+
+.ty-snapshot-row.is-draft {
+  border-style: dashed;
+}
+
+.ty-snapshot-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ty-snapshot-label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ty-snapshot-meta {
+  font-size: 11px;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+
+.ty-snapshot-preview {
+  font-size: 12px;
+  line-height: 1.5;
+  opacity: 0.7;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}

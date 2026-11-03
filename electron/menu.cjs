@@ -7,13 +7,27 @@ const DICTIONARIES = {
   zh: {
     file: "文件",
     "new-file": "新建文件",
-    "open-file": "打开文件",
+    "open-file": "打开文件…",
+    "open-folder": "打开文件夹…",
+    "quick-open": "快速打开…",
+    "open-recent": "打开最近文件",
+    "reopen-closed": "重新打开关闭的文件",
     save: "保存",
-    "save-as": "另存为",
+    "save-as": "另存为…",
+    "save-all": "保存全部文件",
+    "restore-snapshot": "恢复历史版本…",
+    "import-pdf": "导入 PDF 并解析…",
     export: "导出",
-    "export-html": "导出为 HTML...",
-    "export-pdf": "导出为 PDF...",
-    preferences: "偏好设置...",
+    "export-markdown": "Markdown (.md)",
+    "export-html": "HTML",
+    "export-pdf": "PDF",
+    "export-pandoc": "Word / EPUB / LaTeX…",
+    "doc-properties": "文档属性…",
+    "reveal-file": "打开文件所在位置",
+    "show-in-sidebar": "在侧边栏中显示",
+    "move-file": "移动到…",
+    "delete-file": "删除…",
+    preferences: "偏好设置…",
     quit: "退出",
     edit: "编辑",
     undo: "撤销",
@@ -22,6 +36,7 @@ const DICTIONARIES = {
     copy: "复制",
     paste: "粘贴",
     selectAll: "全选",
+    find: "查找…",
     insert: "插入",
     "insert-table": "插入表格",
     "insert-code-fence": "插入代码块",
@@ -37,18 +52,33 @@ const DICTIONARIES = {
     reload: "重新加载",
     "toggle-devtools": "开发者工具",
     help: "帮助",
-    about: "关于 MarkWeave"
+    about: "关于 MarkWeave",
+    "online-docs": "在线文档"
   },
   en: {
     file: "&File",
     "new-file": "New File",
-    "open-file": "Open File...",
+    "open-file": "Open File…",
+    "open-folder": "Open Folder…",
+    "quick-open": "Quick Open…",
+    "open-recent": "Open Recent",
+    "reopen-closed": "Reopen Closed File",
     save: "Save",
-    "save-as": "Save As...",
+    "save-as": "Save As…",
+    "save-all": "Save All Files",
+    "restore-snapshot": "Restore Previous Version…",
+    "import-pdf": "Import PDF…",
     export: "Export",
-    "export-html": "Export as HTML...",
-    "export-pdf": "Export as PDF...",
-    preferences: "Preferences...",
+    "export-markdown": "Markdown (.md)",
+    "export-html": "HTML",
+    "export-pdf": "PDF",
+    "export-pandoc": "Word / EPUB / LaTeX…",
+    "doc-properties": "Document Properties…",
+    "reveal-file": "Show in Folder",
+    "show-in-sidebar": "Show in Sidebar",
+    "move-file": "Move To…",
+    "delete-file": "Delete…",
+    preferences: "Preferences…",
     quit: "Quit",
     edit: "&Edit",
     undo: "Undo",
@@ -57,6 +87,7 @@ const DICTIONARIES = {
     copy: "Copy",
     paste: "Paste",
     selectAll: "Select All",
+    find: "Find…",
     insert: "&Insert",
     "insert-table": "Insert Table",
     "insert-code-fence": "Insert Code Block",
@@ -72,7 +103,8 @@ const DICTIONARIES = {
     reload: "Reload",
     "toggle-devtools": "Toggle Developer Tools",
     help: "&Help",
-    about: "About MarkWeave"
+    about: "About MarkWeave",
+    "online-docs": "Documentation"
   }
 };
 
@@ -105,6 +137,30 @@ function buildMenuTemplate(sendAction, options = {}) {
           accelerator: "CmdOrCtrl+O",
           click: () => action("open-file")
         },
+        {
+          id: "open-folder",
+          label: dict["open-folder"],
+          accelerator: "CmdOrCtrl+Shift+O",
+          click: () => action("open-folder")
+        },
+        { type: "separator" },
+        {
+          id: "quick-open",
+          label: dict["quick-open"],
+          accelerator: "CmdOrCtrl+P",
+          click: () => action("quick-open")
+        },
+        {
+          id: "open-recent",
+          label: dict["open-recent"],
+          click: () => action("open-recent")
+        },
+        {
+          id: "reopen-closed",
+          label: dict["reopen-closed"],
+          accelerator: "CmdOrCtrl+Shift+T",
+          click: () => action("reopen-closed")
+        },
         { type: "separator" },
         {
           id: "save",
@@ -119,9 +175,31 @@ function buildMenuTemplate(sendAction, options = {}) {
           click: () => action("save-as")
         },
         {
+          id: "save-all",
+          label: dict["save-all"],
+          click: () => action("save-all")
+        },
+        { type: "separator" },
+        {
+          id: "restore-snapshot",
+          label: dict["restore-snapshot"],
+          click: () => action("restore-snapshot")
+        },
+        { type: "separator" },
+        {
+          id: "import-pdf",
+          label: dict["import-pdf"],
+          click: () => action("import-pdf")
+        },
+        {
           id: "export",
           label: dict.export,
           submenu: [
+            {
+              id: "export-markdown",
+              label: dict["export-markdown"],
+              click: () => action("export-markdown")
+            },
             {
               id: "export-html",
               label: dict["export-html"],
@@ -130,9 +208,42 @@ function buildMenuTemplate(sendAction, options = {}) {
             {
               id: "export-pdf",
               label: dict["export-pdf"],
+              accelerator: "CmdOrCtrl+Shift+P",
               click: () => action("export-pdf")
+            },
+            { type: "separator" },
+            {
+              id: "export-pandoc",
+              label: dict["export-pandoc"],
+              click: () => action("export-pandoc")
             }
           ]
+        },
+        { type: "separator" },
+        {
+          id: "doc-properties",
+          label: dict["doc-properties"],
+          click: () => action("doc-properties")
+        },
+        {
+          id: "reveal-file",
+          label: dict["reveal-file"],
+          click: () => action("reveal-file")
+        },
+        {
+          id: "show-in-sidebar",
+          label: dict["show-in-sidebar"],
+          click: () => action("show-in-sidebar")
+        },
+        {
+          id: "move-file",
+          label: dict["move-file"],
+          click: () => action("move-file")
+        },
+        {
+          id: "delete-file",
+          label: dict["delete-file"],
+          click: () => action("delete-file")
         },
         { type: "separator" },
         {

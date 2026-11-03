@@ -33,4 +33,63 @@ describe("electron menu", () => {
     const dev = buildMenuTemplate(() => {}, { isDev: true });
     expect(findItem(dev, "view", "toggle-devtools")).toBeTruthy();
   });
+
+  it("exposes the full file menu", () => {
+    const template = buildMenuTemplate(() => {}, { isDev: false });
+    const expected = [
+      "new-file",
+      "open-file",
+      "open-folder",
+      "quick-open",
+      "open-recent",
+      "reopen-closed",
+      "save",
+      "save-as",
+      "save-all",
+      "restore-snapshot",
+      "import-pdf",
+      "export",
+      "doc-properties",
+      "reveal-file",
+      "show-in-sidebar",
+      "move-file",
+      "delete-file",
+      "preferences",
+      "quit",
+    ];
+    for (const id of expected) {
+      expect(findItem(template, "file", id), `缺少菜单项: ${id}`).toBeTruthy();
+    }
+  });
+
+  it("groups all export formats under one submenu", () => {
+    const template = buildMenuTemplate(() => {}, { isDev: false });
+    const exportMenu = findItem(template, "file", "export");
+    const ids = exportMenu.submenu.map((item: any) => item.id).filter(Boolean);
+
+    expect(ids).toContain("export-markdown");
+    expect(ids).toContain("export-html");
+    expect(ids).toContain("export-pdf");
+    expect(ids).toContain("export-pandoc");
+
+    // 导出项不应再散落在文件菜单顶层
+    const fileIds = template
+      .find((entry: any) => entry.id === "file")
+      .submenu.map((item: any) => item.id)
+      .filter(Boolean);
+    expect(fileIds).not.toContain("export-markdown");
+    expect(fileIds).not.toContain("export-html");
+  });
+
+  it("routes every file action through the dispatcher", () => {
+    const sent: string[] = [];
+    const template = buildMenuTemplate((action: string) => sent.push(action), { isDev: false });
+
+    findItem(template, "file", "restore-snapshot").click();
+    findItem(template, "file", "import-pdf").click();
+    findItem(template, "file", "save-all").click();
+    findItem(template, "file", "doc-properties").click();
+
+    expect(sent).toEqual(["restore-snapshot", "import-pdf", "save-all", "doc-properties"]);
+  });
 });
