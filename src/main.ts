@@ -117,6 +117,7 @@ import {
 import { renderMermaidForExport } from "./export/mermaid-render";
 import {
   DEFAULT_AUTO_SAVE,
+  DRAFT_MIRROR_DEBOUNCE_MS,
   autoSaveIntervalMs,
   isLegacyTimestampCopy,
   listSnapshots,
@@ -570,6 +571,8 @@ const editor = new MarkWeaveEditor({
         syncTitle(doc.title);
         scheduleSave();
         scheduleAutoSaveOnChange();
+        // 草稿镜像与自动保存开关无关：改了就要留一份，防止误操作丢稿
+        scheduleDraftMirror(doc.id);
       }
     }
   },
@@ -605,6 +608,8 @@ sourceEditor.addEventListener("input", () => {
       doc.updatedAt = Date.now();
       syncTitle(doc.title);
       scheduleSave();
+      scheduleAutoSaveOnChange();
+      scheduleDraftMirror(doc.id);
     }
   }
 });
@@ -3108,14 +3113,14 @@ function openSettingsModal() {
               min="1" max="120" step="1" value="${currentSettings.autoSave.intervalMinutes}" aria-label="自动保存间隔" />
           </div>
 
-          <div class="ty-settings-section-title" style="margin-top: 18px;">保存与回退</div>
+          <div class="ty-settings-section-title" style="margin-top: 18px;">保存与恢复</div>
           <div class="ty-settings-row">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">保存前留一份快照</span>
-              <span class="ty-settings-desc">覆盖原文件前备份上一版，随时可回退；快照固定在 .markweave-history 里覆盖更新，不会越存越多</span>
+              <span class="ty-settings-label">保留草稿与历史版本</span>
+              <span class="ty-settings-desc">随时把当前编辑内容镜像到磁盘，崩溃或误操作后可恢复；与自动保存开关无关，默认开启</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} aria-label="保存前留一份快照" />
+              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} aria-label="保留草稿与历史版本" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -3134,11 +3139,11 @@ function openSettingsModal() {
 
           <div class="ty-settings-row">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">保留快照层数</span>
-              <span class="ty-settings-desc">1 表示只保留「上一次保存前」的版本；调大可回溯更早的内容，文件总数始终不超过这个值</span>
+              <span class="ty-settings-label">快照总份数</span>
+              <span class="ty-settings-desc">第 1 份是当前草稿，其余是可回退的历史版本；文件总数始终不超过这个值</span>
             </div>
             <input class="ty-settings-input" type="number" id="setting-input-history-max"
-              min="1" max="20" step="1" value="${currentSettings.autoSave.maxHistory}" aria-label="保留快照层数" />
+              min="1" max="20" step="1" value="${currentSettings.autoSave.maxHistory}" aria-label="快照总份数" />
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">导出</div>
@@ -3615,7 +3620,7 @@ function openSettingsModal() {
     const autoSaveMode = ((modalOverlay.querySelector("#setting-select-autosave-mode") as HTMLSelectElement)?.value as AutoSaveSettings["mode"]) || "off";
     const autoSaveInterval = parseInt((modalOverlay.querySelector("#setting-input-autosave-interval") as HTMLInputElement)?.value || "5", 10) || 5;
     const historyDir = (modalOverlay.querySelector("#setting-input-history-dir") as HTMLInputElement)?.value || "";
-    const historyMax = parseInt((modalOverlay.querySelector("#setting-input-history-max") as HTMLInputElement)?.value || "1", 10) || 1;
+    const historyMax = parseInt((modalOverlay.querySelector("#setting-input-history-max") as HTMLInputElement)?.value || "3", 10) || 3;
     const historyEnabled = (modalOverlay.querySelector("#setting-toggle-history") as HTMLInputElement)?.checked ?? true;
 
     const newSettings: MarkWeaveSettings = {
@@ -3868,63 +3873,113 @@ async function writeDocumentToDisk(docId: string): Promise<boolean> {
 }
 
 /**
- * 本次会话里已经确认过快照存在的文档（docId → 文件路径）。
- *
- * 自动保存每 800ms 就可能触发一次。如果每次都检查/轮转快照，
- * 既浪费一次目录列举，又会把 `note.bak.md` 冲成"上一毫秒"这种没用的状态。
- * 因此自动保存只在本次打开后检查一次：没有快照就补一份基线，
- * 已经有了就完全不动它。只有手动保存（Ctrl+S）才会轮转槽位。
+ * 每份文档的快照状态（docId → 上次写入镜像的时间）。
+ * 用来给草稿镜像做节流，避免每敲一个字就写盘。
  */
-const sessionBaseline = new Map<string, string>();
+const draftMirrorAt = new Map<string, number>();
 
-/** 文档换了路径或重新打开时，下一次保存要重新确认快照 */
+/** 草稿镜像的定时器，按 docId 分别合并连续输入 */
+const draftMirrorTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** 文档换了路径或重新打开时，重置镜像节流状态 */
 function resetSessionBaseline(docId: string): void {
-  sessionBaseline.delete(docId);
+  draftMirrorAt.delete(docId);
+  const timer = draftMirrorTimers.get(docId);
+  if (timer) {
+    clearTimeout(timer);
+    draftMirrorTimers.delete(docId);
+  }
+}
+
+/** 快照目录与单份快照的路径 */
+function snapshotPaths(doc: { filePath: string }) {
+  const dir = resolveHistoryDir(doc.filePath, autoSaveSettings);
+  const pathFor = (slot: number): string => {
+    const name = snapshotFileName(doc.filePath, slot).replace(/\\/g, "/").split("/").pop()!;
+    return joinPath(dir, name);
+  };
+  return { dir, pathFor };
 }
 
 /**
- * 覆盖写盘前留一份快照，保证用户能回退到之前的内容。
+ * 刷新「当前内容镜像」——槽位 1。
  *
- * 与旧实现的关键区别：快照占用**固定槽位**（`note.bak.md`、`note.bak-2.md`），
- * 反复保存只覆盖同名文件，不会每次保存都多出一个带时间戳的新版本。
- * 备份的是磁盘上的**旧内容**（而不是即将写入的新内容），否则备份毫无意义。
- *
- * @param rotate true（手动保存）把已有槽位整体后移；
- *               false（自动保存）仅在槽位 1 不存在时补一份基线，绝不覆盖。
- *
- * 失败不影响主保存流程。
+ * 这份快照的唯一目的是**防止误操作丢稿**：编辑器里改过但还没落盘的内容，
+ * 要能在崩溃、误关、手滑之后被找回。因此：
+ * - 与自动保存开关**无关**，只要内容变了就写；
+ * - 写的是编辑器此刻的内容，而不是磁盘上的旧内容。
  */
-async function writeHistoryCopy(docId: string, rotate = true): Promise<void> {
+async function mirrorDraft(docId: string): Promise<void> {
   const api = getDesktopAPI();
   const doc = documents.find((d) => d.id === docId);
   if (!api?.writeHistory || !doc?.filePath || !autoSaveSettings.historyEnabled) return;
 
-  // 自动保存：本次会话已确认过快照就跳过，避免每 800ms 都去列目录
-  if (!rotate && sessionBaseline.get(docId) === doc.filePath) return;
+  const filePath: string = doc.filePath;
+  const raw =
+    doc.id === activeDocId
+      ? isSourceMode
+        ? sourceEditor.value
+        : editor.getMarkdown()
+      : doc.content;
 
+  const { dir, pathFor } = snapshotPaths({ filePath });
+
+  try {
+    await api.writeHistory({ path: pathFor(1), content: prepareContentForDisk(raw) });
+    draftMirrorAt.set(docId, Date.now());
+
+    // 顺手清掉旧方案留下的时间戳副本
+    if (api.listHistory && api.removeHistory) {
+      const files = await api.listHistory(dir);
+      const legacy = files.filter((name) => isLegacyTimestampCopy(name, filePath));
+      if (legacy.length > 0) await api.removeHistory({ dir, names: legacy });
+    }
+  } catch (err) {
+    console.warn("写入草稿镜像失败", err);
+  }
+}
+
+/** 内容变化后按节流调度一次草稿镜像 */
+function scheduleDraftMirror(docId: string): void {
+  if (!autoSaveSettings.historyEnabled) return;
+
+  const last = draftMirrorAt.get(docId) ?? 0;
+  const elapsed = Date.now() - last;
+
+  const existing = draftMirrorTimers.get(docId);
+  if (existing) clearTimeout(existing);
+
+  const delay = elapsed >= DRAFT_MIRROR_DEBOUNCE_MS ? 0 : DRAFT_MIRROR_DEBOUNCE_MS - elapsed;
+  const timer = setTimeout(() => {
+    draftMirrorTimers.delete(docId);
+    void mirrorDraft(docId);
+  }, delay);
+  draftMirrorTimers.set(docId, timer);
+}
+
+/**
+ * 写盘前的快照归档：把磁盘上的**旧内容**推进历史槽位，再刷新镜像。
+ *
+ * 与草稿镜像的区别：这里的槽位 2 存的是"即将被覆盖的那一版"，
+ * 也就是用户真正需要回退到的上一个已保存状态。
+ *
+ * 失败不影响主保存流程。
+ */
+async function archiveSnapshot(docId: string): Promise<void> {
+  const api = getDesktopAPI();
+  const doc = documents.find((d) => d.id === docId);
+  if (!api?.writeHistory || !doc?.filePath || !autoSaveSettings.historyEnabled) return;
+
+  const filePath: string = doc.filePath;
   const maxSlots = Math.max(1, Math.floor(autoSaveSettings.maxHistory));
-  const dir = resolveHistoryDir(doc.filePath, autoSaveSettings);
-
-  const pathFor = (slot: number): string => {
-    const name = snapshotFileName(doc.filePath!, slot).replace(/\\/g, "/").split("/").pop()!;
-    return joinPath(dir, name);
-  };
+  const { dir, pathFor } = snapshotPaths({ filePath });
 
   try {
     const files = api.listHistory ? await api.listHistory(dir) : [];
-    const snapshots = listSnapshots(files, doc.filePath);
-    const plan = planSnapshotWrite(snapshots, maxSlots, rotate);
+    const snapshots = listSnapshots(files, filePath);
+    const plan = planSnapshotWrite(snapshots, maxSlots, "commit");
 
-    if (!plan.write) {
-      sessionBaseline.set(docId, doc.filePath);
-      return;
-    }
-
-    // 文件还没落过盘时没有"上一版"，跳过
-    const previous = await api.readFile?.(doc.filePath);
-    if (!previous) return;
-
-    // 先搬移旧槽位（已按从深到浅排序，不会互相覆盖）
+    // 先搬移旧历史（已按从深到浅排序，不会互相覆盖）
     for (const move of plan.moves) {
       const from = snapshots.find((s) => s.slot === move.from);
       if (!from) continue;
@@ -3933,23 +3988,32 @@ async function writeHistoryCopy(docId: string, rotate = true): Promise<void> {
       await api.writeHistory({ path: pathFor(move.to), content: src.content });
     }
 
-    // 目标槽位写入覆盖前的旧内容
-    await api.writeHistory({ path: pathFor(plan.targetSlot), content: previous.content });
-    sessionBaseline.set(docId, doc.filePath);
-
-    // 清掉超出层数与历史遗留的时间戳副本
-    if (api.removeHistory) {
-      const expired = [
-        ...plan.expired,
-        ...files.filter((name) => isLegacyTimestampCopy(name, doc.filePath!)),
-      ];
-      if (expired.length > 0) {
-        await api.removeHistory({ dir, names: expired });
+    // 磁盘上被覆盖前的旧内容 → 历史槽位 2
+    const previous = await api.readFile?.(filePath);
+    for (const write of plan.writes) {
+      if (write.source === "previous") {
+        if (!previous) continue; // 文件还没落过盘，没有历史可存
+        await api.writeHistory({ path: pathFor(write.slot), content: previous.content });
       }
+      // 镜像（slot 1）交给 mirrorDraft，这里不重复写
+    }
+
+    if (api.removeHistory) {
+      const doomed = [
+        ...plan.expired,
+        ...files.filter((name) => isLegacyTimestampCopy(name, filePath)),
+      ];
+      if (doomed.length > 0) await api.removeHistory({ dir, names: doomed });
     }
   } catch (err) {
-    console.warn("写入保存快照失败", err);
+    console.warn("归档保存快照失败", err);
   }
+}
+
+/** 写盘成功后：旧实现的名字保留，语义变为「归档 + 刷新镜像」 */
+async function writeHistoryCopy(docId: string): Promise<void> {
+  await archiveSnapshot(docId);
+  await mirrorDraft(docId);
 }
 
 /** 自动保存入口：按设置决定是否真正落盘 */
@@ -3962,7 +4026,7 @@ async function runAutoSave(reason: "change" | "interval" | "manual"): Promise<vo
   showSaveStatus(reason === "interval" ? "自动保存中…" : "保存中…", "saving");
   // 自动保存直接覆盖原文件；只在本次会话第一次写入时留一份基线快照，
   // 避免每 800ms 轮转一次把快照挤成"上一毫秒"这种没用的状态。
-  await writeHistoryCopy(doc.id, false);
+  await writeHistoryCopy(doc.id);
   const ok = await writeDocumentToDisk(doc.id);
   showSaveStatus(
     ok ? (reason === "interval" ? "已自动保存" : "已保存") : "保存失败",

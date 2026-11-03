@@ -22,7 +22,7 @@ export interface AutoSaveSettings {
   historyDir: string;
   /**
    * 保留的快照层数。
-   * 1 表示只保留"上一次保存前"的版本（不会产生多个版本）；
+   * 1 表示只保留"上一次保存前"的版本；
    * 大于 1 时再多留几层，总数量始终受此值约束。
    */
   maxHistory: number;
@@ -36,7 +36,8 @@ export const DEFAULT_AUTO_SAVE: AutoSaveSettings = {
   mode: "off",
   intervalMinutes: 5,
   historyDir: "",
-  maxHistory: 1,
+  // 3 = 1 份「当前内容镜像」+ 2 份历史版本，总数恒定
+  maxHistory: 3,
   historyEnabled: true,
   snapshotVersion: SNAPSHOT_VERSION,
 };
@@ -45,6 +46,14 @@ export const MIN_INTERVAL_MINUTES = 1;
 export const MAX_INTERVAL_MINUTES = 120;
 export const MIN_HISTORY = 1;
 export const MAX_HISTORY = 20;
+
+/**
+ * 草稿镜像的写入节流间隔。
+ *
+ * 这份快照的目的是防止误操作丢失未保存的修改，因此**与自动保存开关无关**，
+ * 只要内容变了就该更新。但每敲一个字就写盘太重，用 1.5 秒合并连续输入。
+ */
+export const DRAFT_MIRROR_DEBOUNCE_MS = 1500;
 
 export function normalizeAutoSaveSettings(raw: unknown): AutoSaveSettings {
   const input = (raw ?? {}) as Partial<AutoSaveSettings>;
@@ -114,8 +123,11 @@ export function splitFilePath(filePath: string): { dir: string; stem: string; ex
 /**
  * 固定槽位快照文件名（槽位从 1 开始）。
  *
- * 槽位 1 → `<名>.bak.md`，槽位 2 → `<名>.bak-2.md`，以此类推。
- * 名字固定，重复保存只覆盖，不会像时间戳方案那样越存越多。
+ * 槽位 1 → `<名>.bak.md`  （草稿镜像：当前未保存内容）
+ * 槽位 2 → `<名>.bak-2.md`
+ * 槽位 3 → `<名>.bak-3.md`
+ *
+ * 名字固定，重复使用只覆盖，不会像时间戳方案那样越存越多。
  */
 export function snapshotFileName(originalPath: string, slot = 1): string {
   const safeSlot = Math.max(1, Math.floor(slot));
@@ -173,52 +185,62 @@ export interface SnapshotMove {
   to: number;
 }
 
+/** 本次要写入哪个槽位、写什么内容 */
+export interface SnapshotWrite {
+  slot: number;
+  /** current = 编辑器此刻的内容；previous = 磁盘上被覆盖前的旧内容 */
+  source: "current" | "previous";
+}
+
 export interface SnapshotPlan {
-  /** 本次是否需要写快照 */
-  write: boolean;
+  /** 需要写入的槽位（按顺序执行） */
+  writes: SnapshotWrite[];
   /** 需要先执行的槽位搬移（从深到浅，保证不互相覆盖） */
   moves: SnapshotMove[];
-  /** 新快照写到的槽位 */
-  targetSlot: number;
   /** 超出保留层数、应删除的文件名 */
   expired: string[];
 }
 
 /**
- * 决定这次保存该如何处理快照。
+ * 决定这次写盘该如何处理快照。
+ *
+ * 槽位语义（必须分清，否则会写出"备份了即将写入的内容"这种无效快照）：
+ *
+ * - **槽位 1 = 当前内容的镜像**。写的是编辑器里此刻的内容（可能尚未保存），
+ *   用于防止误操作——崩溃、误关、手滑覆盖之后还能把稿子捞回来。
+ *   它不参与历史轮转，内容一变就原地覆盖，**与自动保存开关无关**。
+ * - **槽位 2..N = 历史版本**。只在真正写盘时归档，存的是被覆盖前的磁盘内容。
  *
  * @param snapshots 目录里已有的快照（listSnapshots 的结果）
- * @param maxSlots  保留层数
- * @param rotate    手动保存为 true（整体后移）；自动保存为 false（只补缺）
- *
- * 关键约束：无论保存多少次，快照文件总数都不超过 maxSlots。
- * 自动保存时若槽位 1 已存在则**完全不动**，防止每 800ms 把基线冲掉。
+ * @param maxSlots  保留层数（1 份镜像 + (maxSlots-1) 份历史）
+ * @param mode      "draft" 只刷新镜像；"commit" 先归档旧内容再刷新镜像
  */
 export function planSnapshotWrite(
   snapshots: { name: string; slot: number }[],
   maxSlots: number,
-  rotate: boolean
+  mode: "draft" | "commit"
 ): SnapshotPlan {
   const limit = Math.max(1, Math.floor(maxSlots));
   const kept = snapshots.filter((s) => s.slot <= limit);
   const expired = selectExpiredSnapshots(snapshots, limit);
 
-  if (!rotate && kept.some((s) => s.slot === 1)) {
-    return { write: false, moves: [], targetSlot: 1, expired };
+  if (mode === "draft") {
+    // 只刷新镜像；历史槽位原样保留
+    return { writes: [{ slot: 1, source: "current" }], moves: [], expired };
   }
 
-  if (!rotate) {
-    return { write: true, moves: [], targetSlot: 1, expired };
-  }
-
-  // 手动保存：把 1..limit-1 整体后移一格，腾出槽位 1
+  // commit：历史槽位整体后移一格，给"被覆盖前的磁盘内容"腾出槽位 2
   const moves: SnapshotMove[] = kept
-    .filter((s) => s.slot < limit)
+    .filter((s) => s.slot >= 2 && s.slot < limit)
     .map((s) => ({ from: s.slot, to: s.slot + 1 }))
     // 从深到浅，避免 to 覆盖尚未搬走的 from
     .sort((a, b) => b.from - a.from);
 
-  return { write: true, moves, targetSlot: 1, expired };
+  const writes: SnapshotWrite[] = [];
+  if (limit >= 2) writes.push({ slot: 2, source: "previous" });
+  writes.push({ slot: 1, source: "current" });
+
+  return { writes, moves, expired };
 }
 
 /**

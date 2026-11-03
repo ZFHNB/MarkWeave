@@ -18,12 +18,12 @@ import {
 } from "../src/workspace/autosave";
 
 describe("auto save settings", () => {
-  it("defaults to off with a single rotating snapshot", () => {
+  it("defaults to off with three rotating snapshots", () => {
     expect(DEFAULT_AUTO_SAVE.mode).toBe("off");
     expect(DEFAULT_AUTO_SAVE.intervalMinutes).toBe(5);
     expect(DEFAULT_AUTO_SAVE.historyEnabled).toBe(true);
-    // 关键：默认只留一层，保证"反复保存不会产生多个版本"
-    expect(DEFAULT_AUTO_SAVE.maxHistory).toBe(1);
+    // 默认三层：既有回退能力，文件数量也仍然恒定
+    expect(DEFAULT_AUTO_SAVE.maxHistory).toBe(3);
   });
 
   it("normalizes partial and invalid input", () => {
@@ -42,10 +42,10 @@ describe("auto save settings", () => {
     expect(normalizeAutoSaveSettings({ historyDir: "  /tmp/h  " }).historyDir).toBe("/tmp/h");
   });
 
-  it("migrates legacy configuration to the single-slot scheme", () => {
-    // 旧配置 maxHistory=20、没有版本号 → 必须被压回 1，否则升级后仍会堆文件
+  it("migrates legacy configuration to the new default", () => {
+    // 旧配置 maxHistory=20、没有版本号 → 压回默认的 3 层
     const migrated = normalizeAutoSaveSettings({ maxHistory: 20 });
-    expect(migrated.maxHistory).toBe(1);
+    expect(migrated.maxHistory).toBe(3);
     expect(migrated.snapshotVersion).toBe(SNAPSHOT_VERSION);
 
     // 已经是新版本的不再改动
@@ -132,76 +132,82 @@ describe("fixed snapshot slots", () => {
   });
 
   it("keeps the total snapshot count bounded across many saves", () => {
-    let files: string[] = [];
+    // 用 Set 模拟文件系统：同槽位永远同名，搬移是改名而非新增
+    let names = new Set<string>();
+
     for (let i = 0; i < 50; i++) {
-      const snapshots = listSnapshots(files, "/docs/note.md");
-      const plan = planSnapshotWrite(snapshots, 1, true);
+      const snapshots = listSnapshots([...names], "/docs/note.md");
+      const plan = planSnapshotWrite(snapshots, 3, "commit");
 
-      // 把旧槽位按计划搬移（未搬移且目标槽位被占用的会被覆盖，不是并存）
-      const afterMoves = snapshots
-        .map((s) => {
-          const move = plan.moves.find((m) => m.from === s.slot);
-          return {
-            name: move ? snapshotFileName("/docs/note.md", move.to).split("/").pop()! : s.name,
-            slot: move ? move.to : s.slot,
-          };
-        })
-        // 目标槽位即将被本次写入覆盖，先移除
-        .filter((s) => s.slot !== plan.targetSlot);
+      // 搬移：旧槽位的文件改名到新槽位
+      for (const move of plan.moves) {
+        const from = snapshots.find((s) => s.slot === move.from);
+        if (!from) continue;
+        names.delete(from.name);
+        names.add(snapshotFileName("/docs/note.md", move.to).split("/").pop()!);
+      }
 
-      files = [
-        snapshotFileName("/docs/note.md", plan.targetSlot).split("/").pop()!,
-        ...afterMoves.map((s) => s.name),
-      ];
+      // 写入：同名覆盖
+      for (const write of plan.writes) {
+        names.add(snapshotFileName("/docs/note.md", write.slot).split("/").pop()!);
+      }
 
       // 清理超限
-      const expired = selectExpiredSnapshots(listSnapshots(files, "/docs/note.md"), 1);
-      files = files.filter((f) => !expired.includes(f));
+      for (const name of selectExpiredSnapshots(listSnapshots([...names], "/docs/note.md"), 3)) {
+        names.delete(name);
+      }
     }
-    // 保存 50 次后仍然只有一个快照文件
-    expect(listSnapshots(files, "/docs/note.md")).toHaveLength(1);
+
+    // 保存 50 次后仍然只有 3 个快照文件
+    expect(listSnapshots([...names], "/docs/note.md")).toHaveLength(3);
   });
 });
 
 describe("snapshot write planning", () => {
   const doc = "/docs/note.md";
 
-  it("writes a baseline when auto saving with no snapshot yet", () => {
-    expect(planSnapshotWrite([], 1, false)).toEqual({
-      write: true,
-      moves: [],
-      targetSlot: 1,
-      expired: [],
-    });
-  });
-
-  it("never touches the baseline during repeated auto saves", () => {
-    // 这是本次修复的核心：自动保存存 100 次也只留一份快照
-    const existing = listSnapshots(["note.bak.md"], doc);
-    const plan = planSnapshotWrite(existing, 1, false);
-    expect(plan.write).toBe(false);
+  it("draft mode refreshes only the mirror", () => {
+    const plan = planSnapshotWrite([], 3, "draft");
+    expect(plan.writes).toEqual([{ slot: 1, source: "current" }]);
     expect(plan.moves).toEqual([]);
   });
 
-  it("rotates depth-first on manual save", () => {
-    // 保留 3 层并已有 1、2 → 2 先搬到 3，再写 1
-    const existing = listSnapshots(["note.bak.md", "note.bak-2.md"], doc);
-    const plan = planSnapshotWrite(existing, 3, true);
-    expect(plan.write).toBe(true);
-    expect(plan.targetSlot).toBe(1);
-    // 从深到浅：先搬 2→3，1→2 由新写入替代
-    expect(plan.moves).toEqual([
-      { from: 2, to: 3 },
-      { from: 1, to: 2 },
+  it("draft mode never touches history slots", () => {
+    const existing = listSnapshots(["note.bak.md", "note.bak-2.md", "note.bak-3.md"], doc);
+    const plan = planSnapshotWrite(existing, 3, "draft");
+    // 只写镜像，历史原样保留
+    expect(plan.writes).toEqual([{ slot: 1, source: "current" }]);
+    expect(plan.moves).toEqual([]);
+  });
+
+  it("commit mode archives the overwritten content into slot 2", () => {
+    const plan = planSnapshotWrite([], 3, "commit");
+    expect(plan.writes).toEqual([
+      { slot: 2, source: "previous" },
+      { slot: 1, source: "current" },
     ]);
   });
 
-  it("drops the slot that would exceed the limit", () => {
-    // 只留 1 层时，手动保存不需要搬移，旧快照直接被覆盖
+  it("commit mode shifts history deeper before writing", () => {
+    // 已有历史 2、3 → 3 先搬不走（已是最深），2 搬到 3
+    const existing = listSnapshots(["note.bak.md", "note.bak-2.md"], doc);
+    const plan = planSnapshotWrite(existing, 3, "commit");
+    expect(plan.moves).toEqual([{ from: 2, to: 3 }]);
+    // 写入顺序：先历史后镜像，避免镜像被后面的搬移覆盖
+    expect(plan.writes.map((w) => w.slot)).toEqual([2, 1]);
+  });
+
+  it("commit mode never moves the mirror itself", () => {
+    // 槽位 1 是镜像，不参与历史轮转
     const existing = listSnapshots(["note.bak.md"], doc);
-    const plan = planSnapshotWrite(existing, 1, true);
-    expect(plan.moves).toEqual([]);
-    expect(plan.write).toBe(true);
+    const plan = planSnapshotWrite(existing, 3, "commit");
+    expect(plan.moves.some((m) => m.from === 1)).toBe(false);
+  });
+
+  it("skips history when only one slot is configured", () => {
+    // 只留 1 层时没有历史空间，只写镜像
+    const plan = planSnapshotWrite([], 1, "commit");
+    expect(plan.writes).toEqual([{ slot: 1, source: "current" }]);
   });
 
   it("reports surplus slots as expired", () => {
@@ -209,20 +215,12 @@ describe("snapshot write planning", () => {
       ["note.bak.md", "note.bak-2.md", "note.bak-3.md"],
       doc
     );
-    expect(planSnapshotWrite(existing, 1, true).expired).toEqual([
+    expect(planSnapshotWrite(existing, 1, "commit").expired).toEqual([
       "note.bak-2.md",
       "note.bak-3.md",
     ]);
-    expect(planSnapshotWrite(existing, 2, true).expired).toEqual(["note.bak-3.md"]);
-  });
-
-  it("still writes a baseline in auto mode when only deeper slots exist", () => {
-    // 槽位 1 缺失（例如被用户手工删掉）→ 自动保存应补一份
-    const existing = listSnapshots(["note.bak-2.md"], doc);
-    const plan = planSnapshotWrite(existing, 3, false);
-    expect(plan.write).toBe(true);
-    expect(plan.moves).toEqual([]);
-    expect(plan.targetSlot).toBe(1);
+    expect(planSnapshotWrite(existing, 2, "commit").expired).toEqual(["note.bak-3.md"]);
+    expect(planSnapshotWrite(existing, 3, "commit").expired).toEqual([]);
   });
 });
 

@@ -1,8 +1,9 @@
 /**
- * 快照策略的端到端验证（模拟真实文件系统行为）。
+ * 快照行为端到端验证（内存文件系统）。
  *
- * 用一个内存文件系统复现 writeHistoryCopy 的完整流程：
- * 自动保存 / 手动保存 / 多轮保存 / 旧副本清理。
+ * 复刻 src/main.ts 的两条路径：
+ *   mirrorDraft   —— 内容变化时刷新槽位 1（当前内容镜像）
+ *   archiveSnapshot —— 写盘前把磁盘旧内容归档到槽位 2..N
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -15,7 +16,6 @@ import {
   DEFAULT_AUTO_SAVE,
 } from "../src/workspace/autosave";
 
-/** 极简内存 FS，模拟 Electron 主进程的读写行为 */
 class MemFS {
   files = new Map<string, string>();
 
@@ -38,151 +38,187 @@ class MemFS {
 }
 
 const DOC = "/docs/note.md";
+const DIR = resolveHistoryDir(DOC, DEFAULT_AUTO_SAVE);
 
-/** 复刻 src/main.ts 里的 writeHistoryCopy 决策流程 */
-function save(fs: MemFS, newContent: string, opts: { rotate: boolean; maxSlots: number }) {
-  const dir = resolveHistoryDir(DOC, { ...DEFAULT_AUTO_SAVE, maxHistory: opts.maxSlots });
-  const files = fs.list(dir);
-  const snapshots = listSnapshots(files, DOC);
-  const plan = planSnapshotWrite(snapshots, opts.maxSlots, opts.rotate);
+function pathOf(slot: number): string {
+  const name = snapshotFileName(DOC, slot).split("/").pop()!;
+  return `${DIR}/${name}`;
+}
 
-  if (plan.write) {
-    const previous = fs.read(DOC);
-    if (previous) {
-      const pathFor = (slot: number) => {
-        const name = snapshotFileName(DOC, slot).split("/").pop()!;
-        return `${dir}/${name}`;
-      };
-      for (const move of plan.moves) {
-        const from = snapshots.find((s) => s.slot === move.from);
-        if (!from) continue;
-        const src = fs.read(`${dir}/${from.name}`);
-        if (src === null) continue;
-        fs.write(pathFor(move.to), src);
-      }
-      fs.write(pathFor(plan.targetSlot), previous);
+/** 复刻 mirrorDraft：编辑器内容 → 槽位 1 */
+function mirror(fs: MemFS, content: string, maxSlots = 3) {
+  const snapshots = listSnapshots(fs.list(DIR), DOC);
+  const plan = planSnapshotWrite(snapshots, maxSlots, "draft");
+  for (const write of plan.writes) {
+    if (write.source === "current") fs.write(pathOf(write.slot), content);
+  }
+}
 
-      for (const name of [
-        ...plan.expired,
-        ...files.filter((n) => isLegacyTimestampCopy(n, DOC)),
-      ]) {
-        fs.remove(`${dir}/${name}`);
-      }
+/** 复刻 archiveSnapshot + mirrorDraft：写盘前归档旧内容，再刷新镜像 */
+function save(fs: MemFS, content: string, maxSlots = 3) {
+  const snapshots = listSnapshots(fs.list(DIR), DOC);
+  const plan = planSnapshotWrite(snapshots, maxSlots, "commit");
+  const previous = fs.read(DOC);
+
+  // 搬移历史
+  for (const move of plan.moves) {
+    const from = snapshots.find((s) => s.slot === move.from);
+    if (!from) continue;
+    const src = fs.read(`${DIR}/${from.name}`);
+    if (src === null) continue;
+    fs.write(pathOf(move.to), src);
+  }
+
+  // 归档旧内容 + 写镜像
+  for (const write of plan.writes) {
+    if (write.source === "previous") {
+      if (previous !== null) fs.write(pathOf(write.slot), previous);
+    } else {
+      fs.write(pathOf(write.slot), content);
     }
   }
 
-  // 主文件始终被覆盖
-  fs.write(DOC, newContent);
-  return fs;
+  // 清理超限 + 旧方案遗留的时间戳副本
+  for (const name of selectExpiredSnapshots(listSnapshots(fs.list(DIR), DOC), maxSlots)) {
+    fs.remove(`${DIR}/${name}`);
+  }
+  for (const name of fs.list(DIR).filter((n) => isLegacyTimestampCopy(n, DOC))) {
+    fs.remove(`${DIR}/${name}`);
+  }
+
+  // 主文件落盘
+  fs.write(DOC, content);
 }
 
-describe("snapshot behaviour end to end", () => {
-  it("produces exactly one snapshot after 20 auto saves", () => {
+describe("draft mirror protects unsaved work", () => {
+  it("mirrors unsaved edits even with auto save disabled", () => {
     const fs = new MemFS();
-    fs.write(DOC, "v0");
+    fs.write(DOC, "saved-v1");
 
-    for (let i = 1; i <= 20; i++) {
-      save(fs, `v${i}`, { rotate: false, maxSlots: 1 });
-    }
+    // 用户改了一段但没保存（自动保存关闭）
+    mirror(fs, "unsaved-v2");
 
-    const dir = resolveHistoryDir(DOC, DEFAULT_AUTO_SAVE);
-    const snapshots = listSnapshots(fs.list(dir), DOC);
-
-    expect(snapshots).toHaveLength(1);
-    expect(snapshots[0].name).toBe("note.bak.md");
-    // 自动保存全程没动过快照：它仍是第一次自动保存时抓到的 v0
-    expect(fs.read(`${dir}/note.bak.md`)).toBe("v0");
-    // 主文件是最新内容
-    expect(fs.read(DOC)).toBe("v20");
+    // 磁盘主文件没变，但草稿镜像里有最新的未保存内容
+    expect(fs.read(DOC)).toBe("saved-v1");
+    expect(fs.read(pathOf(1))).toBe("unsaved-v2");
   });
 
-  it("rotates the snapshot on manual save so the previous version is recoverable", () => {
+  it("keeps the mirror in sync as the user keeps typing", () => {
     const fs = new MemFS();
     fs.write(DOC, "v0");
-    save(fs, "v1", { rotate: false, maxSlots: 1 });
-    expect(fs.read("/docs/.markweave-history/note.bak.md")).toBe("v0");
 
-    save(fs, "v2", { rotate: true, maxSlots: 1 });
-    // 手动保存后，快照变成"上一版" v1
-    expect(fs.read("/docs/.markweave-history/note.bak.md")).toBe("v1");
+    mirror(fs, "v1");
+    mirror(fs, "v2");
+    mirror(fs, "v3");
+
+    // 镜像始终是最新内容，且只有一个文件
+    expect(fs.read(pathOf(1))).toBe("v3");
+    expect(listSnapshots(fs.list(DIR), DOC)).toHaveLength(1);
+  });
+
+  it("survives a crash right after editing", () => {
+    const fs = new MemFS();
+    fs.write(DOC, "original");
+
+    // 用户写了大量修改，还没点保存就崩溃了
+    mirror(fs, "lots of new work");
+
+    // 重新打开时可以从镜像恢复
+    const recovered = fs.read(pathOf(1));
+    expect(recovered).toBe("lots of new work");
+    expect(fs.read(DOC)).toBe("original");
+  });
+});
+
+describe("history slots roll on save", () => {
+  it("archives the old file content into slot 2", () => {
+    const fs = new MemFS();
+    fs.write(DOC, "v1");
+    mirror(fs, "v1-draft");
+
+    save(fs, "v2");
+
+    // 槽位 1 = 当前内容，槽位 2 = 被覆盖前的磁盘内容
+    expect(fs.read(pathOf(1))).toBe("v2");
+    expect(fs.read(pathOf(2))).toBe("v1");
     expect(fs.read(DOC)).toBe("v2");
   });
 
-  it("keeps multiple layers bounded when configured", () => {
+  it("keeps exactly three files no matter how many times you save", () => {
     const fs = new MemFS();
     fs.write(DOC, "v0");
 
-    for (let i = 1; i <= 10; i++) {
-      save(fs, `v${i}`, { rotate: true, maxSlots: 3 });
+    for (let i = 1; i <= 30; i++) {
+      save(fs, `v${i}`);
     }
 
-    const dir = resolveHistoryDir(DOC, DEFAULT_AUTO_SAVE);
-    const snapshots = listSnapshots(fs.list(dir), DOC);
-
+    const snapshots = listSnapshots(fs.list(DIR), DOC);
+    expect(snapshots).toHaveLength(3);
     expect(snapshots.map((s) => s.name)).toEqual([
       "note.bak.md",
       "note.bak-2.md",
       "note.bak-3.md",
     ]);
-    // 三个槽位依次是最近三版
-    expect(fs.read(`${dir}/note.bak.md`)).toBe("v9");
-    expect(fs.read(`${dir}/note.bak-2.md`)).toBe("v8");
-    expect(fs.read(`${dir}/note.bak-3.md`)).toBe("v7");
-    expect(fs.read(DOC)).toBe("v10");
+
+    // 镜像是最新，历史依次是最近两版
+    expect(fs.read(pathOf(1))).toBe("v30");
+    expect(fs.read(pathOf(2))).toBe("v29");
+    expect(fs.read(pathOf(3))).toBe("v28");
   });
 
-  it("cleans up legacy timestamp copies left by the old scheme", () => {
+  it("keeps mirror and history distinct", () => {
+    const fs = new MemFS();
+    fs.write(DOC, "v1");
+    save(fs, "v2");
+    // 之后只改不存
+    mirror(fs, "v2-plus-unsaved");
+
+    // 镜像反映未保存内容，历史仍是已保存版本
+    expect(fs.read(pathOf(1))).toBe("v2-plus-unsaved");
+    expect(fs.read(pathOf(2))).toBe("v1");
+    expect(fs.read(DOC)).toBe("v2");
+  });
+
+  it("supports a single-slot configuration (mirror only)", () => {
     const fs = new MemFS();
     fs.write(DOC, "v0");
-    const dir = resolveHistoryDir(DOC, DEFAULT_AUTO_SAVE);
-    fs.write(`${dir}/note.20261030-112233.md`, "old-a");
-    fs.write(`${dir}/note.20261031-090000.md`, "old-b");
 
-    save(fs, "v1", { rotate: true, maxSlots: 1 });
+    save(fs, "v1", 1);
+    save(fs, "v2", 1);
 
-    const names = fs.list(dir);
-    expect(names).toContain("note.bak.md");
-    expect(names.filter((n) => isLegacyTimestampCopy(n, DOC))).toEqual([]);
-  });
-
-  it("mixes auto and manual saves without growing the file count", () => {
-    const fs = new MemFS();
-    fs.write(DOC, "v0");
-
-    let n = 0;
-    for (let round = 0; round < 10; round++) {
-      // 每轮：3 次自动保存 + 1 次手动保存
-      for (let i = 0; i < 3; i++) save(fs, `v${++n}`, { rotate: false, maxSlots: 1 });
-      save(fs, `v${++n}`, { rotate: true, maxSlots: 1 });
-    }
-
-    const dir = resolveHistoryDir(DOC, DEFAULT_AUTO_SAVE);
-    expect(fs.list(dir)).toHaveLength(1);
-    expect(listSnapshots(fs.list(dir), DOC)).toHaveLength(1);
-  });
-
-  it("does nothing before the document has ever been written", () => {
-    const fs = new MemFS();
-    // 主文件不存在 → 没有"上一版"可备份
-    save(fs, "v1", { rotate: true, maxSlots: 1 });
-    const dir = resolveHistoryDir(DOC, DEFAULT_AUTO_SAVE);
-    expect(fs.list(dir)).toEqual([]);
-  });
-
-  it("expired list never includes the slot being written", () => {
-    const snapshots = listSnapshots(["note.bak.md", "note.bak-2.md"], DOC);
-    const plan = planSnapshotWrite(snapshots, 1, true);
-    expect(plan.expired).not.toContain("note.bak.md");
-    expect(selectExpiredSnapshots(snapshots, 1)).toEqual(["note.bak-2.md"]);
+    expect(listSnapshots(fs.list(DIR), DOC)).toHaveLength(1);
+    expect(fs.read(pathOf(1))).toBe("v2");
   });
 });
 
-/** 模拟真实文件系统行为，确保上述断言不依赖内存实现细节 */
-describe("snapshot naming is stable across calls", () => {
+describe("legacy cleanup", () => {
+  it("removes timestamp copies left by the old scheme", () => {
+    const fs = new MemFS();
+    fs.write(DOC, "v0");
+    fs.write(`${DIR}/note.20261030-112233.md`, "old-a");
+    fs.write(`${DIR}/note.20261031-090000.md`, "old-b");
+
+    save(fs, "v1");
+
+    expect(fs.list(DIR).filter((n) => isLegacyTimestampCopy(n, DOC))).toEqual([]);
+  });
+
+  it("does not touch unrelated files in the history directory", () => {
+    const fs = new MemFS();
+    fs.write(DOC, "v0");
+    fs.write(`${DIR}/other.md`, "someone else");
+
+    save(fs, "v1");
+
+    expect(fs.read(`${DIR}/other.md`)).toBe("someone else");
+  });
+});
+
+describe("naming stability", () => {
   it("returns the same path for the same slot every time", () => {
-    const a = snapshotFileName(DOC, 1);
-    const b = snapshotFileName(DOC, 1);
-    expect(a).toBe(b);
-    expect(a).toBe("/docs/note.bak.md");
+    expect(snapshotFileName(DOC, 1)).toBe(snapshotFileName(DOC, 1));
+    expect(snapshotFileName(DOC, 1)).toBe("/docs/note.bak.md");
+    expect(snapshotFileName(DOC, 2)).toBe("/docs/note.bak-2.md");
+    expect(snapshotFileName(DOC, 3)).toBe("/docs/note.bak-3.md");
   });
 });
