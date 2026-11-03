@@ -118,10 +118,12 @@ import { renderMermaidForExport } from "./export/mermaid-render";
 import {
   DEFAULT_AUTO_SAVE,
   autoSaveIntervalMs,
-  historyFileName,
+  isLegacyTimestampCopy,
+  listSnapshots,
   normalizeAutoSaveSettings,
+  planSnapshotWrite,
   resolveHistoryDir,
-  selectExpiredHistory,
+  snapshotFileName,
   shouldPromptOnClose,
   shouldSaveOnChange,
   type AutoSaveSettings,
@@ -1190,6 +1192,8 @@ function handleFileOpened(file: DesktopFile) {
   const current = documents.find((d) => d.id === activeDocId)!;
   syncTitle(current.title);
   editor.setMarkdown(current.content, { resetHistory: true });
+  // 重新打开同一路径时也要重新取基线快照，否则会沿用上一次会话的旧基线
+  resetSessionBaseline(current.id);
   if (isSourceMode) {
     sourceEditor.value = current.content;
   }
@@ -3104,37 +3108,37 @@ function openSettingsModal() {
               min="1" max="120" step="1" value="${currentSettings.autoSave.intervalMinutes}" aria-label="自动保存间隔" />
           </div>
 
-          <div class="ty-settings-section-title" style="margin-top: 18px;">历史副本</div>
+          <div class="ty-settings-section-title" style="margin-top: 18px;">保存与回退</div>
           <div class="ty-settings-row">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">保存历史副本</span>
-              <span class="ty-settings-desc">保存前留一份带时间戳的备份，便于回溯</span>
+              <span class="ty-settings-label">保存前留一份快照</span>
+              <span class="ty-settings-desc">覆盖原文件前备份上一版，随时可回退；快照固定在 .markweave-history 里覆盖更新，不会越存越多</span>
             </div>
             <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} aria-label="保存历史副本" />
+              <input type="checkbox" id="setting-toggle-history" ${currentSettings.autoSave.historyEnabled ? "checked" : ""} aria-label="保存前留一份快照" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
 
           <div class="ty-settings-row">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">副本存放目录</span>
+              <span class="ty-settings-label">快照存放目录</span>
               <span class="ty-settings-desc">留空则存到文档同级的 .markweave-history 目录</span>
             </div>
             <div class="ty-settings-inline">
               <input class="ty-settings-input ty-settings-input-wide" type="text" id="setting-input-history-dir"
-                placeholder="默认：文档同级 .markweave-history" value="${currentSettings.autoSave.historyDir}" aria-label="副本存放目录" />
+                placeholder="默认：文档同级 .markweave-history" value="${currentSettings.autoSave.historyDir}" aria-label="快照存放目录" />
               <button class="ty-settings-action" id="setting-btn-history-dir">选择…</button>
             </div>
           </div>
 
           <div class="ty-settings-row">
             <div class="ty-settings-info">
-              <span class="ty-settings-label">保留副本数量</span>
-              <span class="ty-settings-desc">超出数量后自动删除最旧的副本</span>
+              <span class="ty-settings-label">保留快照层数</span>
+              <span class="ty-settings-desc">1 表示只保留「上一次保存前」的版本；调大可回溯更早的内容，文件总数始终不超过这个值</span>
             </div>
             <input class="ty-settings-input" type="number" id="setting-input-history-max"
-              min="1" max="200" step="1" value="${currentSettings.autoSave.maxHistory}" aria-label="保留副本数量" />
+              min="1" max="20" step="1" value="${currentSettings.autoSave.maxHistory}" aria-label="保留快照层数" />
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">导出</div>
@@ -3611,7 +3615,7 @@ function openSettingsModal() {
     const autoSaveMode = ((modalOverlay.querySelector("#setting-select-autosave-mode") as HTMLSelectElement)?.value as AutoSaveSettings["mode"]) || "off";
     const autoSaveInterval = parseInt((modalOverlay.querySelector("#setting-input-autosave-interval") as HTMLInputElement)?.value || "5", 10) || 5;
     const historyDir = (modalOverlay.querySelector("#setting-input-history-dir") as HTMLInputElement)?.value || "";
-    const historyMax = parseInt((modalOverlay.querySelector("#setting-input-history-max") as HTMLInputElement)?.value || "20", 10) || 20;
+    const historyMax = parseInt((modalOverlay.querySelector("#setting-input-history-max") as HTMLInputElement)?.value || "1", 10) || 1;
     const historyEnabled = (modalOverlay.querySelector("#setting-toggle-history") as HTMLInputElement)?.checked ?? true;
 
     const newSettings: MarkWeaveSettings = {
@@ -3864,29 +3868,87 @@ async function writeDocumentToDisk(docId: string): Promise<boolean> {
 }
 
 /**
- * 历史副本：在覆盖原文件前先留一份带时间戳的拷贝。
+ * 本次会话里已经确认过快照存在的文档（docId → 文件路径）。
+ *
+ * 自动保存每 800ms 就可能触发一次。如果每次都检查/轮转快照，
+ * 既浪费一次目录列举，又会把 `note.bak.md` 冲成"上一毫秒"这种没用的状态。
+ * 因此自动保存只在本次打开后检查一次：没有快照就补一份基线，
+ * 已经有了就完全不动它。只有手动保存（Ctrl+S）才会轮转槽位。
+ */
+const sessionBaseline = new Map<string, string>();
+
+/** 文档换了路径或重新打开时，下一次保存要重新确认快照 */
+function resetSessionBaseline(docId: string): void {
+  sessionBaseline.delete(docId);
+}
+
+/**
+ * 覆盖写盘前留一份快照，保证用户能回退到之前的内容。
+ *
+ * 与旧实现的关键区别：快照占用**固定槽位**（`note.bak.md`、`note.bak-2.md`），
+ * 反复保存只覆盖同名文件，不会每次保存都多出一个带时间戳的新版本。
+ * 备份的是磁盘上的**旧内容**（而不是即将写入的新内容），否则备份毫无意义。
+ *
+ * @param rotate true（手动保存）把已有槽位整体后移；
+ *               false（自动保存）仅在槽位 1 不存在时补一份基线，绝不覆盖。
+ *
  * 失败不影响主保存流程。
  */
-async function writeHistoryCopy(docId: string): Promise<void> {
+async function writeHistoryCopy(docId: string, rotate = true): Promise<void> {
   const api = getDesktopAPI();
   const doc = documents.find((d) => d.id === docId);
   if (!api?.writeHistory || !doc?.filePath || !autoSaveSettings.historyEnabled) return;
 
-  const dir = resolveHistoryDir(doc.filePath, autoSaveSettings);
-  const target = historyFileName(doc.filePath, new Date());
-  const content = prepareContentForDisk(doc.content);
+  // 自动保存：本次会话已确认过快照就跳过，避免每 800ms 都去列目录
+  if (!rotate && sessionBaseline.get(docId) === doc.filePath) return;
 
-  const written = await api.writeHistory({ path: target, content });
-  if (!written || !api.listHistory || !api.removeHistory) return;
+  const maxSlots = Math.max(1, Math.floor(autoSaveSettings.maxHistory));
+  const dir = resolveHistoryDir(doc.filePath, autoSaveSettings);
+
+  const pathFor = (slot: number): string => {
+    const name = snapshotFileName(doc.filePath!, slot).replace(/\\/g, "/").split("/").pop()!;
+    return joinPath(dir, name);
+  };
 
   try {
-    const files = await api.listHistory(dir);
-    const expired = selectExpiredHistory(files, autoSaveSettings.maxHistory);
-    if (expired.length > 0) {
-      await api.removeHistory({ dir, names: expired });
+    const files = api.listHistory ? await api.listHistory(dir) : [];
+    const snapshots = listSnapshots(files, doc.filePath);
+    const plan = planSnapshotWrite(snapshots, maxSlots, rotate);
+
+    if (!plan.write) {
+      sessionBaseline.set(docId, doc.filePath);
+      return;
+    }
+
+    // 文件还没落过盘时没有"上一版"，跳过
+    const previous = await api.readFile?.(doc.filePath);
+    if (!previous) return;
+
+    // 先搬移旧槽位（已按从深到浅排序，不会互相覆盖）
+    for (const move of plan.moves) {
+      const from = snapshots.find((s) => s.slot === move.from);
+      if (!from) continue;
+      const src = await api.readFile?.(joinPath(dir, from.name));
+      if (!src) continue;
+      await api.writeHistory({ path: pathFor(move.to), content: src.content });
+    }
+
+    // 目标槽位写入覆盖前的旧内容
+    await api.writeHistory({ path: pathFor(plan.targetSlot), content: previous.content });
+    sessionBaseline.set(docId, doc.filePath);
+
+    // 清掉超出层数与历史遗留的时间戳副本
+    if (api.removeHistory) {
+      const expired = [
+        ...plan.expired,
+        ...files.filter((name) => isLegacyTimestampCopy(name, doc.filePath!)),
+      ];
+      if (expired.length > 0) {
+        await api.removeHistory({ dir, names: expired });
+      }
     }
   } catch (err) {
-    console.warn("清理历史副本失败", err);
+    console.warn("写入保存快照失败", err);
   }
 }
 
@@ -3898,7 +3960,9 @@ async function runAutoSave(reason: "change" | "interval" | "manual"): Promise<vo
   if (!doc?.dirty || !doc.filePath) return;
 
   showSaveStatus(reason === "interval" ? "自动保存中…" : "保存中…", "saving");
-  await writeHistoryCopy(doc.id);
+  // 自动保存直接覆盖原文件；只在本次会话第一次写入时留一份基线快照，
+  // 避免每 800ms 轮转一次把快照挤成"上一毫秒"这种没用的状态。
+  await writeHistoryCopy(doc.id, false);
   const ok = await writeDocumentToDisk(doc.id);
   showSaveStatus(
     ok ? (reason === "interval" ? "已自动保存" : "已保存") : "保存失败",
