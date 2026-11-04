@@ -209,6 +209,24 @@ if (wantDir || onlyDir) {
   const dirTarget = path.join(versionDir, `MarkWeave-${version}-win-x64`);
   log(`复制目录版 → ${path.relative(root, dirTarget)}`);
 
+  /**
+   * 保护用户数据。
+   *
+   * 旧版本把 MarkWeaveData 放在 exe 旁边，而这里会整个删掉产物目录重建。
+   * 新版本已改用系统数据目录，但老用户可能还有数据留在里面 ——
+   * 先备份出来，重建完再放回去，绝不能因为重新打包把配置和 API Key 弄丢。
+   */
+  const dataDir = path.join(dirTarget, "MarkWeaveData");
+  const dataBackup = path.join(stagingDir, "userdata-backup");
+  let hasBackup = false;
+
+  if (fs.existsSync(dataDir)) {
+    log("检测到 MarkWeaveData，先备份再重建目录");
+    fs.rmSync(dataBackup, { recursive: true, force: true });
+    copyDir(dataDir, dataBackup);
+    hasBackup = true;
+  }
+
   // Windows 上若旧产物仍在运行（或被杀软占用），rmSync 会抛 EPERM。
   // 静默失败会让后续 in-place 复制产出半新半旧的目录，因此这里显式报错并给指引。
   try {
@@ -227,6 +245,13 @@ if (wantDir || onlyDir) {
   }
 
   copyDir(unpacked, dirTarget);
+
+  // 把备份的数据放回去（仅当产物里还没有时）
+  if (hasBackup) {
+    log("恢复 MarkWeaveData");
+    copyDir(dataBackup, dataDir);
+    fs.rmSync(dataBackup, { recursive: true, force: true });
+  }
 
   const exe = path.join(dirTarget, "MarkWeave.exe");
   buildInfo.artifacts.push({

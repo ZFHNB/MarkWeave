@@ -143,6 +143,10 @@ import {
   shouldSaveOnChange,
   type AutoSaveSettings,
 } from "./workspace/autosave";
+import {
+  decideParseMode,
+  needsUploadConsent,
+} from "./platform/mineru-mode";
 import { enhanceSettingsDescriptions } from "./ui/settings-tooltip";
 import {
   computeBlockStartLines,
@@ -1450,53 +1454,56 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
   showSaveStatus("正在解析 PDF…", "saving");
 
   try {
-    // ---- 预检 ----
-    let mode = mineru.mode;
+    // ---- 预检：决定用哪种方式解析 ----
+    // 关键：已经配置好的方式直接使用，不再每次都弹窗询问
+    const [localInfo, loadedKey] = await Promise.all([
+      api.mineruDetectLocal?.() ?? Promise.resolve(undefined),
+      api.mineruLoadKey?.() ?? Promise.resolve(undefined),
+    ]);
 
-    if (mode === "local") {
-      const local = await api.mineruDetectLocal?.();
-      if (!local?.available) {
-        const choice = await confirmDialog(
-          `${local?.detail ?? "本地 MinerU 未就绪"}\n\n是否改用云端模式解析？`,
-          { title: "本地环境未就绪", confirmLabel: "改用云端" }
-        );
-        if (!choice) {
-          showSaveStatus("已取消", "idle");
-          return;
-        }
-        mode = "cloud";
-      }
+    const decision = decideParseMode(mineru.mode, {
+      localReady: Boolean(localInfo?.available),
+      cloudReady: Boolean(loadedKey?.present && loadedKey.apiKey),
+      localDetail: localInfo?.detail,
+    });
+
+    if (decision.action !== "proceed" || !decision.mode) {
+      showSaveStatus("PDF 解析未配置", "error");
+      const goSettings = await confirmDialog(decision.message ?? "无法解析 PDF", {
+        title: decision.action === "need-cloud-key" ? "未配置 API Key" : "解析环境未就绪",
+        confirmLabel: "前往设置",
+      });
+      if (goSettings) openSettingsModal();
+      return;
     }
 
-    // ---- 云端：确认隐私与计费 ----
-    if (mode === "cloud") {
-      const loaded = await api.mineruLoadKey?.();
-      if (!loaded?.present || !loaded.apiKey) {
-        const goSettings = await confirmDialog(
-          "云端解析需要先配置 API Key。\n\n是否现在前往设置？",
-          { title: "未配置 API Key", confirmLabel: "前往设置" }
-        );
-        showSaveStatus("未配置 API Key", "error");
-        if (goSettings) openSettingsModal();
+    const mode = decision.mode;
+
+    if (mode !== mineru.mode) {
+      // 静默切换：用户配好的是另一种方式，直接用，不打扰
+      toast(
+        mode === "cloud"
+          ? "本地环境未就绪，已改用云端解析"
+          : "云端未配置，已改用本地解析",
+        "info"
+      );
+    }
+
+    // ---- 云端：隐私确认（每次首轮上传前问一次）----
+    if (needsUploadConsent(mode, mineru.cloudUploadConfirmed)) {
+      const ok = await confirmDialog(
+        "云端解析会把该 PDF 上传至 MinerU 服务进行识别。\n\n" +
+          `文件：${extractFileName(pdfPath)}\n\n` +
+          "解析结果通过官方 API 返回；请确认文件不包含敏感信息。是否继续？",
+        { title: "上传到云端", confirmLabel: "继续上传" }
+      );
+      if (!ok) {
+        showSaveStatus("已取消", "idle");
         return;
       }
-
-      // 首次上传前提示文件将发送到云端
-      if (!mineru.cloudUploadConfirmed) {
-        const ok = await confirmDialog(
-          "云端解析会把该 PDF 上传至 MinerU 服务进行识别。\n\n" +
-            `文件：${extractFileName(pdfPath)}\n\n` +
-            "解析结果通过官方 API 返回；请确认文件不包含敏感信息。是否继续？",
-          { title: "上传到云端", confirmLabel: "继续上传" }
-        );
-        if (!ok) {
-          showSaveStatus("已取消", "idle");
-          return;
-        }
-        const next = loadSettings();
-        next.mineru.cloudUploadConfirmed = true;
-        saveSettings(next);
-      }
+      const next = loadSettings();
+      next.mineru.cloudUploadConfirmed = true;
+      saveSettings(next);
     }
 
     // ---- 解析 ----

@@ -7,19 +7,85 @@ const os = require("os");
 const { execFile } = require("child_process");
 const { buildMenuTemplate } = require("./menu.cjs");
 
-// Configure portable userData directory before app is ready
-if (app.isPackaged) {
-  const portableRoot = process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath("exe"));
-  const dataDir = path.join(portableRoot, "MarkWeaveData");
-  if (!fs.existsSync(dataDir)) {
+/**
+ * 数据目录策略。
+ *
+ * - 便携版（有 PORTABLE_EXECUTABLE_DIR）：数据跟着 exe 走，
+ *   方便整个文件夹拷到 U 盘继续用。
+ * - 目录版：用系统标准位置（Windows 是 %APPDATA%/MarkWeave）。
+ *   早期版本把数据放在 exe 旁边，结果每次重新打包（整个产物目录被删掉重建）
+ *   都会连配置和 API Key 一起丢掉。改到系统目录后，重新打包、升级版本都不受影响。
+ *
+ * 旧布局的数据会在首次启动时自动迁移过来。
+ */
+function configureUserData() {
+  if (!app.isPackaged) return;
+
+  const portableRoot = process.env.PORTABLE_EXECUTABLE_DIR;
+  if (portableRoot) {
+    const dataDir = path.join(portableRoot, "MarkWeaveData");
     try {
       fs.mkdirSync(dataDir, { recursive: true });
     } catch (err) {
       console.error("Failed to create portable data directory:", err);
     }
+    app.setPath("userData", dataDir);
+    return;
   }
-  app.setPath("userData", dataDir);
+
+  // 目录版：保持系统默认位置，不覆盖 app.setPath("userData")
+
+  // 兼容旧布局：exe 旁边如果还有 MarkWeaveData，把内容搬过来
+  const legacyDir = path.join(path.dirname(app.getPath("exe")), "MarkWeaveData");
+  const currentDir = app.getPath("userData");
+  try {
+    migrateLegacyData(legacyDir, currentDir);
+  } catch (err) {
+    console.error("Migrating legacy data failed:", err);
+  }
 }
+
+/**
+ * 把旧数据目录里的文件复制到新位置。
+ *
+ * 只补缺、不覆盖：新位置已有的文件优先（说明用户已经在用新位置了）。
+ * 迁移完不删除旧目录，万一有遗漏用户还能自己找回来。
+ */
+function migrateLegacyData(legacyDir, targetDir) {
+  if (!fs.existsSync(legacyDir)) return;
+  if (path.resolve(legacyDir) === path.resolve(targetDir)) return;
+
+  const entries = fs.readdirSync(legacyDir, { withFileTypes: true });
+  if (entries.length === 0) return;
+
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  let copied = 0;
+  const copyEntry = (from, to) => {
+    const stat = fs.statSync(from);
+    if (stat.isDirectory()) {
+      fs.mkdirSync(to, { recursive: true });
+      for (const child of fs.readdirSync(from)) {
+        copyEntry(path.join(from, child), path.join(to, child));
+      }
+      return;
+    }
+    // 新位置已有同名的就不动
+    if (fs.existsSync(to)) return;
+    fs.copyFileSync(from, to);
+    copied += 1;
+  };
+
+  for (const entry of entries) {
+    copyEntry(path.join(legacyDir, entry.name), path.join(targetDir, entry.name));
+  }
+
+  if (copied > 0) {
+    console.log(`Migrated ${copied} legacy data file(s) to ${targetDir}`);
+  }
+}
+
+configureUserData();
 
 // Register custom privileged scheme
 protocol.registerSchemesAsPrivileged([
