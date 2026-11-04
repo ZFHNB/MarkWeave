@@ -9,8 +9,61 @@ const __dirname = path.dirname(__filename);
 
 const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const artifactsDir = path.resolve(__dirname, "../test-artifacts");
+// 端口可覆盖：Windows 会把 5108–5207 整段保留给系统，5173 在这种机器上
+// 直接 EACCES，需要用 MARKWEAVE_E2E_PORT=3000 之类的方式换端口。
+const e2ePort = process.env.MARKWEAVE_E2E_PORT || "5173";
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}/`;
 // 每轮使用全新 profile，避免上一轮持久化的 localStorage/工作区影响文档数量等断言。
 const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "markweave-e2e-"));
+
+/**
+ * 展开「文件」菜单并点击匹配的菜单项。
+ *
+ * 0.2.0 起工具栏精简，导出等操作都收进了文件菜单，测试不能再按按钮 id 点。
+ * 二级菜单（如「导出」）点开后会以浮层形式出现在原行右侧，所以这里可以
+ * 连续两次查找。
+ */
+async function clickMenuItem(page, label, nextLabelMatch) {
+  await page.click("#btn-file-menu");
+  await new Promise((r) => setTimeout(r, 250));
+
+  const labelJson = JSON.stringify(label);
+  const firstClicked = await page.evaluate(`
+    (() => {
+      const row = Array.from(document.querySelectorAll(".ty-menu-item"))
+        .find((btn) => (btn.textContent || "").trim() === ${labelJson});
+      if (!row) return false;
+      row.click();
+      return true;
+    })()
+  `);
+  if (!firstClicked) throw new Error(`文件菜单里找不到「${label}」`);
+  if (!nextLabelMatch) return;
+
+  await new Promise((r) => setTimeout(r, 250));
+  // nextLabelMatch 是谓词：导出项的文字里还带着快捷键，只能按片段匹配
+  const secondClicked = await page.evaluate(`
+    (() => {
+      const match = ${nextLabelMatch.toString()};
+      const row = Array.from(document.querySelectorAll(".ty-menu-item"))
+        .find((btn) => match(btn.textContent || ""));
+      if (!row) return false;
+      row.click();
+      return true;
+    })()
+  `);
+  if (!secondClicked) throw new Error("二级菜单里找不到匹配项");
+}
+
+/** 点击统一对话框里文案匹配的按钮（取消 / 确定等） */
+async function clickDialogButton(page, label) {
+  await page.evaluate((text) => {
+    const btn = Array.from(document.querySelectorAll(".ty-modal-footer .ty-btn")).find(
+      (el) => (el.textContent || "").trim() === text
+    );
+    if (btn) btn.click();
+  }, label);
+}
 
 if (!fs.existsSync(artifactsDir)) {
   fs.mkdirSync(artifactsDir, { recursive: true });
@@ -58,7 +111,7 @@ async function runTests() {
   try {
     // 1. 基础页面加载
     console.log("\n--- 测试 1: 页面加载与编辑器挂载 ---");
-    await page.goto("http://localhost:5173/", { waitUntil: "networkidle0" });
+    await page.goto(e2eBaseUrl, { waitUntil: "networkidle0" });
     const hasProseMirror = await page.$(".ProseMirror");
     assert("ProseMirror 编辑器成功挂载", !!hasProseMirror);
 
@@ -704,8 +757,8 @@ async function runTests() {
     await page.screenshot({ path: path.join(artifactsDir, "17-mermaid-dynamic-port-left-right.png") });
 
     console.log("\n--- 测试 24: 导出 Markdown 识别专有图表并展示双重兼容模态框 ---");
-    // 点击顶栏「导出 Markdown」按钮
-    await page.click("#btn-save-md");
+    // 工具栏在 0.2.0 已精简，导出入口统一收在「文件 → 导出」二级菜单
+    await clickMenuItem(page, "导出", (label) => label.includes("Markdown (.md)"));
     await new Promise((r) => setTimeout(r, 400));
 
     const isModalVisible = await page.evaluate(() => {
@@ -735,8 +788,8 @@ async function runTests() {
 
     await page.screenshot({ path: path.join(artifactsDir, "18-markdown-export-compatibility-dialog.png") });
 
-    // 关闭模态框
-    await page.click("#btn-cancel-export");
+    // 关闭模态框：统一对话框的取消按钮没有固定 id，按文案点击
+    await clickDialogButton(page, "取消");
     await new Promise((r) => setTimeout(r, 300));
     const isModalClosed = await page.evaluate(() => document.querySelector(".ty-modal-overlay") === null);
     assert("成功响应取消并关闭模态框", isModalClosed);
@@ -746,11 +799,11 @@ async function runTests() {
     // ==========================================
     console.log("\n--- 测试 25: 侧边栏底部设置按钮与偏好设置模态框 ---");
     // 检测侧边栏底部设置按钮存在
-    const hasSettingsBtn = await page.$eval("#btn-open-settings", (el) => !!el);
+    const hasSettingsBtn = await page.$eval("#btn-open-settings-quick", (el) => !!el);
     assert("侧边栏左下角成功挂载「偏好设置」入口按钮", hasSettingsBtn);
 
     // 点击打开偏好设置模态框
-    await page.click("#btn-open-settings");
+    await page.click("#btn-open-settings-quick");
     await new Promise((r) => setTimeout(r, 400));
 
     const isSettingsModalOpen = await page.evaluate(() => {
@@ -928,7 +981,7 @@ async function runTests() {
     // ==========================================
     console.log("\n--- 测试 29: 偏好设置多分类 Tab 导航与排版参数即时生效 ---");
     // 打开偏好设置
-    await page.click("#btn-open-settings");
+    await page.click("#btn-open-settings-quick");
     await new Promise((r) => setTimeout(r, 400));
 
     const hasMultiTabs = await page.evaluate(() => {

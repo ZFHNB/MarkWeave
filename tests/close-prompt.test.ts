@@ -39,10 +39,11 @@ describe("close prompt decision", () => {
     expect(needsPrompt([{ dirty: true, filePath: "/d/a.md", content: "x" }], "off")).toBe(true);
   });
 
-  it("ignores auto-save modes that already persist content", () => {
+  it("does not prompt only when every change hits the disk immediately", () => {
     const docs = [{ dirty: true, filePath: "/d/a.md", content: "x" }];
     expect(needsPrompt(docs, "onChange")).toBe(false);
-    expect(needsPrompt(docs, "interval")).toBe(false);
+    // 间隔保存可能还没轮到定时器，关窗仍会丢内容
+    expect(needsPrompt(docs, "interval")).toBe(true);
   });
 
   it("prompts if any document needs saving", () => {

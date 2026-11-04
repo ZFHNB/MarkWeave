@@ -264,9 +264,10 @@ describe("close prompt", () => {
     expect(shouldPromptOnClose(false, "onChange")).toBe(false);
   });
 
-  it("prompts only when auto save is off", () => {
+  it("prompts unless every change is written immediately", () => {
     expect(shouldPromptOnClose(true, "off")).toBe(true);
     expect(shouldPromptOnClose(true, "onChange")).toBe(false);
-    expect(shouldPromptOnClose(true, "interval")).toBe(false);
+    // 间隔保存：下一次定时器触发前内容仍在内存里，关窗会丢
+    expect(shouldPromptOnClose(true, "interval")).toBe(true);
   });
 });

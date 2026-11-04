@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/Electron-44-47848F?style=flat-square&logo=electron" alt="Electron" />
   <img src="https://img.shields.io/badge/Mermaid-12-green?style=flat-square" alt="Mermaid" />
   <img src="https://img.shields.io/badge/KaTeX-0.19-red?style=flat-square" alt="KaTeX" />
-  <img src="https://img.shields.io/badge/Tests-513%20Passed-brightgreen?style=flat-square" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-696%20Passed-brightgreen?style=flat-square" alt="Tests" />
 </p>
 
 ---
@@ -119,7 +119,7 @@ papersize: Letter       # 覆盖默认纸张
 | 图表 | Mermaid 12（按需加载） |
 | 桌面壳 | Electron 44（contextIsolation + sandbox） |
 | 构建 | Vite 8 + TypeScript 6 |
-| 测试 | Vitest（513 项）+ Puppeteer E2E（89 项） |
+| 测试 | Vitest（696 项）+ Puppeteer E2E（89 项） |
 
 ---
 
@@ -136,7 +136,7 @@ papersize: Letter       # 覆盖默认纸张
 git clone https://github.com/ZFHNB/MarkWeave.git
 cd MarkWeave
 npm install
-npm run dev          # http://localhost:5174
+npm run dev          # http://localhost:5173
 ```
 
 ### 常用命令
@@ -144,9 +144,14 @@ npm run dev          # http://localhost:5174
 ```bash
 npm run build        # 构建（含类型检查）
 npm test             # 单元测试
+npm run dev          # 先起开发服务器（E2E 依赖 5173 端口）
 npm run test:e2e     # 端到端测试
 npm run electron:start  # 构建并启动桌面版
 ```
+
+> Windows 有时会把 5173 等端口划进系统保留段（`netsh interface ipv4 show
+> excludedportrange protocol=tcp` 可查），此时用
+> `MARKWEAVE_E2E_PORT=3000 npm run dev` 换端口，并同样带上该环境变量跑 E2E。
 
 ### 打包
 
@@ -222,7 +227,7 @@ docs/                       # 路线图与 QA 清单
 
 ```bash
 npm run build    # 类型检查 + 构建
-npm test         # 513 项单元测试
+npm test         # 696 项单元测试
 npm run test:e2e # 89 项端到端测试
 ```
 

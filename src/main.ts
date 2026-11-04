@@ -1,5 +1,8 @@
 import "./styles/typora-theme.css";
+import type { Node as PMNode } from "prosemirror-model";
 import { MarkWeaveEditor } from "./editor";
+import { schema } from "./editor/schema";
+import { SourceSearchPanel } from "./editor/search/source-search";
 import {
   alertDialog,
   confirmDialog,
@@ -31,11 +34,14 @@ import {
 } from "./workspace/store";
 import { applyDocumentSwitch } from "./workspace/session";
 import { getDesktopAPI } from "./platform/desktop";
+import { pickLocalImage } from "./editor/plugins/images";
 import {
   applyOpenedFile,
   extractFileName,
+  findOpenDocumentByPath,
   markDocumentSaved,
   suggestedSaveName,
+  wouldLoseEdits,
   type DesktopFile,
 } from "./platform/documents";
 import { resolveTheme, type ThemeSetting } from "./platform/theme";
@@ -64,7 +70,9 @@ import {
   trashPath,
 } from "./workspace/file-ops-desktop";
 import {
+  absolutizeImagePaths,
   convertLineEnding,
+  dirname,
   ensureFinalNewline,
   isValidFileName,
   joinPath,
@@ -76,6 +84,8 @@ import {
   createTabState,
   openTab,
   closeTab,
+  cycleTab,
+  updateTabTitle,
   reopenClosedTab,
   type TabState,
 } from "./workspace/tabs";
@@ -91,6 +101,7 @@ import { toStandaloneHtml } from "./export/html-export";
 import { PANDOC_FORMATS, getFormat } from "./export/pandoc";
 import {
   DEFAULT_SYNTAX_OPTIONS,
+  markdownToDoc,
   setMarkdownSyntaxOptions,
   type MarkdownSyntaxOptions,
 } from "./editor/serializer/markdown";
@@ -548,6 +559,10 @@ const editor = new MarkWeaveEditor({
   isAutoPairEnabled: () => loadSettings().autoPair,
   isSmartPunctuationEnabled: () => loadSettings().smartPunctuation,
   getIndentSize: () => loadSettings().indentSize,
+  // 图片来源解析：相对路径按当前文档所在目录展开（桌面版才能显示本地文件）
+  getDocumentPath: () => documents.find((d) => d.id === activeDocId)?.filePath ?? null,
+  isDesktop: () => Boolean(getDesktopAPI()),
+  persistImage: (file) => persistImageForDocument(file),
   onSelectionChange: (cursorPos) => {
     syncActiveOutline(cursorPos);
     updateSelectionStats();
@@ -561,6 +576,9 @@ const editor = new MarkWeaveEditor({
         doc.dirty = true;
         doc.updatedAt = Date.now();
         syncTitle(doc.title);
+        // 标签页上的「未保存」圆点依赖 tabState，必须一起刷新
+        tabState = updateTabTitle(tabState, doc.id, doc.title, true);
+        renderTabs();
         scheduleSave();
         scheduleAutoSaveOnChange();
         // 草稿镜像与自动保存开关无关：改了就要留一份，防止误操作丢稿
@@ -599,6 +617,8 @@ sourceEditor.addEventListener("input", () => {
       doc.dirty = true;
       doc.updatedAt = Date.now();
       syncTitle(doc.title);
+      tabState = updateTabTitle(tabState, doc.id, doc.title, true);
+      renderTabs();
       scheduleSave();
       scheduleAutoSaveOnChange();
       scheduleDraftMirror(doc.id);
@@ -693,6 +713,8 @@ function syncTabsFromDocuments(): void {
 function renderTabs(): void {
   if (tabState.tabs.length === 0) {
     tabStrip.style.display = "none";
+    // 清空 DOM，否则隐藏的旧标签仍然留在文档里（可被查询、可能被误点）
+    tabStrip.innerHTML = "";
     return;
   }
   tabStrip.style.display = "flex";
@@ -745,12 +767,60 @@ function reopenLastTab(): void {
   );
   if (next === tabState) return;
   tabState = next;
+  // 直接带着文档标题重开，否则标签会显示成内部 UUID
+  tabState = updateTabTitle(
+    tabState,
+    tabState.activeTabId ?? "",
+    documents.find((d) => d.id === tabState.activeTabId)?.title ?? "",
+    documents.find((d) => d.id === tabState.activeTabId)?.dirty ?? false
+  );
+  renderTabs();
+  if (tabState.activeTabId) switchDocument(tabState.activeTabId);
+}
+
+/** 关闭当前标签（文档仍留在工作区，Ctrl+Shift+T 可重开） */
+function closeActiveTab(): void {
+  if (!tabState.activeTabId) return;
+  tabState = closeTab(tabState, tabState.activeTabId);
+  renderTabs();
+  if (tabState.activeTabId) {
+    switchDocument(tabState.activeTabId);
+  } else {
+    // 一个标签都不剩时回到第一篇文档，避免编辑器停在已关闭的文档上
+    const fallback = documents.find((d) => d.id === activeDocId) ?? documents[0];
+    if (fallback && fallback.id !== activeDocId) switchDocument(fallback.id);
+  }
+}
+
+/** 在当前标签之间循环（Ctrl+Tab / Ctrl+Shift+Tab） */
+function cycleActiveTab(direction: 1 | -1): void {
+  if (tabState.tabs.length < 2) return;
+  const next = cycleTab(tabState, direction);
+  if (next === tabState) return;
+  tabState = next;
   renderTabs();
   if (tabState.activeTabId) switchDocument(tabState.activeTabId);
 }
 
 document.addEventListener("keydown", (event) => {
-  if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) return;
+  const mod = event.ctrlKey || event.metaKey;
+  if (!mod) return;
+
+  // Ctrl+Tab / Ctrl+Shift+Tab：切换标签
+  if (event.key === "Tab") {
+    event.preventDefault();
+    cycleActiveTab(event.shiftKey ? -1 : 1);
+    return;
+  }
+
+  // Ctrl+W：关闭当前标签（不退出应用）
+  if (!event.shiftKey && event.key.toLowerCase() === "w") {
+    event.preventDefault();
+    closeActiveTab();
+    return;
+  }
+
+  if (!event.shiftKey) return;
   if (event.key.toLowerCase() === "t") {
     event.preventDefault();
     reopenLastTab();
@@ -935,6 +1005,10 @@ function renderFileList() {
       const deletedIndex = documents.findIndex((d) => d.id === doc.id);
       documents = documents.filter((d) => d.id !== doc.id);
 
+      // 文档没了，对应的标签也必须一起移除：
+      // 否则点击残留标签会走到 switchDocument 并抛「document not found」。
+      tabState = closeTab(tabState, doc.id);
+
       if (isDeletingActive) {
         const nextIndex = Math.min(deletedIndex, documents.length - 1);
         const nextDoc = documents[nextIndex];
@@ -946,6 +1020,7 @@ function renderFileList() {
         }
       }
 
+      renderTabs();
       renderFileList();
       scheduleSave();
     });
@@ -970,6 +1045,12 @@ function renderFileList() {
 // 切换文档函数
 function switchDocument(newDocId: string) {
   if (newDocId === activeDocId) return;
+  // 文档可能已被删除（标签页 / 最近文件 / 快捷入口都可能残留旧 id）。
+  // 这里静默忽略并把标签栏拉回真实状态，而不是抛异常打断后续操作。
+  if (!documents.some((d) => d.id === newDocId)) {
+    syncTabsFromDocuments();
+    return;
+  }
 
   const result = applyDocumentSwitch({
     documents,
@@ -1168,7 +1249,7 @@ function handleNewFile() {
 
 btnNewFile.addEventListener("click", handleNewFile);
 
-function handleFileOpened(file: DesktopFile) {
+async function handleFileOpened(file: DesktopFile): Promise<boolean> {
   if (isSourceMode) {
     const doc = documents.find((d) => d.id === activeDocId);
     if (doc && doc.content !== sourceEditor.value) {
@@ -1184,6 +1265,18 @@ function handleFileOpened(file: DesktopFile) {
       doc.dirty = true;
       doc.updatedAt = Date.now();
     }
+  }
+
+  // 重新打开一个已经打开、且有未保存修改的文件时，先用磁盘内容覆盖会静默丢稿。
+  // 拖入、最近文件、快速打开、侧边栏点击都会走到这里，所以拦截放在统一入口。
+  const existing = findOpenDocumentByPath(documents, file.path);
+  if (wouldLoseEdits(existing, file)) {
+    const confirmed = await confirmDialog(
+      `「${existing!.title}」还有未保存的修改。\n\n` +
+        "重新载入磁盘内容会覆盖这些修改（草稿镜像里仍留有备份）。是否继续？",
+      { title: "重新载入文件", confirmLabel: "覆盖并载入" }
+    );
+    if (!confirmed) return false;
   }
 
   const result = applyOpenedFile(documents, file, activeDocId);
@@ -1206,6 +1299,7 @@ function handleFileOpened(file: DesktopFile) {
   if (current.filePath) {
     rememberRecentFile(current.filePath, current.title);
   }
+  return true;
 }
 
 async function handleOpenFile() {
@@ -1220,7 +1314,7 @@ async function handleOpenFile() {
       return;
     }
 
-    handleFileOpened(file);
+    await handleFileOpened(file);
   } else {
     localFileInput.click();
   }
@@ -1276,8 +1370,10 @@ async function openWorkspaceFile(path: string): Promise<void> {
   if (!api?.readFile) return;
   const file = await api.readFile(path);
   if (file) {
+    const opened = await handleFileOpened(file);
+    // 用户在「覆盖未保存修改」的询问里选了取消
+    if (!opened) return;
     activeFilePath = path;
-    handleFileOpened(file);
     renderFileList();
     rememberRecentFile(file.path, extractFileName(file.path));
   }
@@ -1349,6 +1445,12 @@ window.addEventListener("dragleave", (event) => {
 
 window.addEventListener("drop", (event) => {
   if (!dragContainsFiles(event.dataTransfer)) return;
+  // ProseMirror 的图片插件已经处理过这次拖入（插入图片并 preventDefault），
+  // 这里再按"文档拖入"处理会把 .png 报成不支持的文件类型。
+  if (event.defaultPrevented) {
+    hideDropOverlay();
+    return;
+  }
   event.preventDefault();
   hideDropOverlay();
 
@@ -1389,8 +1491,9 @@ async function openDroppedFiles(files: DroppedFileInfo[]): Promise<void> {
       // 桌面版：走标准打开流程
       const file = await api.readFile(info.path);
       if (file) {
+        const didOpen = await handleFileOpened(file);
+        if (!didOpen) continue;
         activeFilePath = info.path;
-        handleFileOpened(file);
         renderFileList();
         rememberRecentFile(file.path, extractFileName(file.path));
 
@@ -1404,7 +1507,7 @@ async function openDroppedFiles(files: DroppedFileInfo[]): Promise<void> {
     // 浏览器版：读取内容后作为内存文档打开
     const dropped = (await fileContentsOf(info.name)) ?? null;
     if (dropped !== null) {
-      handleFileOpened({ path: info.path ?? info.name, content: dropped });
+      await handleFileOpened({ path: info.path ?? info.name, content: dropped });
     }
   }
 }
@@ -1566,8 +1669,8 @@ async function parsePdfWithMineru(pdfPath: string): Promise<void> {
     // ---- 打开结果 ----
     const file = await api.readFile?.(targetPath);
     if (file) {
-      activeFilePath = targetPath;
-      handleFileOpened(file);
+      const didOpen = await handleFileOpened(file);
+      if (didOpen) activeFilePath = targetPath;
       renderFileList();
       rememberRecentFile(file.path, extractFileName(file.path));
     }
@@ -1774,6 +1877,7 @@ async function deleteWorkspaceFile(file: FlatFile): Promise<void> {
   const doc = documents.find((d) => d.filePath === file.path);
   if (doc) {
     documents = documents.filter((d) => d.id !== doc.id);
+    tabState = closeTab(tabState, doc.id);
     if (activeDocId === doc.id && documents.length > 0) {
       activeDocId = documents[0].id;
       syncTitle(documents[0].title);
@@ -1783,6 +1887,7 @@ async function deleteWorkspaceFile(file: FlatFile): Promise<void> {
   if (activeFilePath === file.path) activeFilePath = null;
 
   await refreshWorkspace();
+  renderTabs();
   renderFileList();
   flushSave();
 }
@@ -2021,6 +2126,93 @@ function handleOpenInsertTable() {
   });
 }
 
+/** 源码模式的查找面板：按需创建，输入框与 textarea 一一对应 */
+let sourceSearchPanel: SourceSearchPanel | null = null;
+
+function ensureSourceSearch(): SourceSearchPanel {
+  if (!sourceSearchPanel) {
+    sourceSearchPanel = new SourceSearchPanel(sourceEditor);
+  }
+  return sourceSearchPanel;
+}
+
+/** 图片附件的目录名（与笔记同级） */
+const IMAGE_ATTACHMENT_DIR = "attachments";
+
+/**
+ * 把图片放到文档同级的 attachments/ 下，返回写进 Markdown 的相对路径。
+ *
+ * 只在「文档已保存到磁盘」且桌面版可用时生效；返回 null 时编辑器会退回
+ * data URL 内联，行为与之前一致（至少图片不会丢）。
+ */
+async function persistImageForDocument(file: File): Promise<string | null> {
+  const api = getDesktopAPI();
+  if (!api?.saveImage) return null;
+
+  const doc = documents.find((d) => d.id === activeDocId);
+  if (!doc?.filePath) return null;
+
+  const dataUrl = await readImageAsDataUrl(file);
+  if (!dataUrl) return null;
+
+  const directory = joinPath(dirname(doc.filePath), IMAGE_ATTACHMENT_DIR);
+  const result = await api.saveImage({ directory, dataUrl, name: file.name || "image" });
+  if (!result?.ok || !result.path) {
+    console.warn("保存图片失败，退回内联：", result?.error);
+    return null;
+  }
+
+  // Markdown 里只存相对路径，文档换机器也能用
+  return `${IMAGE_ATTACHMENT_DIR}/${extractFileName(result.path)}`;
+}
+
+/** 插入代码块（菜单 Ctrl+Shift+K，与 Typora 一致） */
+function handleInsertCodeBlock() {
+  if (isSourceMode) toggleSourceMode();
+  editor.insertCodeBlock();
+}
+
+/** 插入公式块（菜单 Ctrl+Shift+M，与 Typora 一致） */
+function handleInsertMathBlock() {
+  if (isSourceMode) toggleSourceMode();
+  editor.insertMathBlock();
+}
+
+/**
+ * 插入图片（菜单 Ctrl+Shift+I，与 Typora 一致）。
+ *
+ * 目前把图片读成 data URL 内联进 Markdown——和拖入 / 粘贴图片的行为一致，
+ * 至少保证这条菜单不是空壳。复制到附件目录见 README 的后续计划。
+ */
+function handleInsertImage() {
+  if (isSourceMode) toggleSourceMode();
+  pickLocalImage((file) => {
+    void (async () => {
+      // 已保存的文档优先落到 attachments/，只有拿不到路径时才内联
+      const persisted = await persistImageForDocument(file);
+      if (persisted) {
+        editor.insertImage(persisted, file.name.replace(/\.[^.]+$/, ""));
+        return;
+      }
+      const dataUrl = await readImageAsDataUrl(file);
+      if (!dataUrl) {
+        toast("无法读取这张图片", "error");
+        return;
+      }
+      editor.insertImage(dataUrl, file.name.replace(/\.[^.]+$/, ""));
+    })();
+  });
+}
+
+function readImageAsDataUrl(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
 
 /** 按偏好处理行尾符与末尾换行后，再进行磁盘写入 */
 function prepareContentForDisk(content: string): string {
@@ -2145,12 +2337,20 @@ window.addEventListener("keydown", (e) => {
   // 查找 / 替换 (Ctrl+F / Ctrl+H)
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
     e.preventDefault();
-    editor.toggleSearch(false);
+    if (isSourceMode) {
+      ensureSourceSearch().open(false);
+    } else {
+      editor.toggleSearch(false);
+    }
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "h") {
     e.preventDefault();
-    editor.openSearch(true);
+    if (isSourceMode) {
+      ensureSourceSearch().open(true);
+    } else {
+      editor.openSearch(true);
+    }
     return;
   }
   // 插入表格快捷键 (Ctrl+Alt+T / Cmd+Alt+T)
@@ -2655,7 +2855,7 @@ function openSettingsModal() {
           <div class="ty-settings-row">
             <div class="ty-settings-info">
               <span class="ty-settings-label">节点拖拽吸附网格</span>
-              <span class="ty-settings-desc">拖拽节点时自动吸附对齐到 10px 网格，连线更规整</span>
+              <span class="ty-settings-desc">拖拽节点时自动吸附对齐到 20px 网格，连线更规整</span>
             </div>
             <label class="ty-settings-toggle">
               <input type="checkbox" id="setting-toggle-grid" ${currentSettings.gridSnap ? "checked" : ""} aria-label="节点拖拽吸附网格" />
@@ -2894,17 +3094,6 @@ function openSettingsModal() {
             </div>
             <label class="ty-settings-toggle">
               <input type="checkbox" id="setting-toggle-spellcheck" ${currentSettings.behavior.spellcheck ? "checked" : ""} aria-label="拼写检查" />
-              <span class="ty-toggle-slider"></span>
-            </label>
-          </div>
-
-          <div class="ty-settings-row">
-            <div class="ty-settings-info">
-              <span class="ty-settings-label">自动链接</span>
-              <span class="ty-settings-desc">输入网址后按空格自动转为可点击链接</span>
-            </div>
-            <label class="ty-settings-toggle">
-              <input type="checkbox" id="setting-toggle-autolink" ${currentSettings.behavior.autoLink ? "checked" : ""} aria-label="自动链接" />
               <span class="ty-toggle-slider"></span>
             </label>
           </div>
@@ -3294,6 +3483,21 @@ function openSettingsModal() {
   // 记录打开前的焦点，关闭后归还，保证键盘用户不会丢失位置
   const previouslyFocused = document.activeElement as HTMLElement | null;
 
+  // 有没有动过设置：Esc / 点遮罩这类"直接丢弃"的关闭方式要提醒一句，
+  // 否则用户改了半天以为已经生效。
+  let settingsDirty = false;
+  const markSettingsDirty = () => {
+    settingsDirty = true;
+  };
+  modalOverlay.addEventListener("input", markSettingsDirty, true);
+  modalOverlay.addEventListener("change", markSettingsDirty, true);
+  modalOverlay.addEventListener("click", (event) => {
+    // 卡片式单选项（增强/兼容模式、导出格式）没有触发 input/change
+    if ((event.target as HTMLElement | null)?.closest(".ty-export-option-card")) {
+      markSettingsDirty();
+    }
+  });
+
   const closeModal = () => {
     tooltipController.destroy();
     modalOverlay.remove();
@@ -3301,11 +3505,26 @@ function openSettingsModal() {
     previouslyFocused?.focus?.();
   };
 
+  /** 有未保存改动时先确认，避免静默丢弃 */
+  const requestClose = async () => {
+    if (!settingsDirty) {
+      closeModal();
+      return;
+    }
+    const discard = await confirmDialog("设置还没有保存，确定要放弃这些修改吗？", {
+      title: "放弃修改",
+      confirmLabel: "放弃",
+      cancelLabel: "继续编辑",
+      danger: true,
+    });
+    if (discard) closeModal();
+  };
+
   /** Esc 关闭 + Tab 焦点循环，避免焦点跑出弹窗 */
   const onDialogKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      closeModal();
+      void requestClose();
       return;
     }
     if (event.key !== "Tab") return;
@@ -3338,7 +3557,9 @@ function openSettingsModal() {
     firstControl?.focus();
   });
 
-  modalOverlay.querySelector("#btn-close-settings-x")?.addEventListener("click", closeModal);
+  modalOverlay.querySelector("#btn-close-settings-x")?.addEventListener("click", () => {
+    void requestClose();
+  });
 
   // 字体选择切换到「自定义」时显示输入框
   const bindCustomFontToggle = (selectId: string, rowId: string) => {
@@ -3596,7 +3817,7 @@ function openSettingsModal() {
   });
   modalOverlay.querySelector("#btn-cancel-settings")?.addEventListener("click", closeModal);
   modalOverlay.addEventListener("click", (e) => {
-    if (e.target === modalOverlay) closeModal();
+    if (e.target === modalOverlay) void requestClose();
   });
 
   modalOverlay.querySelector("#btn-save-settings")?.addEventListener("click", () => {
@@ -3630,7 +3851,8 @@ function openSettingsModal() {
     const lineEnding = ((modalOverlay.querySelector("#setting-select-line-ending") as HTMLSelectElement)?.value as LineEnding) || "lf";
     const finalNewline = (modalOverlay.querySelector("#setting-toggle-finalnewline") as HTMLInputElement)?.checked ?? true;
     const spellcheck = (modalOverlay.querySelector("#setting-toggle-spellcheck") as HTMLInputElement)?.checked ?? false;
-    const autoLink = (modalOverlay.querySelector("#setting-toggle-autolink") as HTMLInputElement)?.checked ?? true;
+    // 「自动链接」只保留 Markdown 语法页里那一个开关，这里沿用旧值避免配置丢失
+    const autoLink = currentSettings.behavior.autoLink;
     const codeWrap = (modalOverlay.querySelector("#setting-toggle-codewrap") as HTMLInputElement)?.checked ?? false;
     const restoreSession = (modalOverlay.querySelector("#setting-toggle-restore") as HTMLInputElement)?.checked ?? true;
     const softBreaksAsHardBreaks = (modalOverlay.querySelector("#setting-toggle-softbreak") as HTMLInputElement)?.checked ?? false;
@@ -3902,9 +4124,20 @@ const draftMirrorAt = new Map<string, number>();
 /** 草稿镜像的定时器，按 docId 分别合并连续输入 */
 const draftMirrorTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/**
+ * 本会话里已经归档过的文档。
+ *
+ * 自动保存（每次修改后 / 按间隔）会反复调用 writeHistoryCopy，
+ * 若每次都轮转历史槽位，槽位 2、3 就会被"上一毫秒"挤满，
+ * 真正需要回退的版本反而被冲掉。因此每个文档每次会话只归档一次：
+ * 之后的自动保存只刷新槽位 1 的镜像。
+ */
+const archivedThisSession = new Set<string>();
+
 /** 文档换了路径或重新打开时，重置镜像节流状态 */
 function resetSessionBaseline(docId: string): void {
   draftMirrorAt.delete(docId);
+  archivedThisSession.delete(docId);
   const timer = draftMirrorTimers.get(docId);
   if (timer) {
     clearTimeout(timer);
@@ -4033,7 +4266,12 @@ async function archiveSnapshot(docId: string): Promise<void> {
 
 /** 写盘成功后：旧实现的名字保留，语义变为「归档 + 刷新镜像」 */
 async function writeHistoryCopy(docId: string): Promise<void> {
-  await archiveSnapshot(docId);
+  // 本次会话已经归档过：只刷新槽位 1（当前内容镜像），不再轮转历史槽位。
+  // 否则自动保存每 800ms 一次就会把历史版本全部挤成"上一毫秒"。
+  if (!archivedThisSession.has(docId)) {
+    await archiveSnapshot(docId);
+    archivedThisSession.add(docId);
+  }
   await mirrorDraft(docId);
 }
 
@@ -4435,7 +4673,7 @@ async function importPdfFromMenu(): Promise<void> {
 
   if (!isPdfFile(file.path)) {
     // 用户选了非 PDF：按普通文档打开，不报错
-    handleFileOpened(file);
+    await handleFileOpened(file);
     return;
   }
   await parsePdfWithMineru(file.path);
@@ -4679,7 +4917,8 @@ getDesktopAPI()?.onCloseRequested?.(() => {
 // Web 版：使用浏览器原生离校提示
 window.addEventListener("beforeunload", (event) => {
   if (!hasUnsavedContent()) return;
-  if (autoSaveSettings.mode !== "off") return;
+  // 与桌面端同一套规则：只有「每次修改后自动保存」才不会有未落盘内容
+  if (autoSaveSettings.mode === "onChange") return;
   event.preventDefault();
   event.returnValue = "";
 });
@@ -4751,6 +4990,10 @@ function getUpdateChannel(currentVersion: string): UpdateChannel {
 
 /** 读取当前文档的 YAML front matter（没有则返回空对象） */
 function currentFrontMatter(): FrontMatter {
+  // 源码模式下的修改还没同步进 ProseMirror 文档，导出必须读 textarea
+  if (isSourceMode) {
+    return frontMatterFromNode(extractSourceFrontMatterText(sourceEditor.value));
+  }
   const doc = editor.getDocument();
   let content: string | null = null;
   doc.forEach((node) => {
@@ -4761,11 +5004,62 @@ function currentFrontMatter(): FrontMatter {
   return frontMatterFromNode(content);
 }
 
+/** 取出 Markdown 文本开头的 YAML front matter（去掉 --- 分隔行） */
+function extractSourceFrontMatterText(markdown: string): string | null {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
+  return match ? match[1] : null;
+}
+
+/**
+ * 把文档里的图片 src 读成 data URL，供独立 HTML 导出内联。
+ * 网络地址 / data URL 原样返回；读不到的返回 null（导出时保留原 src）。
+ */
+async function readLocalImageAsDataUrl(
+  src: string,
+  documentPath: string | null
+): Promise<string | null> {
+  if (!src) return null;
+  if (/^(?:data:|https?:)/i.test(src)) return src;
+  if (!documentPath) return null;
+
+  const api = getDesktopAPI();
+  if (!api?.readFile) return null;
+
+  // 相对路径按文档目录展开；file:// 前缀去掉后直接读
+  let absolute: string;
+  if (/^file:\/\//i.test(src)) {
+    absolute = decodeURI(src.replace(/^file:\/\//i, "")).replace(/^\/([a-zA-Z]:)/, "$1");
+  } else if (/^[a-zA-Z]:[\\/]/.test(src)) {
+    absolute = src;
+  } else {
+    absolute = joinPath(dirname(documentPath), src.replace(/^\.\//, ""));
+  }
+
+  try {
+    const result = await api.readImage?.(absolute);
+    return result?.dataUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 导出用的文档快照。
+ * 源码模式下编辑器的 ProseMirror 文档是旧的（编辑只写进了 textarea），
+ * 必须把 textarea 内容解析成文档再导出，否则导出的是上一次的内容。
+ */
+function documentForExport(): PMNode {
+  if (isSourceMode) {
+    return markdownToDoc(sourceEditor.value, schema);
+  }
+  return editor.getDocument();
+}
+
 async function exportHtml(): Promise<void> {
   const currentDoc = documents.find((d) => d.id === activeDocId);
   const rawTitle = currentDoc ? currentDoc.title : "MarkWeave 导出文档";
   const settings = loadSettings();
-  const doc = editor.getDocument();
+  const doc = documentForExport();
 
   // front matter 里的 title 优先于文件名
   const front = currentFrontMatter();
@@ -4789,7 +5083,7 @@ async function exportHtml(): Promise<void> {
     console.warn("KaTeX 字体内联失败，公式将回退到系统字体", err);
   }
 
-  const htmlContent = toStandaloneHtml(doc, {
+  const htmlContent = await toStandaloneHtml(doc, {
     title,
     themeId: settings.editorTheme,
     dark: document.body.classList.contains("theme-night"),
@@ -4798,6 +5092,7 @@ async function exportHtml(): Promise<void> {
     // front matter 里 toc: true 时生成目录
     toc: front.toc === true,
     tocDepth: front.tocDepth ?? 3,
+    resolveImage: (src) => readLocalImageAsDataUrl(src, currentDoc?.filePath ?? null),
   });
 
   const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
@@ -4893,7 +5188,9 @@ async function openPandocExportDialog(): Promise<void> {
 
     const markdown = isSourceMode ? sourceEditor.value : editor.getMarkdown();
     const result = await pandocConvert({
-      markdown,
+      // 相对路径图片在 Word/EPUB 里会被 pandoc 当成不存在的文件，
+      // 导出前展开成绝对路径（临时文件在别的目录，相对路径必然失效）
+      markdown: absolutizeImagePaths(markdown, currentDoc?.filePath ?? null),
       format: selected,
       suggestedName: `${baseTitle}.${format.extension}`,
       metadata: buildExportMeta(front, baseTitle).metadata,
@@ -4914,6 +5211,17 @@ async function openPandocExportDialog(): Promise<void> {
 async function exportPdf(): Promise<void> {
   const api = getDesktopAPI();
   const currentDoc = documents.find((d) => d.id === activeDocId);
+  // 源码模式下编辑器 DOM 里是旧内容，导出前先把 textarea 同步进 ProseMirror，
+  // 否则 printToPDF 打印的是上一次渲染的结果。
+  if (isSourceMode) {
+    const doc0 = documents.find((d) => d.id === activeDocId);
+    if (doc0) {
+      doc0.content = sourceEditor.value;
+      doc0.dirty = true;
+      doc0.updatedAt = Date.now();
+    }
+    editor.setMarkdown(sourceEditor.value);
+  }
   const front = currentFrontMatter();
   const title = resolveHtmlTitle(
     front,
@@ -4931,8 +5239,10 @@ async function exportPdf(): Promise<void> {
   const options = frontPaper
     ? normalizePdfOptions({ ...settings.pdf, paper: frontPaper as PaperSize })
     : settings.pdf;
+  // 必须用能识别反斜杠的 dirname：Windows 路径直接 slice 会把整条
+  // 文件名当成目录，拼出 `D:\notes\a.md\a.pdf` 导致 ENOTDIR。
   const suggestedName = currentDoc?.filePath
-    ? joinPath(currentDoc.filePath.replace(/[\/][^\/]+$/, ""), `${title}.pdf`)
+    ? joinPath(dirname(currentDoc.filePath), `${title}.pdf`)
     : `${title}.pdf`;
 
   const result = await api.printToPdf({
@@ -4940,9 +5250,14 @@ async function exportPdf(): Promise<void> {
     options: toElectronPdfOptions(options),
   });
 
-  if (!result) {
-    void alertDialog("PDF 导出失败", "导出失败");
+  if (result?.path) {
+    toast(`已导出 PDF：${extractFileName(result.path)}`, "success");
+    return;
   }
+  await alertDialog(
+    `PDF 导出失败${result?.error ? `：${result.error}` : ""}\n\n目标路径：${suggestedName}`,
+    "导出失败"
+  );
 }
 
 // Electron 桌面菜单与文件打开集成
@@ -5016,6 +5331,15 @@ if (desktopAPI) {
       case "insert-table":
         handleOpenInsertTable();
         break;
+      case "insert-code-fence":
+        handleInsertCodeBlock();
+        break;
+      case "insert-math-block":
+        handleInsertMathBlock();
+        break;
+      case "insert-image":
+        handleInsertImage();
+        break;
       case "toggle-source":
         toggleSourceMode();
         break;
@@ -5034,7 +5358,7 @@ if (desktopAPI) {
       if (desktopAPI.readFile) {
         const file = await desktopAPI.readFile(filePath);
         if (file) {
-          handleFileOpened(file);
+          await handleFileOpened(file);
         }
       }
     } catch (err) {

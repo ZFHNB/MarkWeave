@@ -29,6 +29,11 @@ export interface HtmlExportOptions {
   toc?: boolean;
   /** 目录最大标题层级，默认 3 */
   tocDepth?: number;
+  /**
+   * 把 Markdown 里的图片 src 转成可离线使用的地址。
+   * 桌面版会把相对路径读成 data URL 内联，浏览器版保持原样。
+   */
+  resolveImage?: (src: string) => Promise<string | null>;
 }
 
 const THEME_CSS: Record<string, string> = {
@@ -165,11 +170,50 @@ function bodyHtml(doc: PMNode, mermaidSvgs: string[] = []): string {
   });
 }
 
-export function toStandaloneHtml(doc: PMNode, options: HtmlExportOptions = {}): string {
+/**
+ * 把正文里 <img src> 换成离线可用的地址。
+ *
+ * 独立 HTML 是要拷给别人 / 离线打开的，相对路径和 file:// 都会失效，
+ * 因此桌面版把这些图片读出来内联成 data URL。
+ */
+async function inlineImages(
+  html: string,
+  resolveImage?: (src: string) => Promise<string | null>
+): Promise<string> {
+  if (!resolveImage) return html;
+
+  const srcs = new Set<string>();
+  html.replace(/<img\b[^>]*\bsrc="([^"]*)"/gi, (_m, src: string) => {
+    srcs.add(src);
+    return _m;
+  });
+
+  const replacements = new Map<string, string>();
+  for (const src of srcs) {
+    try {
+      const resolved = await resolveImage(src);
+      if (resolved && resolved !== src) replacements.set(src, resolved);
+    } catch {
+      // 单张图失败不影响整篇导出
+    }
+  }
+  if (replacements.size === 0) return html;
+
+  return html.replace(/(<img\b[^>]*\bsrc=")([^"]*)"/gi, (whole, head: string, src: string) => {
+    const next = replacements.get(src);
+    return next ? `${head}${next}"` : whole;
+  });
+}
+
+export async function toStandaloneHtml(doc: PMNode, options: HtmlExportOptions = {}): Promise<string> {
   const title = options.title || "MarkWeave Document";
   const css = buildExportCss(options.themeId, options.dark, options.katexFontCss);
 
   const tocHtml = options.toc ? buildTocHtml(doc, options.tocDepth ?? 3) : "";
+  const body = await inlineImages(
+    bodyHtml(doc, options.mermaidSvgs ?? []),
+    options.resolveImage
+  );
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -185,7 +229,7 @@ ${css}
 <body class="markweave-export">
 <article id="write">
 ${tocHtml}
-${bodyHtml(doc, options.mermaidSvgs ?? [])}
+${body}
 </article>
 </body>
 </html>`;

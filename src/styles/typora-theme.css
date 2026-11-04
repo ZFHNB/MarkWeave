@@ -2591,6 +2591,7 @@ body.theme-night .md-image-toolbar {
   .ty-sidebar,
   .ty-header-bar,
   .ty-footer,
+  .ty-tab-strip,
   .md-fences-toolbar,
   .md-diagram-toolbar-wrap,
   .md-table-toolbar,
@@ -2602,7 +2603,19 @@ body.theme-night .md-image-toolbar {
   .md-quick-open-overlay,
   .md-footnote-tooltip,
   .md-toc-title,
-  .md-yaml-toggle {
+  .md-yaml-toggle,
+  /* 这些是交互浮层，打印时必须隐藏：
+     源码 textarea 会整块盖住正文，拖拽手柄/遮罩会印在纸上 */
+  #source-editor,
+  .md-block-handle,
+  .ty-drop-overlay,
+  .ty-toast-host {
+    display: none !important;
+  }
+
+  /* 模态框本身在打印时应隐藏，但要保留它后面的正文——
+     直接隐藏 overlay 即可，正文不在 overlay 内 */
+  .ty-modal-overlay {
     display: none !important;
   }
 

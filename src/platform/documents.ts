@@ -20,6 +20,34 @@ export function extractFileName(filePath: string): string {
   return trimmed.length > 0 ? trimmed : "未命名.md";
 }
 
+/** 统一路径分隔符，避免同一文件因 `\` / `/` 差异被当成两篇文档 */
+function normalizePath(filePath: string): string {
+  return filePath.replace(/\\/g, "/");
+}
+
+/** 找出已经打开这个磁盘文件的文档 */
+export function findOpenDocumentByPath(
+  documents: StoredDocument[],
+  filePath: string
+): StoredDocument | undefined {
+  const target = normalizePath(filePath);
+  return documents.find((doc) => doc.filePath && normalizePath(doc.filePath) === target);
+}
+
+/**
+ * 重新载入磁盘内容前，是否需要向用户确认。
+ *
+ * 只有「有未保存修改」且「磁盘内容与编辑器内容不同」时才算真正会丢稿；
+ * 内容一致时直接刷新即可，不必打扰。
+ */
+export function wouldLoseEdits(
+  existing: StoredDocument | undefined,
+  file: DesktopFile
+): boolean {
+  if (!existing || !existing.dirty) return false;
+  return existing.content !== file.content;
+}
+
 export function applyOpenedFile(
   documents: StoredDocument[],
   file: DesktopFile,
@@ -27,21 +55,21 @@ export function applyOpenedFile(
   now?: number
 ): { documents: StoredDocument[]; activeDocId: string } {
   void activeDocId;
-  const existingIndex = documents.findIndex((d) => d.filePath === file.path);
-  if (existingIndex !== -1) {
+  const existing = findOpenDocumentByPath(documents, file.path);
+  if (existing) {
     const timestamp = now ?? Date.now();
-    const targetDoc = documents[existingIndex];
     const updatedDoc: StoredDocument = {
-      ...targetDoc,
+      ...existing,
+      // 磁盘上的路径写法可能和内存里不一致，统一成最新一次打开时的写法
+      filePath: file.path,
       content: file.content,
       dirty: false,
       updatedAt: timestamp,
     };
-    const nextDocuments = [...documents];
-    nextDocuments[existingIndex] = updatedDoc;
+    const nextDocuments = documents.map((doc) => (doc.id === existing.id ? updatedDoc : doc));
     return {
       documents: nextDocuments,
-      activeDocId: targetDoc.id,
+      activeDocId: existing.id,
     };
   }
 

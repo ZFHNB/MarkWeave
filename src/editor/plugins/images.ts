@@ -17,7 +17,12 @@ export const imagePluginKey = new PluginKey("markweave-images");
 export interface ImageInsertOptions {
   /** 桌面版可将本地路径转换为可显示 URL */
   resolveSrc?: (path: string) => string;
-  /** 需要把图片文件复制到文档目录时调用 */
+  /**
+   * 把图片落到磁盘并返回写进 Markdown 的 src。
+   *
+   * 返回 null 表示"做不到"（未保存的文档、写入失败等），调用方会退回
+   * data URL 内联，保证图片至少看得见。
+   */
   persistFile?: (file: File) => Promise<string | null>;
 }
 
@@ -106,6 +111,8 @@ export function pickLocalImage(onPick: (file: File) => void): void {
     if (file) onPick(file);
     input.remove();
   });
+  // 用户点了「取消」时不会触发 change，靠 cancel 事件把临时 input 收掉
+  input.addEventListener("cancel", () => input.remove());
   document.body.appendChild(input);
   input.click();
 }

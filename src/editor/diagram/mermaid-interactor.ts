@@ -47,6 +47,27 @@ interface EdgeTopology {
 
 const GRID_SIZE = 20;
 
+/** 设置项「节点拖拽吸附网格」对应的像素步长；关闭时返回 0（自由拖拽） */
+export function readGridSnapSize(): number {
+  try {
+    return localStorage.getItem("markweave_grid_snap") === "false" ? 0 : GRID_SIZE;
+  } catch {
+    return GRID_SIZE;
+  }
+}
+
+/** 设置项「默认折线拐角风格」→ 交互器内部风格（step-round 复用 stepBefore 的渲染） */
+export function readDefaultCurveStyle(): "basis" | "stepBefore" | "linear" {
+  try {
+    const raw = localStorage.getItem("markweave_mermaid_default_curve");
+    if (raw === "linear") return "linear";
+    if (raw === "step" || raw === "step-round") return "stepBefore";
+    return "basis";
+  } catch {
+    return "basis";
+  }
+}
+
 export function resolvePreviewModeOnAttach(
   currentMode: "custom" | "standard",
   modeInitialized: boolean,
@@ -588,7 +609,9 @@ export class MermaidInteractor {
         if (c === "linear") return "linear";
         return "basis";
       }
-      return "basis";
+      // 代码里没写 curve，也没有用户本会话的显式选择时，
+      // 落到偏好设置里的「默认折线拐角风格」（否则这个设置是死的）
+      return this.activeCurveStyle ?? readDefaultCurveStyle();
     }
 
     // 2. 如果当前交互器已有明确的活跃风格（用户在工具栏点击了对应按钮），必须优先以用户的活跃选择为准
@@ -607,7 +630,8 @@ export class MermaidInteractor {
         return "basis";
       }
     }
-    return "basis"; // 默认平滑
+    // 代码里没写 curve：用偏好设置里的默认风格
+    return readDefaultCurveStyle();
   }
 
   /**
@@ -927,11 +951,12 @@ export class MermaidInteractor {
 
         const node = this.nodesMap.get(this.activeNodeKey);
         if (node) {
-          // 格点吸附 (Snap to Grid)
+          // 格点吸附 (Snap to Grid)：设置里关掉时按 0 处理，即自由拖拽
+          const grid = readGridSnapSize();
           const rawTargetX = this.nodeOriginBeforeDrag.x + deltaX;
           const rawTargetY = this.nodeOriginBeforeDrag.y + deltaY;
-          node.currentX = Math.round(rawTargetX / GRID_SIZE) * GRID_SIZE;
-          node.currentY = Math.round(rawTargetY / GRID_SIZE) * GRID_SIZE;
+          node.currentX = grid > 0 ? Math.round(rawTargetX / grid) * grid : rawTargetX;
+          node.currentY = grid > 0 ? Math.round(rawTargetY / grid) * grid : rawTargetY;
           node.dx = node.currentX - node.baseX;
           node.dy = node.currentY - node.baseY;
 

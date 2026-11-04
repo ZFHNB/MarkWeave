@@ -143,13 +143,14 @@ export class ContextMenu {
       {
         id: "select-line",
         label: "选择当前行",
-        shortcut: "Ctrl+Shift+L",
+        // Ctrl+Shift+L 在桌面端被原生菜单的「切换侧边栏」占用，这里不标快捷键，
+        // 免得用户按了没反应。
         run: () => this.run(selectLine),
       },
       {
         id: "delete-block",
         label: "删除当前段落",
-        shortcut: "Ctrl+Shift+K",
+        // Ctrl+Shift+K 在桌面端是「插入代码块」，冲突后无法标称
         run: () => this.run(deleteBlock),
       },
       { id: "sep-3", label: "", separator: true },

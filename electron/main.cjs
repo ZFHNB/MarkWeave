@@ -349,6 +349,35 @@ ipcMain.handle("file:read", async (_event, targetPath) => {
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown", ".mdown", ".mkd", ".txt"]);
 
+/**
+ * 把本地图片读成 data URL（二进制安全）。
+ * 独立 HTML 导出要把图片内联进去，按 utf8 读文本会损坏 PNG/JPEG。
+ */
+ipcMain.handle("file:read-image", async (_event, targetPath) => {
+  if (!targetPath || typeof targetPath !== "string") return null;
+  const MIME = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+    ".svg": "image/svg+xml",
+    ".bmp": "image/bmp",
+    ".avif": "image/avif",
+  };
+  const mime = MIME[path.extname(targetPath).toLowerCase()];
+  if (!mime) return null;
+  try {
+    const buffer = await fs.promises.readFile(targetPath);
+    // 单图超过 20MB 就不再内联，避免导出文件失控
+    if (buffer.length > 20 * 1024 * 1024) return null;
+    return { dataUrl: `data:${mime};base64,${buffer.toString("base64")}` };
+  } catch (err) {
+    console.error("Failed to read image:", err);
+    return null;
+  }
+});
+
 async function listMarkdownFiles(rootDir, currentDir = rootDir, depth = 0, out = []) {
   if (depth > 12 || out.length > 2000) return out;
   let entries;
@@ -408,6 +437,69 @@ ipcMain.handle("file:write", async (_event, payload) => {
   } catch (err) {
     console.error("Failed to write file:", err);
     return null;
+  }
+});
+
+/**
+ * 把图片写入文档旁的附件目录，供 Markdown 使用相对路径引用。
+ *
+ * 剪贴板里拿到的图片没有文件名，所以由渲染层传 dataUrl + 期望文件名；
+ * 同名文件自动加 -1/-2 后缀，绝不覆盖用户已有图片。
+ * 目录建不出来时返回 error，渲染层退回 data URL 内联。
+ */
+ipcMain.handle("file:save-image", async (_event, payload) => {
+  if (!payload || typeof payload.directory !== "string" || typeof payload.dataUrl !== "string") {
+    return { ok: false, error: "invalid-payload" };
+  }
+
+  const match = /^data:([^;,]+);base64,(.+)$/i.exec(payload.dataUrl);
+  if (!match) return { ok: false, error: "unsupported-data-url" };
+
+  const mime = match[1].toLowerCase();
+  const MIME_EXT = {
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/svg+xml": "svg",
+    "image/bmp": "bmp",
+    "image/avif": "avif",
+  };
+  const ext = MIME_EXT[mime];
+  if (!ext) return { ok: false, error: "unsupported-mime" };
+
+  const rawName = typeof payload.name === "string" ? payload.name : "image";
+  const base = path
+    .basename(rawName, path.extname(rawName))
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .trim() || "image";
+
+  try {
+    await fs.promises.mkdir(payload.directory, { recursive: true });
+
+    let target = null;
+    // 后缀递增直到找到不存在的文件名（wx 兜底，避免并发覆盖）
+    for (let i = 1; i <= 999; i++) {
+      const name = i === 1 ? `${base}.${ext}` : `${base}-${i}.${ext}`;
+      const candidate = path.join(payload.directory, name);
+      try {
+        await fs.promises.writeFile(candidate, Buffer.from(match[2], "base64"), {
+          flag: "wx",
+        });
+        target = candidate;
+        break;
+      } catch (err) {
+        if (err && err.code === "EEXIST") continue;
+        throw err;
+      }
+    }
+    if (!target) return { ok: false, error: "too-many-duplicates" };
+
+    const stat = await fs.promises.stat(target);
+    return { ok: true, path: target, bytes: stat.size };
+  } catch (err) {
+    console.error("Failed to save image:", err);
+    return { ok: false, error: err?.code || "write-failed" };
   }
 });
 
@@ -1073,13 +1165,15 @@ ipcMain.handle("print:pdf", async (_event, payload) => {
     });
 
     if (payload?.path) {
+      await fs.promises.mkdir(path.dirname(payload.path), { recursive: true });
       await fs.promises.writeFile(payload.path, data);
       return { path: payload.path, bytes: data.length };
     }
     return { data: data.toString("base64"), bytes: data.length };
   } catch (err) {
     console.error("Failed to export PDF:", err);
-    return null;
+    // 把系统错误码带回渲染层，否则界面只能显示一句「导出失败」
+    return { error: err?.code || err?.message || "unknown" };
   }
 });
 

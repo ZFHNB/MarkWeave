@@ -54,6 +54,19 @@ export function joinPath(dir: string, name: string): string {
   return `${normalizedDir}${separator}${name}`;
 }
 
+/**
+ * 取文件所在目录。
+ *
+ * 两种分隔符都要认：Windows 下 Electron 给回的是反斜杠路径，
+ * 只按 `/` 切分会把 `D:\notes\a.md` 原样返回，后续拼上文件名就得到
+ * `D:\notes\a.md\a.pdf` 这种把文件当目录的路径。
+ */
+export function dirname(filePath: string): string {
+  const normalized = filePath.replace(/\\/g, "/");
+  const index = normalized.lastIndexOf("/");
+  return index === -1 ? "" : normalized.slice(0, index);
+}
+
 export function baseName(filePath: string): string {
   const normalized = filePath.replace(/\\/g, "/");
   const index = normalized.lastIndexOf("/");
@@ -62,6 +75,31 @@ export function baseName(filePath: string): string {
 
 export function stripExtension(name: string): string {
   return name.replace(/\.(md|markdown|mdown|mkd|txt)$/i, "");
+}
+
+/**
+ * 把 Markdown 里的相对路径图片展开成绝对路径。
+ *
+ * pandoc 拿到的是写到临时目录的 input.md，相对路径会指向临时目录，
+ * 图片因此全部丢失。绝对路径和网络地址保持原样。
+ */
+export function absolutizeImagePaths(markdown: string, documentPath: string | null): string {
+  if (!documentPath) return markdown;
+  const base = dirname(documentPath);
+  if (!base) return markdown;
+
+  return markdown.replace(
+    /(!\[[^\]]*\]\()([^)\s]+)(\s+"[^"]*")?(\))/g,
+    (whole, open: string, src: string, title: string = "", close: string) => {
+      if (!src) return whole;
+      // 网络地址 / data URL / 锚点 / 已展开的 file:// 都不动
+      if (/^(?:https?:|data:|file:|blob:|#|\/)/i.test(src)) return whole;
+      // 已是绝对路径（含盘符）时不动
+      if (/^[a-zA-Z]:[\\/]/.test(src)) return whole;
+      const normalized = src.replace(/^\.\//, "");
+      return `${open}${joinPath(base, normalized)}${title}${close}`;
+    }
+  );
 }
 
 /** 生成不冲突的副本名，如 "note (2).md" */

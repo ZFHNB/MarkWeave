@@ -10,6 +10,14 @@ import { EditorView, type NodeView } from "prosemirror-view";
 
 const ZOOM_STEPS = [25, 33, 50, 67, 80, 100, 150, 200];
 
+export interface ImageViewOptions {
+  /**
+   * 把 Markdown 里的 src 解析成浏览器可加载的 URL。
+   * 只影响 DOM 的显示，节点属性保持不变（Markdown 里仍是相对路径）。
+   */
+  resolveSrc?: (src: string) => string;
+}
+
 export class ImageView implements NodeView {
   dom: HTMLElement;
   node: PMNode;
@@ -19,23 +27,33 @@ export class ImageView implements NodeView {
   private img: HTMLImageElement;
   private toolbar: HTMLElement;
   private zoom = 100;
+  private options: ImageViewOptions;
 
-  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+  constructor(
+    node: PMNode,
+    view: EditorView,
+    getPos: () => number | undefined,
+    options: ImageViewOptions = {}
+  ) {
     this.node = node;
     this.view = view;
     this.getPos = getPos;
+    this.options = options;
 
     this.dom = document.createElement("span");
     this.dom.className = "md-image-wrap";
 
     this.img = document.createElement("img");
     this.img.className = "md-image";
-    this.img.src = node.attrs.src || "";
+    this.img.src = this.resolveSrc(node.attrs.src || "");
     this.img.alt = node.attrs.alt || "";
     if (node.attrs.title) this.img.title = node.attrs.title;
     this.img.draggable = false;
     this.img.addEventListener("error", () => {
       this.dom.classList.add("md-image-broken");
+    });
+    this.img.addEventListener("load", () => {
+      this.dom.classList.remove("md-image-broken");
     });
 
     this.toolbar = document.createElement("span");
@@ -97,10 +115,19 @@ export class ImageView implements NodeView {
     this.view.dispatch(this.view.state.tr.delete(pos, pos + this.node.nodeSize));
   }
 
+  /** 相对路径 → 可加载 URL；本来就是绝对/网络地址时原样返回 */
+  private resolveSrc(src: string): string {
+    if (!src) return src;
+    return this.options.resolveSrc ? this.options.resolveSrc(src) : src;
+  }
+
   update(node: PMNode): boolean {
     if (node.type !== this.node.type) return false;
     this.node = node;
-    if (node.attrs.src !== this.img.getAttribute("src")) this.img.src = node.attrs.src || "";
+    const nextSrc = this.resolveSrc(node.attrs.src || "");
+    if (nextSrc !== this.img.getAttribute("src")) {
+      this.img.src = nextSrc;
+    }
     this.img.alt = node.attrs.alt || "";
     this.img.title = node.attrs.title || "";
     return true;

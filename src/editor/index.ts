@@ -25,18 +25,17 @@ import { createImagePlugin } from "./plugins/images";
 import { createAutoPairPlugin } from "./plugins/auto-pair";
 import { createCodeIndentPlugin } from "./plugins/code-indent";
 import { createBlockDragPlugin } from "./plugins/block-drag";
-import { createImageResolvePlugin } from "./plugins/image-resolve";
+import { createImageResolvePlugin, resolveImageSrc } from "./plugins/image-resolve";
 import { ImageView } from "./nodeviews/image";
 import {
   jumpToTop,
   jumpToBottom,
   selectBlock,
-  deleteBlock,
-  selectLine,
   increaseHeadingLevel,
   decreaseHeadingLevel,
   clearFormatting,
   toggleTaskStatus,
+  insertBlockAfterCurrent,
 } from "./commands/editing";
 import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
@@ -66,6 +65,11 @@ export interface EditorOptions {
   onSelectionChange?: (cursorPos: number) => void;
   getDocumentPath?: () => string | null;
   isDesktop?: () => boolean;
+  /**
+   * 图片落盘：返回写进 Markdown 的 src（通常是 `attachments/x.png`）。
+   * 返回 null 时退回 data URL 内联。
+   */
+  persistImage?: (file: File) => Promise<string | null>;
 }
 
 export class MarkWeaveEditor {
@@ -105,8 +109,9 @@ export class MarkWeaveEditor {
       "Mod-Shift-Backspace": deleteRow,
       "Mod-Alt-1": increaseHeadingLevel,
       "Mod-Alt-2": decreaseHeadingLevel,
-      "Mod-Shift-k": deleteBlock,
-      "Mod-Shift-l": selectLine,
+      // 注意：Mod-Shift+<字母> 的组合在 Electron 里会先被原生菜单的
+      // accelerator 截走（见 electron/menu.cjs），生效的是菜单那一项。
+      // 这里保留绑定，是为了 Web 版和没有原生菜单的场景。
       "Mod-Shift-b": selectBlock,
       "Mod-Shift-\\": clearFormatting,
       "Mod-Shift-x": toggleTaskStatus,
@@ -132,7 +137,11 @@ export class MarkWeaveEditor {
         createMarkdownPastePlugin(),
         createFootnoteHoverPlugin(),
         createSearchPlugin(),
-        createImagePlugin(),
+        createImagePlugin({
+          // 注意：这里写进 Markdown 的必须是相对路径或 data URL，
+          // 不能是 file:// 绝对路径——否则文档一换机器就全裂图。
+          persistFile: (file) => this.options.persistImage?.(file) ?? Promise.resolve(null),
+        }),
         createAutoPairPlugin({
           isEnabled: () => this.options.isAutoPairEnabled?.() ?? true,
           smartPunctuation: () => this.options.isSmartPunctuationEnabled?.() ?? true,
@@ -170,7 +179,18 @@ export class MarkWeaveEditor {
         task_item: (node, view, getPos) => new TaskItemView(node, view, getPos),
         toc_block: (node, view, getPos) => new TocView(node, view, getPos),
         yaml_frontmatter: (node, view, getPos) => new YamlFrontmatterView(node, view, getPos),
-        image: (node, view, getPos) => new ImageView(node, view, getPos),
+        image: (node, view, getPos) =>
+          new ImageView(node, view, getPos, {
+            // 相对路径在编辑器里要能显示出来：解析成 file:// 只影响 DOM，
+            // Markdown 里存的仍然是原始的相对路径。
+            resolveSrc: (src) =>
+              resolveImageSrc(
+                src,
+                this.options.getDocumentPath?.() ?? null,
+                null,
+                this.options.isDesktop?.() ?? false
+              ),
+          }),
       },
       dispatchTransaction: (tr) => {
         const newState = this.view.state.apply(tr);
@@ -376,6 +396,36 @@ export class MarkWeaveEditor {
   public insertTable(rows: number, cols: number) {
     const cmd = insertTable(rows, cols);
     cmd(this.view.state, this.view.dispatch);
+    this.view.focus();
+  }
+
+  /**
+   * 在当前块之后插入一个新块并把光标放进去。
+   *
+   * 用于菜单里的「插入代码块 / 公式块」——它们对应 Typora 的
+   * Ctrl+Shift+K / Ctrl+Shift+M，用户期望是「新建一个块」，而不是
+   * 把当前段落转换掉。
+   */
+  private runInsertBlock(node: PMNode): void {
+    if (insertBlockAfterCurrent(node)(this.view.state, this.view.dispatch)) {
+      this.view.focus();
+    }
+  }
+
+  /** 插入一个代码块（语言留空，由块上的语言下拉选择） */
+  public insertCodeBlock(language = ""): void {
+    this.runInsertBlock(schema.nodes.code_block.create({ params: language }));
+  }
+
+  /** 插入一个空的公式块 */
+  public insertMathBlock(formula = ""): void {
+    this.runInsertBlock(schema.nodes.math_block.create({ formula }));
+  }
+
+  /** 插入图片节点；src 由调用方决定（data URL 或相对路径） */
+  public insertImage(src: string, alt = "", title: string | null = null): void {
+    const node = schema.nodes.image.create({ src, alt, title });
+    this.view.dispatch(this.view.state.tr.replaceSelectionWith(node).scrollIntoView());
     this.view.focus();
   }
 

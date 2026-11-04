@@ -265,9 +265,14 @@ export function resolveHistoryDir(filePath: string, settings: AutoSaveSettings):
   return `${dir || "."}/.markweave-history`;
 }
 
-/** 关闭窗口时是否需要提醒用户保存 */
+/**
+ * 关闭窗口时是否需要提醒用户保存。
+ *
+ * 只有「每次修改后自动保存」能保证 dirty 一旦产生就已经落盘；
+ * 「按固定间隔」在下一次定时器触发前内容仍在内存里，关窗照样会丢，
+ * 因此不能当成"已保存"处理。
+ */
 export function shouldPromptOnClose(dirty: boolean, autoSaveMode: AutoSaveMode): boolean {
   if (!dirty) return false;
-  // 自动保存已开启时内容已落盘，不再打扰用户
-  return autoSaveMode === "off";
+  return autoSaveMode !== "onChange";
 }

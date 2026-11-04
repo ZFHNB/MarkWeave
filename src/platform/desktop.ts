@@ -49,12 +49,20 @@ export interface MarkWeaveDesktopAPI {
   getPathForFile?: (file: File) => string | null;
   saveFile: (payload: SaveFilePayload) => Promise<SaveFileResult | null>;
   readFile?: (filePath: string) => Promise<OpenFileResult | null>;
+  /** 把本地图片读成 data URL（二进制安全，供 HTML 导出内联） */
+  readImage?: (filePath: string) => Promise<{ dataUrl: string } | null>;
   writeFile?: (payload: { path: string; content: string }) => Promise<{ path: string } | null>;
+  /** 把 data URL 图片写入文档旁附件目录，返回绝对路径 */
+  saveImage?: (payload: {
+    directory: string;
+    dataUrl: string;
+    name?: string;
+  }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string } | null>;
   statFile?: (filePath: string) => Promise<{ path: string; mtime: number; size: number } | null>;
   printToPdf?: (payload: {
     path?: string;
     options: Record<string, unknown>;
-  }) => Promise<{ path?: string; data?: string; bytes: number } | null>;
+  }) => Promise<{ path?: string; data?: string; bytes?: number; error?: string } | null>;
   createFile?: (payload: { path: string; content: string }) => Promise<{ path?: string; error?: string } | null>;
   createFolder?: (folderPath: string) => Promise<{ path?: string; error?: string } | null>;
   renamePath?: (payload: { from: string; to: string }) => Promise<{ path?: string; error?: string } | null>;

@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   applyOpenedFile,
+  findOpenDocumentByPath,
   markDocumentSaved,
   suggestedSaveName,
+  wouldLoseEdits,
 } from "../src/platform/documents";
 
 function doc(id: string, title: string, content: string, filePath?: string) {
@@ -47,5 +49,35 @@ describe("desktop document helpers", () => {
     const existing = [doc("a", "notes.md", "A")];
     expect(suggestedSaveName(existing, "a")).toBe("notes.md");
     expect(suggestedSaveName(existing, "missing")).toBe("未命名.md");
+  });
+});
+
+describe("reopening an already-open file", () => {
+  it("matches the same file regardless of slash style", () => {
+    const existing = [doc("a", "a.md", "old", "C:\\notes\\a.md")];
+    const found = findOpenDocumentByPath(existing, "C:/notes/a.md");
+    expect(found?.id).toBe("a");
+    expect(findOpenDocumentByPath(existing, "C:\\notes\\b.md")).toBeUndefined();
+  });
+
+  it("reports lost edits only when there are unsaved changes on top of different content", () => {
+    const file = { path: "C:\\notes\\a.md", content: "disk" };
+
+    expect(wouldLoseEdits(undefined, file)).toBe(false);
+    expect(wouldLoseEdits(doc("a", "a.md", "x", file.path), file)).toBe(false);
+
+    const dirty = { ...doc("a", "a.md", "unsaved edit", file.path), dirty: true };
+    expect(wouldLoseEdits(dirty, file)).toBe(true);
+
+    // 有 dirty 标记但内容和磁盘一致：直接刷新，不打扰用户
+    const same = { ...doc("a", "a.md", "disk", file.path), dirty: true };
+    expect(wouldLoseEdits(same, file)).toBe(false);
+  });
+
+  it("does not duplicate a document when the same path is opened with different separators", () => {
+    const existing = [doc("a", "a.md", "old", "C:\\notes\\a.md")];
+    const result = applyOpenedFile(existing, { path: "C:/notes/a.md", content: "new" }, "a");
+    expect(result.documents).toHaveLength(1);
+    expect(result.documents[0].content).toBe("new");
   });
 });

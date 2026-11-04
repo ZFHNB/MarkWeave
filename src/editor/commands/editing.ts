@@ -198,6 +198,37 @@ export function toggleInlineMark(name: string): Command {
   };
 }
 
+/**
+ * 在当前块之后插入一个新块，并把光标放进去。
+ *
+ * 用于菜单的「插入代码块 / 公式块」——对应 Typora 的 Ctrl+Shift+K / Ctrl+Shift+M。
+ * 语义是「在光标所在块后面新建一个块」，而不是把当前段落转换掉，
+ * 所以不会吞掉用户已经写好的内容。
+ */
+export function insertBlockAfterCurrent(node: PMNode): Command {
+  return (state, dispatch) => {
+    const { $from, empty } = state.selection;
+    if (!empty) return false;
+
+    // 光标在列表 / 引用内部时，插到最外层块之后
+    let depth = $from.depth;
+    while (depth > 1 && $from.node(depth - 1).type.name !== "doc") depth--;
+    if (depth < 1) return false;
+
+    if (!dispatch) return true;
+
+    const after = $from.after(depth);
+    const trailing = schema.nodes.paragraph.createAndFill();
+    const tr = state.tr.insert(after, trailing ? [node, trailing] : [node]);
+    // 有文字内容的块（代码块）把光标放进块内；叶子块（公式块渲染成卡片，
+    // 内部没有可落光标的位置）则落到它后面的段落里，避免光标丢失。
+    const target = node.isTextblock ? after + 1 : after + node.nodeSize + 1;
+    tr.setSelection(TextSelection.near(tr.doc.resolve(target), 1));
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
+
 /** 提取当前块内的纯文本，供“复制为 Markdown / 纯文本”使用 */
 export function getBlockText(state: EditorState): string {
   const range = getBlockRange(state);

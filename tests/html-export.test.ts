@@ -10,8 +10,8 @@ function doc(markdown: string) {
 }
 
 describe("standalone HTML export", () => {
-  it("produces a complete document with inlined styles", () => {
-    const html = toStandaloneHtml(doc("# Hello\n\nSome *text*."), { title: "Demo" });
+  it("produces a complete document with inlined styles", async () => {
+    const html = await toStandaloneHtml(doc("# Hello\n\nSome *text*."), { title: "Demo" });
     expect(html.startsWith("<!DOCTYPE html>")).toBe(true);
     expect(html).toContain('<meta charset="utf-8" />');
     expect(html).toContain("<title>Demo</title>");
@@ -23,25 +23,25 @@ describe("standalone HTML export", () => {
     expect(html).toContain(".katex");
   });
 
-  it("escapes the title", () => {
-    const html = toStandaloneHtml(doc("x"), { title: '<script>"x"</script>' });
+  it("escapes the title", async () => {
+    const html = await toStandaloneHtml(doc("x"), { title: '<script>"x"</script>' });
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
   });
 
-  it("embeds the selected theme css", () => {
+  it("embeds the selected theme css", async () => {
     const css = buildExportCss("github");
     expect(css).toContain("#write");
     expect(css).not.toBe(buildExportCss("default"));
   });
 
-  it("uses a dark body background for night", () => {
+  it("uses a dark body background for night", async () => {
     expect(buildExportCss("night")).toContain("#363b40");
     expect(buildExportCss("github")).toContain("#fff");
   });
 
-  it("replaces mermaid code blocks with rendered svg in order", () => {
-    const html = toStandaloneHtml(
+  it("replaces mermaid code blocks with rendered svg in order", async () => {
+    const html = await toStandaloneHtml(
       doc("```mermaid\ngraph TD; A-->B;\n```\n\n```js\nconst a = 1;\n```"),
       { mermaidSvgs: ["<svg id=\"one\"></svg>"] }
     );
@@ -49,15 +49,15 @@ describe("standalone HTML export", () => {
     expect(html).toContain("language-js");
   });
 
-  it("keeps the source block when no svg is available", () => {
-    const html = toStandaloneHtml(doc("```mermaid\ngraph TD; A-->B;\n```"), {
+  it("keeps the source block when no svg is available", async () => {
+    const html = await toStandaloneHtml(doc("```mermaid\ngraph TD; A-->B;\n```"), {
       mermaidSvgs: [],
     });
     expect(html).toContain('class="language-mermaid"');
   });
 
-  it("serializes tables and task lists", () => {
-    const html = toStandaloneHtml(
+  it("serializes tables and task lists", async () => {
+    const html = await toStandaloneHtml(
       doc("| A | B |\n| --- | --- |\n| 1 | 2 |\n\n- [x] done\n- [ ] todo")
     );
     expect(html).toContain("<table>");
@@ -67,14 +67,14 @@ describe("standalone HTML export", () => {
 });
 
 describe("mermaid block discovery", () => {
-  it("collects only mermaid-fenced code blocks in document order", () => {
+  it("collects only mermaid-fenced code blocks in document order", async () => {
     const blocks = collectMermaidBlocks(
       doc("```mermaid\nA\n```\n\n```js\nB\n```\n\n```Mermaid\nC\n```")
     );
     expect(blocks).toEqual(["A", "C"]);
   });
 
-  it("ignores empty mermaid blocks", () => {
+  it("ignores empty mermaid blocks", async () => {
     expect(collectMermaidBlocks(doc("```mermaid\n\n```"))).toEqual([]);
   });
 });
@@ -90,14 +90,14 @@ describe("katex font embedding", () => {
 
   it("uses the provided font css in the exported document", async () => {
     const { buildKatexFontCss } = await import("../src/export/katex-fonts");
-    const html = toStandaloneHtml(doc("x"), { katexFontCss: buildKatexFontCss() });
+    const html = await toStandaloneHtml(doc("x"), { katexFontCss: buildKatexFontCss() });
     expect(html).toContain("data:font/woff2;base64");
   });
 });
 
 describe("table of contents", () => {
-  it("emits a toc when requested", () => {
-    const html = toStandaloneHtml(doc("# 第一章\n\n正文\n\n## 1.1 小节\n\n内容"), {
+  it("emits a toc when requested", async () => {
+    const html = await toStandaloneHtml(doc("# 第一章\n\n正文\n\n## 1.1 小节\n\n内容"), {
       title: "T",
       toc: true,
     });
@@ -106,10 +106,10 @@ describe("table of contents", () => {
     expect(html).toContain("1.1 小节");
   });
 
-  it("respects tocDepth", () => {
+  it("respects tocDepth", async () => {
     const md = "# 一级\n\n## 二级\n\n### 三级";
-    const deep = toStandaloneHtml(doc(md), { toc: true, tocDepth: 3 });
-    const shallow = toStandaloneHtml(doc(md), { toc: true, tocDepth: 1 });
+    const deep = await toStandaloneHtml(doc(md), { toc: true, tocDepth: 3 });
+    const shallow = await toStandaloneHtml(doc(md), { toc: true, tocDepth: 1 });
 
     // 只统计 <nav> 内的 <li>，避免匹配到样式表里的类名
     const countEntries = (html: string) => (html.match(/<li class="toc-level-/g) ?? []).length;
@@ -117,27 +117,27 @@ describe("table of contents", () => {
     expect(countEntries(shallow)).toBe(1);
   });
 
-  it("omits the toc by default", () => {
-    expect(toStandaloneHtml(doc("# A"))).not.toContain('<nav class="markweave-toc"');
+  it("omits the toc by default", async () => {
+    expect(await toStandaloneHtml(doc("# A"))).not.toContain('<nav class="markweave-toc"');
   });
 
-  it("links match heading ids", () => {
-    const html = toStandaloneHtml(doc("# 标题一\n\n## 标题二"), { toc: true });
+  it("links match heading ids", async () => {
+    const html = await toStandaloneHtml(doc("# 标题一\n\n## 标题二"), { toc: true });
     const links = [...html.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
     const ids = [...html.matchAll(/<h[1-6] id="([^"]+)"/g)].map((m) => m[1]);
     expect(links).toEqual(ids);
   });
 
-  it("handles a document without headings", () => {
-    const html = toStandaloneHtml(doc("只有正文"), { toc: true });
+  it("handles a document without headings", async () => {
+    const html = await toStandaloneHtml(doc("只有正文"), { toc: true });
     expect(html).not.toContain('<nav class="markweave-toc"');
     expect(html).toContain("只有正文");
   });
 });
 
 describe("front matter exclusion", () => {
-  it("does not render the front matter block in the body", () => {
-    const html = toStandaloneHtml(doc("---\ntitle: X\n---\n\n正文"), { title: "X" });
+  it("does not render the front matter block in the body", async () => {
+    const html = await toStandaloneHtml(doc("---\ntitle: X\n---\n\n正文"), { title: "X" });
     expect(html).not.toContain("front-matter");
     expect(html).not.toContain("title: X");
   });
