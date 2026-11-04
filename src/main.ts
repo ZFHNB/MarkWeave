@@ -161,10 +161,10 @@ import {
 import { enhanceSettingsDescriptions } from "./ui/settings-tooltip";
 import {
   computeBlockStartLines,
-  findLineByBlockText,
+  findAnchorLine,
+  lineAtScrollTop,
   lineForBlockIndex,
   ratioFromScroll,
-  scrollTopForLine,
 } from "./editor/source-mapping";
 import {
   BODY_CJK_FONTS,
@@ -1972,17 +1972,8 @@ function sourceMetrics() {
   return { lineHeight, paddingTop, viewportHeight: sourceEditor.clientHeight };
 }
 
-/** 把光标的行号滚动到可视区上部三分之一处 */
-function scrollSourceToLine(line: number) {
-  const { lineHeight, paddingTop, viewportHeight } = sourceMetrics();
-  sourceEditor.scrollTop = scrollTopForLine(line, { lineHeight, paddingTop, viewportHeight });
-}
+/** 更新视图切换指示器：主视图显示"源码模式"，源码视图显示"退出源代码模式" */
 
-/** 找出 textarea 中光标所在的行号（0 起） */
-function currentSourceLine(): number {
-  const upto = sourceEditor.value.slice(0, sourceEditor.selectionStart);
-  return upto.split("\n").length - 1;
-}
 
 /** 更新视图切换指示器：主视图显示"源码模式"，源码视图显示"退出源代码模式" */
 function syncViewToggleIndicator() {
@@ -2000,47 +1991,117 @@ function syncViewToggleIndicator() {
   }
 }
 
-function toggleSourceMode() {
-  isSourceMode = !isSourceMode;
+/**
+ * 切到源码视图：以「渲染视图可视区顶部的第一个块」为锚点。
+ *
+ * 不用光标位置——光标常停在视口外的某一行（例如搜索命中后又滚回去读），
+ * 按光标同步会把用户带到看不见的地方。用户要的是"我还停在这段文字"。
+ */
+function enterSourceMode(): void {
+  const anchor = editor.getTopVisibleBlock();
+  const metrics = editor.getScrollMetrics();
 
-  if (isSourceMode) {
-    // 进入源码视图：以"光标所在块的内容"为锚点定位源码行
-    const anchorText = editor.getCursorBlockText();
-    const metrics = editor.getScrollMetrics();
+  sourceEditor.value = editor.getMarkdown();
+  sourceEditor.classList.add("visible");
+  btnToggleSource.classList.add("active");
 
-    sourceEditor.value = editor.getMarkdown();
-    sourceEditor.classList.add("visible");
-    btnToggleSource.classList.add("active");
+  // 估算当前在文档中的大致比例，用于同一段文字出现多次时挑最接近的一处
+  const ratio = ratioFromScroll(metrics.top, metrics.scrollHeight, metrics.height);
+  const totalLines = sourceEditor.value.split("\n").length;
+  const nearLine = Math.round(ratio * totalLines);
 
-    // 估算当前在文档中的大致比例，作为多处命中时的参考
-    const ratio = ratioFromScroll(metrics.top, metrics.scrollHeight, metrics.height);
-    const totalLines = sourceEditor.value.split("\n").length;
-    const nearLine = Math.round(ratio * totalLines);
+  const found = anchor?.text
+    ? findAnchorLine(anchor.text, sourceEditor.value, nearLine)
+    : null;
+  const line =
+    found !== null
+      ? found
+      : lineForBlockIndex(
+          computeBlockStartLines(sourceEditor.value, editor.getBlockCount()),
+          anchor?.index ?? editor.getCursorBlockIndex()
+        );
 
-    const found = findLineByBlockText(anchorText, sourceEditor.value, nearLine);
-    const line =
-      found !== null
-        ? found
-        : lineForBlockIndex(
-            computeBlockStartLines(sourceEditor.value, editor.getBlockCount()),
-            editor.getCursorBlockIndex()
-          );
-
-    sourceEditor.focus();
-    // 光标落到该行行首，切回时能从同一位置恢复
-    const lines = sourceEditor.value.split("\n");
-    const offset = lines.slice(0, line).reduce((sum, l) => sum + l.length + 1, 0);
+  // 顶部对齐。必须同时设 selectionStart 与 scrollTop：
+  // 只设 scrollTop 的话，聚焦 textarea 时浏览器会为了露出旧光标把视口拉回去，
+  // 从而丢掉刚刚算好的位置。
+  const alignTop = () => {
+    const offset = sourceOffsetForLine(line);
     sourceEditor.setSelectionRange(offset, offset);
-    scrollSourceToLine(line);
-    // textarea 首次获得布局后需要再滚一次
-    requestAnimationFrame(() => scrollSourceToLine(line));
-    syncViewToggleIndicator();
-    return;
-  }
+    sourceEditor.scrollTop = sourceLineTop(line);
+  };
 
-  // 退出源码视图：按光标所在行找对应的块
-  const line = currentSourceLine();
+  alignTop();
+  sourceEditor.focus();
+  // textarea 首次获得布局后需要再滚一次
+  requestAnimationFrame(alignTop);
+  syncViewToggleIndicator();
+}
+
+/** 源码中某行行首的字符偏移，用于把光标放到同一位置 */
+function sourceOffsetForLine(line: number): number {
+  const lines = sourceEditor.value.split("\n");
+  let offset = 0;
+  for (let i = 0; i < Math.min(line, lines.length); i++) offset += lines[i].length + 1;
+  return offset;
+}
+
+/**
+ * 源码行的「实际顶部偏移」。
+ *
+ * textarea 会按宽度自动折行，长段落占的物理行比逻辑行多得多，
+ * 用 行号 × lineHeight 会把锚点越推越远（长文档能偏出几百像素）。
+ * 这里用镜像 DOM 逐行量真实高度，量不出来时退回估算。
+ */
+function sourceLineTop(line: number): number {
+  const { lineHeight, paddingTop } = sourceMetrics();
+  const mirror = document.createElement("div");
+  const cs = getComputedStyle(sourceEditor);
+  mirror.style.cssText = [
+    "position:absolute",
+    "visibility:hidden",
+    "top:-99999px",
+    "left:-99999px",
+    `width:${sourceEditor.clientWidth}px`,
+    `padding:${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`,
+    `border:${cs.borderWidth} solid transparent`,
+    `box-sizing:${cs.boxSizing}`,
+    `font-family:${cs.fontFamily}`,
+    `font-size:${cs.fontSize}`,
+    `line-height:${cs.lineHeight}`,
+    `letter-spacing:${cs.letterSpacing}`,
+    "white-space:pre-wrap",
+    "overflow-wrap:break-word",
+    "word-break:break-word",
+    "tab-size:4",
+  ].join(";");
+
+  const lines = sourceEditor.value.split("\n");
+  const before = document.createElement("div");
+  before.textContent = lines.slice(0, line).join("\n") + (line > 0 ? "\n" : "");
+  mirror.appendChild(before);
+  document.body.appendChild(mirror);
+
+  // a 是「该行之前」占的高度，b 是「该行本身」占的高度
+  const a = before.getBoundingClientRect().height;
+  const after = document.createElement("div");
+  after.textContent = lines[line] ?? "";
+  mirror.appendChild(after);
+  const b = after.getBoundingClientRect().height;
+  mirror.remove();
+
+  if (!Number.isFinite(a) || a <= 0) return paddingTop + line * lineHeight;
+  // b 减去 padding 才是内容高度；至少按一行算
+  const contentB = Math.max(lineHeight, b - paddingTop);
+  return paddingTop + a + (contentB - lineHeight);
+}
+
+/**
+ * 切回渲染视图：同样以「源码可视区顶部的第一行」为锚点。
+ */
+function exitSourceMode(): void {
   const sourceText = sourceEditor.value;
+  const anchorLine = currentSourceTopLine();
+  const anchorText = sourceLineText(anchorLine);
 
   editor.setMarkdown(sourceText);
 
@@ -2057,58 +2118,74 @@ function toggleSourceMode() {
   editor.focus();
   syncViewToggleIndicator();
 
-  // 记录源码光标在本行内的列偏移，切回时据此还原块内位置
-  const sourceLines = sourceText.split("\n");
-  const lineRaw = sourceLines[line] ?? "";
-  const lineStart = sourceText.lastIndexOf("\n", sourceEditor.selectionStart - 1) + 1;
-  const columnInLine = Math.max(0, sourceEditor.selectionStart - lineStart);
-  // 行首的 Markdown 标记（#、>、- 等）在渲染视图里不存在，需要扣掉
-  const leadingMarkup = (lineRaw.match(/^[\s#>*+\-\d.]+/) ?? [""])[0].length;
-  const inlineOffset = Math.max(0, columnInLine - leadingMarkup);
-
-  // 用该行的文本在渲染文档里反查块位置。
+  // 用锚点行的文字在渲染文档里反查块位置。
   // 需要等两帧：setMarkdown 之后 ProseMirror 才会完成 DOM 重建。
-  const lineText = lineRaw.trim();
+  const needle = anchorText
+    .replace(/^[#>*+\-\d.\s]+/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 24);
+
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
-      if (!lineText) return;
-
-      // 直接在渲染文档的顶层块里找包含该文本的块，比行号映射更直接
-      const needle = lineText
-        .replace(/^[#>*+\-\d.\s]+/, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 24);
-
-      if (needle) {
-        const doc = editor.getDocument();
-        let targetIndex = -1;
-        let idx = 0;
-        doc.forEach((node) => {
-          if (targetIndex >= 0) return;
-          const text = node.textContent.replace(/\s+/g, " ").trim();
-          if (text.includes(needle)) targetIndex = idx;
-          idx++;
-        });
-
-        if (targetIndex >= 0) {
-          // 光标与滚动位置都要恢复，否则下一次切换又会从文档开头算起
-          editor.setCursorToBlock(targetIndex, inlineOffset);
-          editor.scrollToBlockIndex(targetIndex);
-          return;
-        }
+      if (!needle) {
+        scrollEditorBySourceRatio(anchorLine, sourceText);
+        return;
       }
 
-      // 兜底：按行号比例定位
-      const totalLines = Math.max(1, sourceText.split("\n").length);
-      const ratio = line / totalLines;
-      const metrics = editor.getScrollMetrics();
-      const scroller = document.querySelector(".ty-editor-scroller") as HTMLElement | null;
-      if (scroller) {
-        scroller.scrollTop = ratio * Math.max(0, metrics.scrollHeight - metrics.height);
+      const doc = editor.getDocument();
+      let targetIndex = -1;
+      let idx = 0;
+      doc.forEach((node) => {
+        if (targetIndex >= 0) return;
+        const text = node.textContent.replace(/\s+/g, " ").trim();
+        if (text.includes(needle)) targetIndex = idx;
+        idx++;
+      });
+
+      if (targetIndex >= 0) {
+        // 只滚到该块顶部，不移动光标——用户在源码里未必把光标放在正在读的位置
+        editor.scrollBlockToTop(targetIndex);
+        return;
       }
+      scrollEditorBySourceRatio(anchorLine, sourceText);
     })
   );
+}
+
+/** 源码 textarea 可视区第一行对应的行号（0 起） */
+function currentSourceTopLine(): number {
+  const { lineHeight, paddingTop } = sourceMetrics();
+  return lineAtScrollTop(sourceEditor.scrollTop, {
+    lineHeight,
+    paddingTop,
+    viewportHeight: sourceEditor.clientHeight,
+  });
+}
+
+/** 取源码中某一行的文字（用于渲染视图里反查块） */
+function sourceLineText(line: number): string {
+  return sourceEditor.value.split("\n")[line] ?? "";
+}
+
+/**
+ * 兜底定位：源码与渲染文档的块无法按文字对应时，按行比例滚动。
+ */
+function scrollEditorBySourceRatio(anchorLine: number, sourceText: string): void {
+  const totalLines = Math.max(1, sourceText.split("\n").length);
+  const metrics = editor.getScrollMetrics();
+  const scroller = document.querySelector(".ty-editor-scroller") as HTMLElement | null;
+  if (!scroller) return;
+  scroller.scrollTop = (anchorLine / totalLines) * Math.max(0, metrics.scrollHeight - metrics.height);
+}
+
+function toggleSourceMode() {
+  isSourceMode = !isSourceMode;
+  if (isSourceMode) {
+    enterSourceMode();
+  } else {
+    exitSourceMode();
+  }
 }
 
 btnToggleSource.addEventListener("click", toggleSourceMode);

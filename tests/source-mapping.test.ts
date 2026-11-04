@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   blockIndexForLine,
   computeBlockStartLines,
+  findAnchorLine,
   findLineByBlockText,
+  lineAtScrollTop,
   lineForBlockIndex,
   ratioFromScroll,
   scrollTopForLine,
@@ -100,5 +102,63 @@ describe("ratioFromScroll", () => {
 
   it("handles a non-scrollable document", () => {
     expect(ratioFromScroll(0, 100, 200)).toBe(0);
+  });
+});
+
+describe("reading-position sync (viewport top, not cursor)", () => {
+  const MD = `# 开头
+
+第一段正文。
+
+## 中间一节
+
+这一节是用户正在读的地方。
+
+## 结尾
+
+最后一段。`;
+
+  it("reads the top line back from a scroll offset", () => {
+    const win = { lineHeight: 24, paddingTop: 20, viewportHeight: 600 };
+    // 让第 N 行顶部对齐视口顶部所需的偏移 = paddingTop + N * lineHeight
+    expect(lineAtScrollTop(20, win)).toBe(0);
+    expect(lineAtScrollTop(20 + 24, win)).toBe(1);
+    expect(lineAtScrollTop(20 + 24 * 7, win)).toBe(7);
+    // 行内偏移向下取整：仍是同一行
+    expect(lineAtScrollTop(20 + 24 * 7 + 12, win)).toBe(7);
+  });
+
+  it("clamps when scrolled above the content", () => {
+    const win = { lineHeight: 24, paddingTop: 20, viewportHeight: 600 };
+    expect(lineAtScrollTop(0, win)).toBe(0);
+  });
+
+  it("locates the anchor by the start of its text, not just containment", () => {
+    const line = findAnchorLine("这一节是用户正在读的地方。", MD);
+    expect(line).toBe(6);
+    expect(MD.split("\n")[line!].startsWith("这一节")).toBe(true);
+  });
+
+  it("ignores markdown markers when matching headings", () => {
+    expect(findAnchorLine("中间一节", MD)).toBe(4);
+  });
+
+  it("disambiguates repeated text with nearLine", () => {
+    const repeated = ["重复段落", "", "填充", "", "填充", "", "重复段落"].join("\n");
+    const first = findAnchorLine("重复段落", repeated, 0);
+    const second = findAnchorLine("重复段落", repeated, 6);
+    expect(first).toBe(0);
+    expect(second).toBe(6);
+  });
+
+  it("falls back to a windowed match for wrapped blocks", () => {
+    const wrapped = ["头部", "", "这是一段会被源码换行拆开的长文字", "继续的部分"].join("\n");
+    // 该段跨两行；块从第 2 行开始，上一行的空白行不算
+    expect(findAnchorLine("这是一段会被源码换行拆开的长文字继续的部分", wrapped)).toBe(2);
+  });
+
+  it("returns null when nothing matches", () => {
+    expect(findAnchorLine("不存在的文字", MD)).toBeNull();
+    expect(findAnchorLine("   ", MD)).toBeNull();
   });
 });

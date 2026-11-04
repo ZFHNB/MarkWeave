@@ -294,6 +294,71 @@ export class MarkWeaveEditor {
     scroller.scrollTop = Math.max(0, relativeTop - scroller.clientHeight / 3);
   }
 
+  /**
+   * 把指定顶层块滚到可视区顶部。
+   *
+   * 与 scrollToBlockIndex 的区别：这里不做「上部三分之一」的偏移，
+   * 也不移动光标——视图切换时用户只该看到同一段文字出现在同一位置。
+   */
+  public scrollBlockToTop(index: number): void {
+    const doc = this.view.state.doc;
+    if (doc.childCount === 0) return;
+
+    const clamped = Math.min(Math.max(0, index), doc.childCount - 1);
+    let offset = 0;
+    for (let i = 0; i < clamped; i++) offset += doc.child(i).nodeSize;
+
+    const dom = this.view.nodeDOM(offset);
+    const scroller = this.view.dom.closest(".ty-editor-scroller") as HTMLElement | null;
+    if (!(dom instanceof HTMLElement) || !scroller) return;
+
+    const domRect = dom.getBoundingClientRect();
+    const scrollerRect = scroller.getBoundingClientRect();
+    const relativeTop = domRect.top - scrollerRect.top + scroller.scrollTop;
+    scroller.scrollTop = Math.max(0, relativeTop);
+  }
+
+  /**
+   * 视口顶部第一个可见的顶层块——「用户此刻在读哪一段」的锚点。
+   *
+   * 视图切换时用它而不是光标：光标可能停在视口外的某一行，
+   * 按光标同步会让用户丢失阅读位置。返回 null 表示取不到可信值。
+   */
+  public getTopVisibleBlock(): { index: number; text: string } | null {
+    const doc = this.view.state.doc;
+    if (doc.childCount === 0) return null;
+
+    const scroller = this.view.dom.closest(".ty-editor-scroller") as HTMLElement | null;
+    if (!scroller) return null;
+
+    const scrollerRect = scroller.getBoundingClientRect();
+    let offset = 0;
+    let best: { index: number; text: string; top: number } | null = null;
+
+    for (let i = 0; i < doc.childCount; i++) {
+      const node = doc.child(i);
+      const dom = this.view.nodeDOM(offset);
+      offset += node.nodeSize;
+      if (!(dom instanceof HTMLElement)) continue;
+
+      const rect = dom.getBoundingClientRect();
+      // 块底边还在视口顶部之上：完全滚过去了，继续找
+      if (rect.bottom <= scrollerRect.top + 1) continue;
+
+      const text = node.textContent.replace(/\s+/g, " ").trim();
+      // 空块（分隔线、占位段落等）读不出文字，不能当锚点
+      if (!text) {
+        // 但它是第一个可见块时仍要记住，供兜底使用
+        if (!best) best = { index: i, text: "", top: rect.top - scrollerRect.top };
+        continue;
+      }
+      best = { index: i, text, top: rect.top - scrollerRect.top };
+      break;
+    }
+
+    return best ? { index: best.index, text: best.text } : null;
+  }
+
   /** 当前选区文本；无选区时返回空串 */
   public getSelectionText(): string {
     const { from, to, empty } = this.view.state.selection;

@@ -25,6 +25,82 @@ export function scrollTopForLine(line: number, window: LineWindow): number {
 }
 
 /**
+ * 「滚动到某个偏移后，落在可视区顶部的是第几行」。
+ *
+ * 源码视图按行流式排版、行高固定，所以由 scrollTop 反推行号是精确的。
+ * 注意不能直接对它取 scrollTopForLine 的逆：后者把目标行放在上部三分之一处，
+ * 内容够长时还多减了 viewportHeight/3；这里按"行首刚好越过视口顶部"来算，
+ * 超出的部分向下取整，因此截断到 0 的那一段会稳定落在第 0 行。
+ */
+export function lineAtScrollTop(scrollTop: number, window: LineWindow): number {
+  const contentY = Math.max(0, scrollTop) - window.paddingTop;
+  return Math.max(0, Math.floor(contentY / Math.max(1, window.lineHeight)));
+}
+
+/**
+ * 在源码里定位「阅读锚点」所在的行。
+ *
+ * 锚点就是用户在渲染视图里正在看的那段文字（可视区顶部的第一个块）。
+ * 与 findLineByBlockText 的区别：这里要求尽量落在锚点文字的开头，
+ * 而不是包含它的任意一行——块内容跨多行时，"开头"才是视觉位置。
+ *
+ * @param anchorText 锚点块的纯文本（可只取开头几十个字符）
+ * @param markdown   源码全文
+ * @param nearLine   参考行号，多个候选时取最接近的
+ */
+export function findAnchorLine(
+  anchorText: string,
+  markdown: string,
+  nearLine = 0
+): number | null {
+  const raw = anchorText.replace(/\s+/g, " ").trim();
+  if (!raw) return null;
+
+  const lines = markdown.split("\n");
+  const head = raw.slice(0, 24);
+  const candidates: number[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    // 去掉行首的 Markdown 标记（#、>、-、1. 等）与前后空白后比较
+    const stripped = lines[i]
+      .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+\.\s+)/, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!stripped) continue;
+    // 只接受「以锚点文字开头」的行。
+    //
+    // 不能用 includes：像「第 3 节」这样的锚点会命中「第 30 节」「第 31 节」，
+    // 一旦原文没有完全相同的段落（标题带 # 前缀等），就会定位到错误的小节。
+    if (stripped.startsWith(head)) candidates.push(i);
+  }
+
+  if (candidates.length > 0) {
+    return candidates.reduce((best, cur) =>
+      Math.abs(cur - nearLine) < Math.abs(best - nearLine) ? cur : best
+    );
+  }
+
+  // 跨行匹配兜底：块内容被换行拆开时，把连续几行拼起来再比较。
+  // 拼接时要忽略空白，否则 needle 里的空格永远对不上换行。
+  // 还要求窗口的第一行本身是锚点开头——否则提前几行的"尾巴 + 目标行"
+  // 拼起来也能包含 needle，定位会落到上一段去。
+  const needle = raw.replace(/\s+/g, "").slice(0, 40);
+  if (needle.length >= 8) {
+    for (let i = 0; i < lines.length; i++) {
+      const firstLine = lines[i].replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+\.\s+)/, "").replace(/\s+/g, "");
+      if (!firstLine) continue;
+      if (!needle.startsWith(firstLine.slice(0, Math.min(firstLine.length, 12)))) continue;
+      const window = lines
+        .slice(i, i + 4)
+        .join("")
+        .replace(/\s+/g, "");
+      if (window.includes(needle)) return i;
+    }
+  }
+  return null;
+}
+
+/**
  * 根据编辑器滚动位置估算在源码中的比例位置（0–1）。
  * 只在无法取得精确块位置时作为兜底。
  */
