@@ -240,3 +240,86 @@ export function blockIndexForLine(blocks: number[], line: number): number {
   }
   return index;
 }
+
+/** 每逻辑行行首的字符偏移 */
+export function lineStartOffsets(text: string): number[] {
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\n") starts.push(i + 1);
+  }
+  return starts;
+}
+
+/** 字符偏移所在的逻辑行号（0 起） */
+export function lineIndexForOffset(starts: number[], offset: number): number {
+  // 二分找「不超过 offset 的最后一个行首」
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (starts[mid] <= offset) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/**
+ * 字符偏移 → 视觉行号（考虑 textarea 的自动折行）。
+ *
+ * `lineHeights[i]` 是第 i 个逻辑行在 textarea 里实际占的高度。
+ * 偏移落在某行内部时，按该行内已显示的字符比例估算折到了第几个视觉行。
+ */
+export function visualLineForOffset(
+  starts: number[],
+  text: string,
+  offset: number,
+  lineHeights: number[],
+  lineHeight: number
+): number {
+  if (starts.length === 0) return 0;
+  const clamped = Math.max(0, Math.min(offset, text.length));
+  const index = lineIndexForOffset(starts, clamped);
+  const lh = Math.max(1, lineHeight);
+
+  let visual = 0;
+  for (let i = 0; i < index; i++) {
+    visual += Math.max(1, Math.round((lineHeights[i] || lh) / lh));
+  }
+
+  const lineStart = starts[index];
+  const lineEnd = index + 1 < starts.length ? starts[index + 1] - 1 : text.length;
+  const lineLength = Math.max(1, lineEnd - lineStart);
+  const within = (clamped - lineStart) / lineLength;
+  const wrapped = Math.max(1, Math.round((lineHeights[index] || lh) / lh));
+  return visual + Math.min(wrapped - 1, Math.floor(within * wrapped));
+}
+
+/**
+ * 视觉行号 → 该视觉行对应的字符偏移。
+ *
+ * 视觉行是 textarea 按宽度折行后的结果，一个逻辑行可能占多个视觉行。
+ * 这里按「字符在行内的比例」反推，足够定位到用户在顶部看到的那句话。
+ */
+export function offsetForVisualLine(
+  starts: number[],
+  text: string,
+  visualLine: number,
+  lineHeights: number[],
+  lineHeight: number
+): number {
+  if (starts.length === 0) return 0;
+  const lh = Math.max(1, lineHeight);
+  let remaining = Math.max(0, visualLine);
+
+  for (let i = 0; i < starts.length; i++) {
+    const wrapped = Math.max(1, Math.round((lineHeights[i] || lh) / lh));
+    if (remaining < wrapped) {
+      const lineStart = starts[i];
+      const lineEnd = i + 1 < starts.length ? starts[i + 1] - 1 : text.length;
+      const ratio = wrapped <= 1 ? 0 : remaining / wrapped;
+      return Math.min(lineEnd, lineStart + Math.floor((lineEnd - lineStart) * ratio));
+    }
+    remaining -= wrapped;
+  }
+  return text.length;
+}

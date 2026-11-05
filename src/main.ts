@@ -84,6 +84,9 @@ import {
   createTabState,
   openTab,
   closeTab,
+  closeOtherTabs,
+  closeAllTabs,
+  closeTabsToRight,
   cycleTab,
   updateTabTitle,
   reopenClosedTab,
@@ -162,8 +165,8 @@ import { enhanceSettingsDescriptions } from "./ui/settings-tooltip";
 import {
   computeBlockStartLines,
   findAnchorLine,
-  lineAtScrollTop,
   lineForBlockIndex,
+  lineStartOffsets,
   ratioFromScroll,
 } from "./editor/source-mapping";
 import {
@@ -739,11 +742,7 @@ function renderTabs(): void {
     close.addEventListener("mousedown", (e) => e.preventDefault());
     close.addEventListener("click", (e) => {
       e.stopPropagation();
-      tabState = closeTab(tabState, tab.docId);
-      renderTabs();
-      if (tabState.activeTabId) {
-        switchDocument(tabState.activeTabId);
-      }
+      applyTabClose(closeTab(tabState, tab.docId));
     });
 
     el.appendChild(label);
@@ -751,9 +750,15 @@ function renderTabs(): void {
     el.addEventListener("click", () => switchDocument(tab.docId));
     el.addEventListener("auxclick", (e) => {
       if (e.button === 1) {
-        tabState = closeTab(tabState, tab.docId);
-        renderTabs();
+        e.preventDefault();
+        applyTabClose(closeTab(tabState, tab.docId));
       }
+    });
+    // 右键：关闭 / 关闭其他 / 关闭右侧 / 关闭全部
+    el.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openTabContextMenu(tab.docId, e.clientX, e.clientY);
     });
     tabStrip.appendChild(el);
   });
@@ -790,6 +795,153 @@ function closeActiveTab(): void {
     const fallback = documents.find((d) => d.id === activeDocId) ?? documents[0];
     if (fallback && fallback.id !== activeDocId) switchDocument(fallback.id);
   }
+}
+
+/**
+ * 关闭标签后的公共收尾：同步编辑器、标签栏与文件列表。
+ *
+ * 标签全部关掉时不必强制切回某篇文档——用户可能就是想清空标签栏，
+ * 编辑器继续保持当前内容即可（文档仍在工作区，随时能重开）。
+ */
+function applyTabClose(next: TabState): void {
+  const previousActive = tabState.activeTabId;
+  tabState = next;
+  renderTabs();
+
+  if (tabState.activeTabId && tabState.activeTabId !== activeDocId) {
+    switchDocument(tabState.activeTabId);
+  } else if (!tabState.activeTabId && previousActive) {
+    // 激活标签被关掉了：把编辑器停到当前文档上，不做额外跳转
+    renderFileList();
+  }
+}
+
+/** 关闭指定的其它标签（保留 keepId） */
+function closeOtherTabsOf(keepId: string): void {
+  if (tabState.tabs.length <= 1) return;
+  applyTabClose(closeOtherTabs(tabState, keepId));
+  if (keepId !== activeDocId) switchDocument(keepId);
+}
+
+/** 关闭全部标签 */
+function closeAllTabsOf(): void {
+  if (tabState.tabs.length === 0) return;
+  applyTabClose(closeAllTabs(tabState));
+  toast("已关闭全部标签，文档仍保留在工作区", "info");
+}
+
+/** 关闭 keepId 右侧的全部标签 */
+function closeTabsRightOf(keepId: string): void {
+  applyTabClose(closeTabsToRight(tabState, keepId));
+}
+
+/** 已打开文档项的右键菜单（文件列表里「已打开文档」分组） */
+function openDocumentContextMenu(docId: string, x: number, y: number): void {
+  const doc = documents.find((d) => d.id === docId);
+  if (!doc) return;
+  const isTabOpen = tabState.tabs.some((tab) => tab.docId === docId);
+
+  openMenuAt(
+    { left: x, right: x, top: y, bottom: y, width: 0, height: 0 },
+    [
+      { label: "打开", onClick: () => switchDocument(docId) },
+      { kind: "separator" },
+      {
+        label: "关闭",
+        shortcut: "Ctrl+W",
+        disabled: !isTabOpen,
+        onClick: () => applyTabClose(closeTab(tabState, docId)),
+      },
+      {
+        label: "关闭其他文档",
+        disabled: tabState.tabs.length <= 1,
+        onClick: () => closeOtherTabsOf(docId),
+      },
+      {
+        label: "关闭全部文档",
+        disabled: tabState.tabs.length === 0,
+        onClick: () => closeAllTabsOf(),
+      },
+      { kind: "separator" },
+      {
+        label: "在文件夹中显示",
+        disabled: !doc.filePath,
+        onClick: () => {
+          if (doc.filePath) void revealPath(doc.filePath);
+        },
+      },
+    ]
+  );
+}
+
+/** 工作区文件行的右键菜单（尚未打开的文件） */
+function openWorkspaceFileContextMenu(file: FlatFile, x: number, y: number): void {
+  openMenuAt(
+    { left: x, right: x, top: y, bottom: y, width: 0, height: 0 },
+    [
+      { label: "打开", onClick: () => void openWorkspaceFile(file.path) },
+      { kind: "separator" },
+      { label: "重命名…", onClick: () => void renameWorkspaceFile(file) },
+      {
+        label: "删除…",
+        onClick: () => void deleteWorkspaceFile(file),
+      },
+      { kind: "separator" },
+      {
+        label: "在文件夹中显示",
+        onClick: () => void revealPath(file.path),
+      },
+      {
+        label: "关闭全部标签",
+        disabled: tabState.tabs.length === 0,
+        onClick: () => closeAllTabsOf(),
+      },
+    ]
+  );
+}
+
+/** 标签栏右键菜单 */
+function openTabContextMenu(docId: string, x: number, y: number): void {
+  const index = tabState.tabs.findIndex((tab) => tab.docId === docId);
+  const hasRight = index >= 0 && index < tabState.tabs.length - 1;
+
+  openMenuAt(
+    { left: x, right: x, top: y, bottom: y, width: 0, height: 0 },
+    [
+      {
+        label: "关闭",
+        shortcut: "Ctrl+W",
+        onClick: () => {
+          tabState = closeTab(tabState, docId);
+          applyTabClose(tabState);
+        },
+      },
+      {
+        label: "关闭其他标签",
+        disabled: tabState.tabs.length <= 1,
+        onClick: () => closeOtherTabsOf(docId),
+      },
+      {
+        label: "关闭右侧标签",
+        disabled: !hasRight,
+        onClick: () => closeTabsRightOf(docId),
+      },
+      { kind: "separator" },
+      {
+        label: "关闭全部标签",
+        onClick: () => closeAllTabsOf(),
+      },
+      { kind: "separator" },
+      {
+        label: "在文件夹中显示",
+        disabled: !documents.find((d) => d.id === docId)?.filePath,
+        onClick: () => {
+          const doc = documents.find((d) => d.id === docId);
+          if (doc?.filePath) void revealPath(doc.filePath);
+        },
+      },
+    ]
+  );
 }
 
 /** 在当前标签之间循环（Ctrl+Tab / Ctrl+Shift+Tab） */
@@ -883,7 +1035,8 @@ function renderFileList() {
       row.addEventListener("click", () => void openWorkspaceFile(file.path));
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
-        void revealPath(file.path);
+        event.stopPropagation();
+        openWorkspaceFileContextMenu(file, event.clientX, event.clientY);
       });
       fileListContainer.appendChild(row);
     });
@@ -1033,6 +1186,12 @@ function renderFileList() {
         return;
       }
       switchDocument(doc.id);
+    });
+    // 右键：同样提供关闭单个 / 关闭其他 / 关闭全部
+    itemEl.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openDocumentContextMenu(doc.id, event.clientX, event.clientY);
     });
 
     itemEl.appendChild(iconSpan);
@@ -1964,13 +2123,6 @@ document.querySelectorAll(".ty-sidebar-tab").forEach((tab) => {
 
 // 源码模式切换 (Ctrl+/ 或按钮)
 let isSourceMode = false;
-/** 读出 textarea 的行高与内边距，用于按行定位滚动 */
-function sourceMetrics() {
-  const cs = getComputedStyle(sourceEditor);
-  const lineHeight = parseFloat(cs.lineHeight) || 24;
-  const paddingTop = parseFloat(cs.paddingTop) || 0;
-  return { lineHeight, paddingTop, viewportHeight: sourceEditor.clientHeight };
-}
 
 /** 更新视图切换指示器：主视图显示"源码模式"，源码视图显示"退出源代码模式" */
 
@@ -1992,6 +2144,82 @@ function syncViewToggleIndicator() {
 }
 
 /**
+ * 源码视图与渲染视图共用的「行高测量」。
+ *
+ * textarea 会按宽度自动折行，长段落占的视觉行远多于逻辑行。
+ * 用镜像 DOM 逐行量真实高度，量不出来时退回 行号 × lineHeight 的估算。
+ */
+/**
+ * 源码字符偏移 → 该偏移在 textarea 里的像素顶部（含 padding）。
+ *
+ * 在镜像 DOM 里重排同一段文本，用 Range 读该字符所在行的矩形。
+ * 关键是把 textarea 的宽度/字体/空白处理逐项复制过去，否则折行位置会变。
+ */
+function sourceTopForOffset(text: string, offset: number): number {
+  const cs = getComputedStyle(sourceEditor);
+  const lineHeight = parseFloat(cs.lineHeight) || 24;
+  const paddingTop = parseFloat(cs.paddingTop) || 0;
+  const clamped = Math.max(0, Math.min(offset, text.length));
+
+  // 关键：镜像的可用宽度必须与 textarea 的「内容宽度」一致。
+  // textarea 是 border-box，padding 由控件自己扣；div 若也用 border-box，
+  // 就需要 width = clientWidth 且 padding = 0（已扣过一次），宽度才对得上。
+  // 这里用 content-box + 显式内容宽度，避免重复扣除 padding。
+  const mirror = document.createElement("div");
+  const contentWidth = Math.max(
+    1,
+    sourceEditor.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0")
+  );
+  mirror.style.cssText = [
+    "position:absolute",
+    "visibility:hidden",
+    "top:0",
+    "left:-99999px",
+    `width:${contentWidth}px`,
+    "padding:0",
+    "border:0",
+    "box-sizing:content-box",
+    `font-family:${cs.fontFamily}`,
+    `font-size:${cs.fontSize}`,
+    `font-weight:${cs.fontWeight}`,
+    `font-style:${cs.fontStyle}`,
+    `line-height:${cs.lineHeight}`,
+    `letter-spacing:${cs.letterSpacing}`,
+    `word-spacing:${cs.wordSpacing}`,
+    `text-transform:${cs.textTransform}`,
+    `font-variant:${cs.fontVariant}`,
+    `font-feature-settings:${cs.fontFeatureSettings}`,
+    "white-space:pre-wrap",
+    "overflow-wrap:break-word",
+    "word-break:normal",
+    "tab-size:4",
+  ].join(";");
+  document.body.appendChild(mirror);
+
+  let top = Number.NaN;
+  try {
+    const node = mirror.firstChild;
+    if (node) {
+      const range = document.createRange();
+      range.setStart(node, clamped);
+      range.setEnd(node, Math.min(text.length, clamped + 1));
+      const rects = range.getClientRects();
+      if (rects.length > 0) {
+        top = rects[0].top - mirror.getBoundingClientRect().top;
+      }
+    }
+  } catch {
+    top = Number.NaN;
+  }
+  mirror.remove();
+
+  if (!Number.isFinite(top) || top < 0) {
+    return paddingTop + (text.slice(0, clamped).split("\n").length - 1) * lineHeight;
+  }
+  return paddingTop + top;
+}
+
+/**
  * 切到源码视图：以「渲染视图可视区顶部的第一个块」为锚点。
  *
  * 不用光标位置——光标常停在视口外的某一行（例如搜索命中后又滚回去读），
@@ -1999,109 +2227,59 @@ function syncViewToggleIndicator() {
  */
 function enterSourceMode(): void {
   const anchor = editor.getTopVisibleBlock();
-  const metrics = editor.getScrollMetrics();
+  const spans = editor.getBlockSpans();
 
   sourceEditor.value = editor.getMarkdown();
   sourceEditor.classList.add("visible");
   btnToggleSource.classList.add("active");
 
-  // 估算当前在文档中的大致比例，用于同一段文字出现多次时挑最接近的一处
+  // 1) 优先用「块 → 源码字符偏移」的精确映射（与序列化器同源，逐字一致）
+  let sourceOffset: number | null = null;
+  if (anchor && spans[anchor.index]) {
+    sourceOffset = spans[anchor.index].start;
+  }
+
+  // 2) 块偏移与源码文本对不上时（外部粘贴、块重建等），按文字反查
+  const metrics = editor.getScrollMetrics();
   const ratio = ratioFromScroll(metrics.top, metrics.scrollHeight, metrics.height);
-  const totalLines = sourceEditor.value.split("\n").length;
-  const nearLine = Math.round(ratio * totalLines);
+  const nearLine = Math.round(ratio * sourceEditor.value.split("\n").length);
+  if (sourceOffset === null && anchor?.text) {
+    const found = findAnchorLine(anchor.text, sourceEditor.value, nearLine);
+    if (found !== null) {
+      sourceOffset = lineStartOffsets(sourceEditor.value)[found] ?? null;
+    }
+  }
 
-  const found = anchor?.text
-    ? findAnchorLine(anchor.text, sourceEditor.value, nearLine)
-    : null;
-  const line =
-    found !== null
-      ? found
-      : lineForBlockIndex(
-          computeBlockStartLines(sourceEditor.value, editor.getBlockCount()),
-          anchor?.index ?? editor.getCursorBlockIndex()
-        );
+  // 3) 最后兜底：按块序号估行
+  if (sourceOffset === null) {
+    const blocks = computeBlockStartLines(sourceEditor.value, editor.getBlockCount());
+    const line = lineForBlockIndex(blocks, anchor?.index ?? editor.getCursorBlockIndex());
+    sourceOffset = lineStartOffsets(sourceEditor.value)[line] ?? 0;
+  }
 
-  // 顶部对齐。必须同时设 selectionStart 与 scrollTop：
-  // 只设 scrollTop 的话，聚焦 textarea 时浏览器会为了露出旧光标把视口拉回去，
-  // 从而丢掉刚刚算好的位置。
-  const alignTop = () => {
-    const offset = sourceOffsetForLine(line);
-    sourceEditor.setSelectionRange(offset, offset);
-    sourceEditor.scrollTop = sourceLineTop(line);
-  };
-
-  alignTop();
+  // 让浏览器自己算偏移位置的像素坐标：它对折行有权威数据，
+  // 镜像测量在长行/表格上会偏。做法是先把光标移到锚点并聚焦，
+  // 浏览器会将它滚进视野；随后读出锚点相对视口顶部的距离并校正。
   sourceEditor.focus();
-  // textarea 首次获得布局后需要再滚一次
-  requestAnimationFrame(alignTop);
+  sourceEditor.setSelectionRange(sourceOffset, sourceOffset);
+  sourceEditor.scrollTop = sourceTopForOffset(sourceEditor.value, sourceOffset);
+
+  // 再用浏览器实际折行结果校正一次（差分，不依赖绝对测量）
+  const settle = () => {
+    sourceEditor.scrollTop = sourceTopForOffset(sourceEditor.value, sourceOffset);
+  };
+  requestAnimationFrame(settle);
   syncViewToggleIndicator();
 }
 
-/** 源码中某行行首的字符偏移，用于把光标放到同一位置 */
-function sourceOffsetForLine(line: number): number {
-  const lines = sourceEditor.value.split("\n");
-  let offset = 0;
-  for (let i = 0; i < Math.min(line, lines.length); i++) offset += lines[i].length + 1;
-  return offset;
-}
-
 /**
- * 源码行的「实际顶部偏移」。
- *
- * textarea 会按宽度自动折行，长段落占的物理行比逻辑行多得多，
- * 用 行号 × lineHeight 会把锚点越推越远（长文档能偏出几百像素）。
- * 这里用镜像 DOM 逐行量真实高度，量不出来时退回估算。
- */
-function sourceLineTop(line: number): number {
-  const { lineHeight, paddingTop } = sourceMetrics();
-  const mirror = document.createElement("div");
-  const cs = getComputedStyle(sourceEditor);
-  mirror.style.cssText = [
-    "position:absolute",
-    "visibility:hidden",
-    "top:-99999px",
-    "left:-99999px",
-    `width:${sourceEditor.clientWidth}px`,
-    `padding:${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`,
-    `border:${cs.borderWidth} solid transparent`,
-    `box-sizing:${cs.boxSizing}`,
-    `font-family:${cs.fontFamily}`,
-    `font-size:${cs.fontSize}`,
-    `line-height:${cs.lineHeight}`,
-    `letter-spacing:${cs.letterSpacing}`,
-    "white-space:pre-wrap",
-    "overflow-wrap:break-word",
-    "word-break:break-word",
-    "tab-size:4",
-  ].join(";");
-
-  const lines = sourceEditor.value.split("\n");
-  const before = document.createElement("div");
-  before.textContent = lines.slice(0, line).join("\n") + (line > 0 ? "\n" : "");
-  mirror.appendChild(before);
-  document.body.appendChild(mirror);
-
-  // a 是「该行之前」占的高度，b 是「该行本身」占的高度
-  const a = before.getBoundingClientRect().height;
-  const after = document.createElement("div");
-  after.textContent = lines[line] ?? "";
-  mirror.appendChild(after);
-  const b = after.getBoundingClientRect().height;
-  mirror.remove();
-
-  if (!Number.isFinite(a) || a <= 0) return paddingTop + line * lineHeight;
-  // b 减去 padding 才是内容高度；至少按一行算
-  const contentB = Math.max(lineHeight, b - paddingTop);
-  return paddingTop + a + (contentB - lineHeight);
-}
-
-/**
- * 切回渲染视图：同样以「源码可视区顶部的第一行」为锚点。
+ * 切回渲染视图：以「源码可视区顶部的第一个视觉行」为锚点。
  */
 function exitSourceMode(): void {
   const sourceText = sourceEditor.value;
-  const anchorLine = currentSourceTopLine();
-  const anchorText = sourceLineText(anchorLine);
+
+  // 顶部锚点：用与正向完全相同的镜像测量，反查「可视区顶部那个字符」
+  const anchorOffset = offsetAtSourceTop(sourceText, sourceEditor.scrollTop);
 
   editor.setMarkdown(sourceText);
 
@@ -2118,65 +2296,108 @@ function exitSourceMode(): void {
   editor.focus();
   syncViewToggleIndicator();
 
-  // 用锚点行的文字在渲染文档里反查块位置。
-  // 需要等两帧：setMarkdown 之后 ProseMirror 才会完成 DOM 重建。
-  const needle = anchorText
-    .replace(/^[#>*+\-\d.\s]+/, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 24);
-
+  // setMarkdown 之后 ProseMirror 的 DOM 要重建，等两帧再定位
   requestAnimationFrame(() =>
     requestAnimationFrame(() => {
-      if (!needle) {
-        scrollEditorBySourceRatio(anchorLine, sourceText);
-        return;
-      }
+      const spans = editor.getBlockSpans();
 
-      const doc = editor.getDocument();
+      // 字符偏移落在哪个块，就是渲染视图该顶到哪个块
       let targetIndex = -1;
-      let idx = 0;
-      doc.forEach((node) => {
-        if (targetIndex >= 0) return;
-        const text = node.textContent.replace(/\s+/g, " ").trim();
-        if (text.includes(needle)) targetIndex = idx;
-        idx++;
-      });
+      for (let i = 0; i < spans.length; i++) {
+        if (anchorOffset >= spans[i].start && anchorOffset < spans[i].end) {
+          targetIndex = i;
+          break;
+        }
+      }
+      if (targetIndex < 0 && spans.length > 0) {
+        targetIndex = anchorOffset >= spans[spans.length - 1].end ? spans.length - 1 : 0;
+      }
 
       if (targetIndex >= 0) {
         // 只滚到该块顶部，不移动光标——用户在源码里未必把光标放在正在读的位置
         editor.scrollBlockToTop(targetIndex);
         return;
       }
-      scrollEditorBySourceRatio(anchorLine, sourceText);
+
+      // 兜底：按内容比例滚动
+      const ratio = sourceText.length > 0 ? anchorOffset / sourceText.length : 0;
+      const m = editor.getScrollMetrics();
+      const scroller = document.querySelector(".ty-editor-scroller") as HTMLElement | null;
+      if (scroller) {
+        scroller.scrollTop = ratio * Math.max(0, m.scrollHeight - m.height);
+      }
     })
   );
 }
 
-/** 源码 textarea 可视区第一行对应的行号（0 起） */
-function currentSourceTopLine(): number {
-  const { lineHeight, paddingTop } = sourceMetrics();
-  return lineAtScrollTop(sourceEditor.scrollTop, {
-    lineHeight,
-    paddingTop,
-    viewportHeight: sourceEditor.clientHeight,
-  });
-}
-
-/** 取源码中某一行的文字（用于渲染视图里反查块） */
-function sourceLineText(line: number): string {
-  return sourceEditor.value.split("\n")[line] ?? "";
-}
-
 /**
- * 兜底定位：源码与渲染文档的块无法按文字对应时，按行比例滚动。
+ * 源码可视区顶部的字符偏移。
+ *
+ * 与 sourceTopForOffset 互为逆运算，同样依赖「镜像宽度 = textarea 内容宽度」
+ * 这个前提；宽度对不上时折行位置就不同，整块偏移都会错。
  */
-function scrollEditorBySourceRatio(anchorLine: number, sourceText: string): void {
-  const totalLines = Math.max(1, sourceText.split("\n").length);
-  const metrics = editor.getScrollMetrics();
-  const scroller = document.querySelector(".ty-editor-scroller") as HTMLElement | null;
-  if (!scroller) return;
-  scroller.scrollTop = (anchorLine / totalLines) * Math.max(0, metrics.scrollHeight - metrics.height);
+function offsetAtSourceTop(text: string, scrollTop: number): number {
+  const cs = getComputedStyle(sourceEditor);
+  // textarea 的 scrollTop 0 点即内容第一行顶部，无需扣 padding
+  const target = Math.max(0, scrollTop);
+
+  const mirror = document.createElement("div");
+  const contentWidth = Math.max(
+    1,
+    sourceEditor.clientWidth - parseFloat(cs.paddingLeft || "0") - parseFloat(cs.paddingRight || "0")
+  );
+  mirror.style.cssText = [
+    "position:absolute",
+    "visibility:hidden",
+    "top:0",
+    "left:-99999px",
+    `width:${contentWidth}px`,
+    "padding:0",
+    "border:0",
+    "box-sizing:content-box",
+    `font-family:${cs.fontFamily}`,
+    `font-size:${cs.fontSize}`,
+    `font-weight:${cs.fontWeight}`,
+    `font-style:${cs.fontStyle}`,
+    `line-height:${cs.lineHeight}`,
+    `letter-spacing:${cs.letterSpacing}`,
+    `word-spacing:${cs.wordSpacing}`,
+    `text-transform:${cs.textTransform}`,
+    `font-variant:${cs.fontVariant}`,
+    `font-feature-settings:${cs.fontFeatureSettings}`,
+    "white-space:pre-wrap",
+    "overflow-wrap:break-word",
+    "word-break:normal",
+    "tab-size:4",
+  ].join(";");
+  mirror.textContent = text;
+  document.body.appendChild(mirror);
+
+  let result = 0;
+  try {
+    const node = mirror.firstChild;
+    if (node) {
+      const base = mirror.getBoundingClientRect().top;
+      // 二分：找第一个「行顶部 >= 视口顶部」的字符
+      let lo = 0;
+      let hi = text.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        const range = document.createRange();
+        range.setStart(node, mid);
+        range.setEnd(node, Math.min(mid + 1, text.length));
+        const rects = range.getClientRects();
+        const top = rects.length > 0 ? rects[0].top - base : 0;
+        if (top < target) lo = mid + 1;
+        else hi = mid;
+      }
+      result = Math.min(lo, text.length);
+    }
+  } catch {
+    result = 0;
+  }
+  mirror.remove();
+  return result;
 }
 
 function toggleSourceMode() {

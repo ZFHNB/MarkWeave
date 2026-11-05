@@ -37,7 +37,7 @@ import {
   toggleTaskStatus,
   insertBlockAfterCurrent,
 } from "./commands/editing";
-import { markdownToDoc, docToMarkdown } from "./serializer/markdown";
+import { markdownToDoc, docToMarkdown, blockSpans } from "./serializer/markdown";
 import { extractHeadings, type HeadingItem } from "./outline";
 import { computeStats } from "./stats";
 import { tableEditing, addRowAfter, deleteRow } from "prosemirror-tables";
@@ -315,14 +315,32 @@ export class MarkWeaveEditor {
     const domRect = dom.getBoundingClientRect();
     const scrollerRect = scroller.getBoundingClientRect();
     const relativeTop = domRect.top - scrollerRect.top + scroller.scrollTop;
-    scroller.scrollTop = Math.max(0, relativeTop);
+    this.setScrollTopInstant(scroller, Math.max(0, relativeTop));
+  }
+
+  /**
+   * 瞬时设置滚动位置。
+   *
+   * 滚动容器带 `scroll-behavior: smooth`，直接赋值 scrollTop 会变成动画——
+   * 视图切换时用户会看到页面"飘"过去，而且中途读到的位置也不对。
+   */
+  private setScrollTopInstant(scroller: HTMLElement, top: number): void {
+    const previous = scroller.style.scrollBehavior;
+    scroller.style.scrollBehavior = "auto";
+    scroller.scrollTop = top;
+    // 读一次属性强制回流，确保新位置已生效再恢复样式
+    void scroller.scrollTop;
+    scroller.style.scrollBehavior = previous;
   }
 
   /**
    * 视口顶部第一个可见的顶层块——「用户此刻在读哪一段」的锚点。
    *
    * 视图切换时用它而不是光标：光标可能停在视口外的某一行，
-   * 按光标同步会让用户丢失阅读位置。返回 null 表示取不到可信值。
+   * 按光标同步会让用户丢失阅读位置。
+   *
+   * `text` 是该块的纯文本（可能为空，例如分隔线），`index` 是顶层块序号；
+   * 两样都给出来后，调用方可以先用块偏移精确定位，再退回文本匹配。
    */
   public getTopVisibleBlock(): { index: number; text: string } | null {
     const doc = this.view.state.doc;
@@ -333,7 +351,6 @@ export class MarkWeaveEditor {
 
     const scrollerRect = scroller.getBoundingClientRect();
     let offset = 0;
-    let best: { index: number; text: string; top: number } | null = null;
 
     for (let i = 0; i < doc.childCount; i++) {
       const node = doc.child(i);
@@ -345,18 +362,22 @@ export class MarkWeaveEditor {
       // 块底边还在视口顶部之上：完全滚过去了，继续找
       if (rect.bottom <= scrollerRect.top + 1) continue;
 
-      const text = node.textContent.replace(/\s+/g, " ").trim();
-      // 空块（分隔线、占位段落等）读不出文字，不能当锚点
-      if (!text) {
-        // 但它是第一个可见块时仍要记住，供兜底使用
-        if (!best) best = { index: i, text: "", top: rect.top - scrollerRect.top };
-        continue;
-      }
-      best = { index: i, text, top: rect.top - scrollerRect.top };
-      break;
+      // 第一个「真正盖住视口顶部」的块就是锚点，哪怕它是空块——
+      // 返回空文本让调用方改用块序号，比跳过它去取下一段更准
+      return { index: i, text: node.textContent.replace(/\s+/g, " ").trim() };
     }
 
-    return best ? { index: best.index, text: best.text } : null;
+    return null;
+  }
+
+  /**
+   * 当前渲染文档里每个顶层块在 Markdown 源码中的字符区间。
+   *
+   * 由序列化器直接给出，与 docToMarkdown 逐字一致——不要再按空行猜段落，
+   * 代码块、表格、紧凑列表上都会错位。
+   */
+  public getBlockSpans(): { start: number; end: number }[] {
+    return blockSpans(this.view.state.doc);
   }
 
   /** 当前选区文本；无选区时返回空串 */

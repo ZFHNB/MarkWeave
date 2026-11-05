@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   activateTab,
+  closeAllTabs,
+  closeOtherTabs,
   closeTab,
+  closeTabsToRight,
   computeSelectionStats,
   createTabState,
   cycleTab,
@@ -115,5 +118,59 @@ describe("selection stats", () => {
 
   it("handles empty selection text", () => {
     expect(computeSelectionStats("", true)).toMatchObject({ words: 0, chars: 0, lines: 0 });
+  });
+});
+
+describe("bulk tab closing", () => {
+  function threeTabs() {
+    let state = createTabState();
+    state = openTab(state, tab("a"));
+    state = openTab(state, tab("b"));
+    state = openTab(state, tab("c"));
+    return state;
+  }
+
+  it("closes everything except the kept tab", () => {
+    const next = closeOtherTabs(threeTabs(), "b");
+    expect(next.tabs.map((t) => t.docId)).toEqual(["b"]);
+    expect(next.activeTabId).toBe("b");
+    expect(next.closedTabs).toEqual(expect.arrayContaining(["a", "c"]));
+  });
+
+  it("keeps the state untouched when the kept tab does not exist", () => {
+    const state = threeTabs();
+    expect(closeOtherTabs(state, "missing")).toBe(state);
+  });
+
+  it("closes all tabs and remembers them for reopening", () => {
+    const next = closeAllTabs(threeTabs());
+    expect(next.tabs).toEqual([]);
+    expect(next.activeTabId).toBeNull();
+    // 最近关闭的排在最前：c 最后被关，因此最先能被「重新打开」找回
+    expect(next.closedTabs[0]).toBe("c");
+  });
+
+  it("is a no-op when there are no tabs", () => {
+    const empty = createTabState();
+    expect(closeAllTabs(empty)).toBe(empty);
+  });
+
+  it("closes tabs to the right of the kept one", () => {
+    const next = closeTabsToRight(threeTabs(), "a");
+    expect(next.tabs.map((t) => t.docId)).toEqual(["a"]);
+    expect(next.activeTabId).toBe("a");
+    expect(next.closedTabs).toEqual(expect.arrayContaining(["b", "c"]));
+  });
+
+  it("does nothing when the kept tab is already last", () => {
+    const state = threeTabs();
+    expect(closeTabsToRight(state, "c")).toBe(state);
+  });
+
+  it("can reopen a tab after closing all", () => {
+    const closed = closeAllTabs(threeTabs());
+    const reopened = reopenClosedTab(closed, ["a", "b", "c"]);
+    expect(reopened.tabs).toHaveLength(1);
+    expect(reopened.closedTabs).not.toContain(reopened.tabs[0].docId);
   });
 });

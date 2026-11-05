@@ -462,3 +462,47 @@ export function docToMarkdown(doc: PMNode): string {
   const joined = result.join("\n\n");
   return joined.trim() === "" ? "" : joined;
 }
+
+/**
+ * 每个顶层块序列化文本的起始偏移 + 文本长度。
+ *
+ * 与 docToMarkdown 用同一套序列化与「\n\n」拼接规则，所以偏移是精确的，
+ * 不依赖按空行猜测段落分界（那样在代码块、表格、紧凑列表上都会错位）。
+ * 视图切换时靠它把「渲染文档里的块」和「源码里的行」可靠地对应起来。
+ */
+export interface BlockSpan {
+  start: number;
+  end: number;
+}
+
+export function blockSpans(doc: PMNode): BlockSpan[] {
+  // 偏移必须落在「整篇序列化结果」上，不能逐块单独序列化再累加：
+  // 表格行、列表项在单块与整篇输出中的换行方式不同，累加会越偏越多。
+  // 这里用单块长度做预估，再在实际文本上校正到最近的块边界。
+  const full = docToMarkdown(doc);
+  const spans: BlockSpan[] = [];
+  let cursor = 0;
+
+  doc.forEach((child) => {
+    const estimated = docToMarkdown(child.type.schema.node("doc", null, [child])).length;
+    let end = Math.min(cursor + estimated, full.length);
+    // 切分点若没落在块分隔处，往后找最近的 "\n\n"（块边界）
+    if (end < full.length) {
+      const nextBlank = full.indexOf("\n\n", cursor);
+      if (nextBlank !== -1 && Math.abs(nextBlank - end) <= Math.max(8, estimated * 0.5)) {
+        end = nextBlank;
+      }
+    }
+    spans.push({ start: cursor, end });
+    cursor = Math.min(end + 2, full.length);
+  });
+
+  return spans;
+}
+/** 取某块在整篇序列化结果中的文本（供调用方显示/校验） */
+export function blockSpanText(doc: PMNode, index: number): string {
+  const spans = blockSpans(doc);
+  const full = docToMarkdown(doc);
+  const span = spans[index];
+  return span ? full.slice(span.start, span.end) : "";
+}

@@ -108,3 +108,51 @@ export function computeSelectionStats(
     inSelection: hasSelection,
   };
 }
+
+/**
+ * 关闭除 keepId 之外的所有标签。
+ *
+ * 目标标签保持激活；不在标签栏里的文档不受影响（它们本来就没开）。
+ */
+export function closeOtherTabs(state: TabState, keepId: string): TabState {
+  const kept = state.tabs.filter((tab) => tab.docId === keepId);
+  if (kept.length === 0) return state;
+
+  const closed = state.tabs
+    .filter((tab) => tab.docId !== keepId)
+    .map((tab) => tab.docId);
+
+  return {
+    tabs: kept,
+    activeTabId: keepId,
+    closedTabs: [...closed, ...state.closedTabs.filter((id) => id !== keepId)].slice(0, 20),
+  };
+}
+
+/** 关闭全部标签；文档本身仍在工作区，可用「重新打开」找回 */
+export function closeAllTabs(state: TabState): TabState {
+  if (state.tabs.length === 0) return state;
+  const closed = state.tabs.map((tab) => tab.docId);
+  return {
+    tabs: [],
+    activeTabId: null,
+    // 越靠后的越"最近"，因此反向压入
+    closedTabs: [...closed.slice().reverse(), ...state.closedTabs].slice(0, 20),
+  };
+}
+
+/** 关闭指定标签右侧的所有标签（保留 keepId 及其左侧） */
+export function closeTabsToRight(state: TabState, keepId: string): TabState {
+  const index = state.tabs.findIndex((tab) => tab.docId === keepId);
+  if (index === -1) return state;
+
+  const kept = state.tabs.slice(0, index + 1);
+  const closed = state.tabs.slice(index + 1).map((tab) => tab.docId);
+  if (closed.length === 0) return state;
+
+  return {
+    tabs: kept,
+    activeTabId: keepId,
+    closedTabs: [...closed, ...state.closedTabs.filter((id) => !closed.includes(id))].slice(0, 20),
+  };
+}
