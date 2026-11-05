@@ -314,6 +314,19 @@ html, body {
   font-weight: 500;
 }
 
+/* 已在标签栏打开的文档：右侧一个小圆点，与"仅存在于工作区"的条目区分 */
+.ty-file-item.is-tab-open .ty-file-title::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--primary-color, #4285f4);
+  vertical-align: middle;
+  opacity: 0.75;
+}
+
 /* ================= 主编辑区 (#write) ================= */
 .ty-main-container {
   flex: 1;

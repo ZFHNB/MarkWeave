@@ -835,10 +835,20 @@ function closeTabsRightOf(keepId: string): void {
   applyTabClose(closeTabsToRight(tabState, keepId));
 }
 
-/** 已打开文档项的右键菜单（文件列表里「已打开文档」分组） */
+/**
+ * 工作区文档项的右键菜单。
+ *
+ * 这里必须区分两个概念：
+ * - 工作区文档：`documents` 里的全部条目，侧边栏一律列出；
+ * - 标签页：`tabState.tabs`，只有真正「打开过」的才在里面。
+ * 启动时只有第一篇文档有标签，其余文档虽然列在侧边栏里，但并没有开标签。
+ * 因此「关闭其他文档」在只有一个标签时确实无事可做，需要把原因说清楚，
+ * 而不是给一个不知为何灰掉的菜单项。
+ */
 function openDocumentContextMenu(docId: string, x: number, y: number): void {
   const doc = documents.find((d) => d.id === docId);
   if (!doc) return;
+  const tabCount = tabState.tabs.length;
   const isTabOpen = tabState.tabs.some((tab) => tab.docId === docId);
 
   openMenuAt(
@@ -847,19 +857,20 @@ function openDocumentContextMenu(docId: string, x: number, y: number): void {
       { label: "打开", onClick: () => switchDocument(docId) },
       { kind: "separator" },
       {
-        label: "关闭",
+        label: isTabOpen ? "关闭" : "关闭（未打开）",
         shortcut: "Ctrl+W",
         disabled: !isTabOpen,
         onClick: () => applyTabClose(closeTab(tabState, docId)),
       },
       {
-        label: "关闭其他文档",
-        disabled: tabState.tabs.length <= 1,
+        // 只有一个标签时确实没有"其他"可关，原因写在文案里
+        label: tabCount <= 1 ? "关闭其他文档（当前仅 1 个标签）" : "关闭其他文档",
+        disabled: tabCount <= 1,
         onClick: () => closeOtherTabsOf(docId),
       },
       {
-        label: "关闭全部文档",
-        disabled: tabState.tabs.length === 0,
+        label: tabCount > 0 ? `关闭全部文档（${tabCount} 个标签）` : "关闭全部文档",
+        disabled: tabCount === 0,
         onClick: () => closeAllTabsOf(),
       },
       { kind: "separator" },
@@ -1050,13 +1061,19 @@ function renderFileList() {
 
     const divider = document.createElement("div");
     divider.className = "ty-file-group-title";
-    divider.textContent = "已打开文档";
+    divider.textContent = "工作区文档";
     fileListContainer.appendChild(divider);
   }
 
   documents.forEach((doc) => {
+    // 「在标签栏打开」与「在工作区里存在」是两件事：
+    // 启动时只有当前文档有标签，其余只是工作区条目。这里用一个小圆点区分，
+    // 否则用户会以为列表里的每一项都已经打开了。
+    const isTabOpen = tabState.tabs.some((tab) => tab.docId === doc.id);
     const itemEl = document.createElement("div");
-    itemEl.className = `ty-file-item ${doc.id === activeDocId ? "active" : ""}`;
+    itemEl.className = `ty-file-item ${doc.id === activeDocId ? "active" : ""}${
+      isTabOpen ? " is-tab-open" : ""
+    }`;
     itemEl.setAttribute("data-id", doc.id);
 
     const iconSpan = document.createElement("span");
@@ -1066,7 +1083,7 @@ function renderFileList() {
     const titleSpan = document.createElement("span");
     titleSpan.className = "ty-file-title";
     titleSpan.textContent = doc.title;
-    titleSpan.title = "双击重命名";
+    titleSpan.title = isTabOpen ? "已打开（双击重命名）" : "未打开（双击重命名）";
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "ty-file-delete-btn";
@@ -1238,8 +1255,10 @@ function switchDocument(newDocId: string) {
 }
 
 // 初始渲染文件列表
-renderFileList();
+// 先建标签再渲染文件列表：列表里要标出哪些文档"已在标签栏打开"，
+// 反过来会漏掉首屏那一个。
 syncTabsFromDocuments();
+renderFileList();
 
 // 渲染实时大纲目录
 let outlineHeadings: HeadingItem[] = [];
