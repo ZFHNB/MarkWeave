@@ -1,5 +1,7 @@
 import { Node as PMNode } from "prosemirror-model";
 import { EditorView, type NodeView } from "prosemirror-view";
+import { openMenuAt } from "../../ui/components";
+import { imageFileName, resolveImageFilePath } from "./image-actions";
 
 /**
  * 图片节点视图（对标 Typora）：
@@ -16,6 +18,16 @@ export interface ImageViewOptions {
    * 只影响 DOM 的显示，节点属性保持不变（Markdown 里仍是相对路径）。
    */
   resolveSrc?: (src: string) => string;
+  /** 当前文档的磁盘路径，用于解析相对图片 */
+  getDocumentPath?: () => string | null;
+  /** 在系统文件管理器中定位文件（主进程能力） */
+  revealPath?: (path: string) => Promise<boolean> | void;
+  /** 把图片写入剪贴板 */
+  copyImage?: (src: string, absolutePath: string | null) => Promise<boolean>;
+  /** 另存为：返回用户选择的目标路径 */
+  saveImageAs?: (src: string, suggestedName: string) => Promise<boolean>;
+  /** 删除图片节点 */
+  deleteNode?: () => void;
 }
 
 export class ImageView implements NodeView {
@@ -88,6 +100,64 @@ export class ImageView implements NodeView {
     this.dom.appendChild(this.toolbar);
 
     this.dom.addEventListener("click", () => this.showToolbar());
+
+    // 右键菜单：模仿 Typora 的图片操作
+    this.dom.addEventListener("contextmenu", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.openContextMenu(event.clientX, event.clientY);
+    });
+  }
+
+  /** 图片右键菜单 */
+  private openContextMenu(x: number, y: number): void {
+    const src: string = this.node.attrs.src || "";
+    const documentPath = this.options.getDocumentPath?.() ?? null;
+    const absolute = resolveImageFilePath(src, documentPath);
+
+    const items = [
+      {
+        label: "打开图片位置",
+        disabled: !absolute,
+        onClick: () => {
+          if (absolute) void this.options.revealPath?.(absolute);
+        },
+      },
+      {
+        label: "复制图片",
+        onClick: () => {
+          void this.options.copyImage?.(src, absolute);
+        },
+      },
+      {
+        label: "复制图片路径",
+        disabled: !src,
+        onClick: () => {
+          void navigator.clipboard?.writeText(src);
+        },
+      },
+      { kind: "separator" as const },
+      {
+        label: "将图像另存为…",
+        onClick: () => {
+          void this.options.saveImageAs?.(src, imageFileName(src));
+        },
+      },
+      {
+        label: "删除图片",
+        onClick: () => {
+          const pos = this.getPos();
+          if (typeof pos === "number") {
+            this.view.dispatch(
+              this.view.state.tr.delete(pos, pos + this.node.nodeSize)
+            );
+          }
+          this.options.deleteNode?.();
+        },
+      },
+    ];
+
+    openMenuAt({ left: x, right: x, top: y, bottom: y, width: 0, height: 0 }, items);
   }
 
   private showToolbar(): void {

@@ -1,6 +1,6 @@
 "use strict";
 
-const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, safeStorage } = require("electron");
+const { app, BrowserWindow, protocol, ipcMain, dialog, shell, Menu, safeStorage, clipboard, nativeImage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -375,6 +375,69 @@ ipcMain.handle("file:read-image", async (_event, targetPath) => {
   } catch (err) {
     console.error("Failed to read image:", err);
     return null;
+  }
+});
+
+/**
+ * 把图片写入系统剪贴板。
+ *
+ * 支持两路输入：
+ * - dataUrl：粘贴得到的图片（内存里只有 base64）
+ * - targetPath：磁盘上的图片文件
+ * 两者都没有时返回 ok:false，由渲染层提示用户。
+ */
+ipcMain.handle("image:copy", async (_event, payload) => {
+  try {
+    let buffer = null;
+    if (payload && typeof payload.dataUrl === "string") {
+      const m = /^data:[^;]+;base64,(.+)$/i.exec(payload.dataUrl);
+      if (m) buffer = Buffer.from(m[1], "base64");
+    } else if (payload && typeof payload.path === "string") {
+      buffer = await fs.promises.readFile(payload.path);
+    }
+    if (!buffer) return { ok: false, error: "no-image-data" };
+
+    const image = nativeImage.createFromBuffer(buffer);
+    if (image.isEmpty()) return { ok: false, error: "unsupported-format" };
+    clipboard.writeImage(image);
+    return { ok: true };
+  } catch (err) {
+    console.error("Failed to copy image:", err);
+    return { ok: false, error: err?.code || "copy-failed" };
+  }
+});
+
+/**
+ * 图片另存为：弹保存对话框，把 dataUrl 或磁盘文件写到用户选定的位置。
+ */
+ipcMain.handle("image:save-as", async (_event, payload) => {
+  if (!payload) return { ok: false, error: "invalid-payload" };
+  const suggested = typeof payload.suggestedName === "string" ? payload.suggestedName : "image.png";
+  const ext = (path.extname(suggested).replace(".", "") || "png").toLowerCase();
+
+  const picked = await dialog.showSaveDialog(mainWindow, {
+    title: "图片另存为",
+    defaultPath: path.join(app.getPath("documents"), suggested),
+    filters: [{ name: "图片", extensions: [ext, "png", "jpg", "webp", "svg"] }],
+  });
+  if (picked.canceled || !picked.filePath) return { ok: false, canceled: true };
+
+  try {
+    let buffer = null;
+    if (typeof payload.dataUrl === "string") {
+      const m = /^data:[^;]+;base64,(.+)$/i.exec(payload.dataUrl);
+      if (m) buffer = Buffer.from(m[1], "base64");
+    } else if (typeof payload.path === "string") {
+      buffer = await fs.promises.readFile(payload.path);
+    }
+    if (!buffer) return { ok: false, error: "no-image-data" };
+
+    await fs.promises.mkdir(path.dirname(picked.filePath), { recursive: true });
+    await fs.promises.writeFile(picked.filePath, buffer);
+    return { ok: true, path: picked.filePath };
+  } catch (err) {
+    console.error("Failed to save image:", err);
+    return { ok: false, error: err?.code || "write-failed" };
   }
 });
 
@@ -1151,9 +1214,31 @@ ipcMain.handle("pandoc:convert", async (_event, payload) => {
   }
 });
 
+/**
+ * PDF 导出。
+ *
+ * 与 HTML / Markdown 导出保持一致：总是先弹保存对话框，由用户决定落盘位置。
+ * payload.path 只作为「建议路径」（对话框的初始目录/文件名），不再直接写入。
+ * 没给建议路径时退回系统「文档」目录。
+ */
 ipcMain.handle("print:pdf", async (_event, payload) => {
   if (!mainWindow || mainWindow.isDestroyed()) return null;
   const options = payload?.options || {};
+
+  const defaultPath =
+    payload?.path && typeof payload.path === "string"
+      ? payload.path
+      : path.join(app.getPath("documents"), payload?.suggestedName || "document.pdf");
+
+  const picked = await dialog.showSaveDialog(mainWindow, {
+    title: "导出 PDF",
+    defaultPath,
+    filters: [{ name: "PDF", extensions: ["pdf"] }],
+  });
+  if (picked.canceled || !picked.filePath) {
+    return { canceled: true };
+  }
+
   try {
     const data = await mainWindow.webContents.printToPDF({
       landscape: Boolean(options.landscape),
@@ -1164,12 +1249,9 @@ ipcMain.handle("print:pdf", async (_event, payload) => {
       margins: options.margins,
     });
 
-    if (payload?.path) {
-      await fs.promises.mkdir(path.dirname(payload.path), { recursive: true });
-      await fs.promises.writeFile(payload.path, data);
-      return { path: payload.path, bytes: data.length };
-    }
-    return { data: data.toString("base64"), bytes: data.length };
+    await fs.promises.mkdir(path.dirname(picked.filePath), { recursive: true });
+    await fs.promises.writeFile(picked.filePath, data);
+    return { path: picked.filePath, bytes: data.length };
   } catch (err) {
     console.error("Failed to export PDF:", err);
     // 把系统错误码带回渲染层，否则界面只能显示一句「导出失败」

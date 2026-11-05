@@ -35,6 +35,7 @@ import {
 import { applyDocumentSwitch } from "./workspace/session";
 import { getDesktopAPI } from "./platform/desktop";
 import { pickLocalImage } from "./editor/plugins/images";
+import { resolveImageFilePath } from "./editor/nodeviews/image-actions";
 import {
   applyOpenedFile,
   extractFileName,
@@ -566,6 +567,9 @@ const editor = new MarkWeaveEditor({
   getDocumentPath: () => documents.find((d) => d.id === activeDocId)?.filePath ?? null,
   isDesktop: () => Boolean(getDesktopAPI()),
   persistImage: (file) => persistImageForDocument(file),
+  revealImageInFolder: (path) => revealPath(path),
+  copyImageToClipboard: (src, absolute) => copyImageToClipboard(src, absolute),
+  saveImageAs: (src, name) => saveImageWithDialog(src, name),
   onSelectionChange: (cursorPos) => {
     syncActiveOutline(cursorPos);
     updateSelectionStats();
@@ -808,12 +812,64 @@ function applyTabClose(next: TabState): void {
   tabState = next;
   renderTabs();
 
-  if (tabState.activeTabId && tabState.activeTabId !== activeDocId) {
-    switchDocument(tabState.activeTabId);
-  } else if (!tabState.activeTabId && previousActive) {
-    // 激活标签被关掉了：把编辑器停到当前文档上，不做额外跳转
-    renderFileList();
+  if (tabState.activeTabId) {
+    if (tabState.activeTabId !== activeDocId) switchDocument(tabState.activeTabId);
+  } else if (previousActive) {
+    // 最后一个标签也被关掉了：编辑器不该继续显示已关闭文档的内容，
+    // 换成一张空白临时文档（不落盘；用户在里面输入后，关窗时会按
+    // 「未命名文档」的既有规则提醒保存）。
+    openBlankDocument({ reuseActive: true });
   }
+
+  // 文件列表上的「已在标签栏打开」圆点依赖 tabState，必须一并刷新
+  renderFileList();
+}
+
+/**
+ * 打开一张空白文档。
+ *
+ * - `reuseActive`：把当前这篇文档清空复用（用于「关掉最后一个标签」，
+ *   避免工作区里留下一堆被关掉的残留条目）；
+ * - 否则新建一篇（用于「新建文件」）。
+ *
+ * 两种情况都会在标签栏开一个标签，并把光标放到正文开头。
+ */
+function openBlankDocument(options: { reuseActive?: boolean } = {}): string {
+  const active = documents.find((d) => d.id === activeDocId);
+
+  // 只有在「这篇文档没有磁盘路径、也没有未保存内容」时才敢就地清空复用。
+  // 否则清空等于销毁用户的稿子——应该新建一篇空白文档，把原来的留在工作区。
+  const reusable =
+    options.reuseActive &&
+    active &&
+    !active.filePath &&
+    !active.dirty &&
+    active.content.trim() === "";
+
+  if (reusable) {
+    active.title = uniqueTitle(
+      documents.filter((d) => d.id !== active.id),
+      "未命名文档.md"
+    );
+    active.updatedAt = Date.now();
+    editor.setMarkdown("", { resetHistory: true });
+    if (isSourceMode) sourceEditor.value = "";
+    syncTitle(active.title);
+    syncTabsFromDocuments();
+    renderFileList();
+    flushSave();
+    editor.focusStart();
+    return active.id;
+  }
+
+  const newTitle = uniqueTitle(documents, "未命名文档.md");
+  const newDoc = createDocument(newTitle, "");
+  documents.push(newDoc);
+  renderFileList();
+  switchDocument(newDoc.id);
+  flushSave();
+  editor.focusStart();
+  return newDoc.id;
 }
 
 /** 关闭指定的其它标签（保留 keepId） */
@@ -887,10 +943,42 @@ function openDocumentContextMenu(docId: string, x: number, y: number): void {
 
 /** 工作区文件行的右键菜单（尚未打开的文件） */
 function openWorkspaceFileContextMenu(file: FlatFile, x: number, y: number): void {
+  // 该文件若已在标签栏打开，就能直接关它；否则只提供"打开"相关操作。
+  // 用户从工作区列表右键时，意图是"处理这个文件"，不应该被要求先去标签栏。
+  const targetDoc = findOpenDocumentByPath(documents, file.path);
+  const targetTab = targetDoc
+    ? tabState.tabs.find((tab) => tab.docId === targetDoc.id)
+    : undefined;
+  const tabCount = tabState.tabs.length;
+
   openMenuAt(
     { left: x, right: x, top: y, bottom: y, width: 0, height: 0 },
     [
       { label: "打开", onClick: () => void openWorkspaceFile(file.path) },
+      { kind: "separator" },
+      {
+        label: targetTab ? "关闭" : "关闭（未打开）",
+        shortcut: "Ctrl+W",
+        disabled: !targetTab,
+        onClick: () => {
+          if (targetTab) applyTabClose(closeTab(tabState, targetTab.docId));
+        },
+      },
+      {
+        label:
+          targetTab && tabCount > 1
+            ? "关闭其他标签"
+            : "关闭其他标签（当前仅 1 个标签）",
+        disabled: !targetTab || tabCount <= 1,
+        onClick: () => {
+          if (targetTab) closeOtherTabsOf(targetTab.docId);
+        },
+      },
+      {
+        label: tabCount > 0 ? `关闭全部标签（${tabCount} 个）` : "关闭全部标签",
+        disabled: tabCount === 0,
+        onClick: () => closeAllTabsOf(),
+      },
       { kind: "separator" },
       { label: "重命名…", onClick: () => void renameWorkspaceFile(file) },
       {
@@ -901,11 +989,6 @@ function openWorkspaceFileContextMenu(file: FlatFile, x: number, y: number): voi
       {
         label: "在文件夹中显示",
         onClick: () => void revealPath(file.path),
-      },
-      {
-        label: "关闭全部标签",
-        disabled: tabState.tabs.length === 0,
-        onClick: () => closeAllTabsOf(),
       },
     ]
   );
@@ -1066,13 +1149,11 @@ function renderFileList() {
   }
 
   documents.forEach((doc) => {
-    // 「在标签栏打开」与「在工作区里存在」是两件事：
-    // 启动时只有当前文档有标签，其余只是工作区条目。这里用一个小圆点区分，
-    // 否则用户会以为列表里的每一项都已经打开了。
-    const isTabOpen = tabState.tabs.some((tab) => tab.docId === doc.id);
+    // 点的含义与标签页一致：只有「有未保存修改」才画点。
+    // 不能用它表示"已打开"——用户会误以为文件被改过。
     const itemEl = document.createElement("div");
     itemEl.className = `ty-file-item ${doc.id === activeDocId ? "active" : ""}${
-      isTabOpen ? " is-tab-open" : ""
+      doc.dirty ? " is-dirty" : ""
     }`;
     itemEl.setAttribute("data-id", doc.id);
 
@@ -1083,7 +1164,7 @@ function renderFileList() {
     const titleSpan = document.createElement("span");
     titleSpan.className = "ty-file-title";
     titleSpan.textContent = doc.title;
-    titleSpan.title = isTabOpen ? "已打开（双击重命名）" : "未打开（双击重命名）";
+    titleSpan.title = doc.dirty ? "有未保存的修改（双击重命名）" : "双击重命名";
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "ty-file-delete-btn";
@@ -1416,13 +1497,7 @@ function setActiveOutlineById(id: string | null): void {
 
 // 新建文档按钮与操作
 function handleNewFile() {
-  const newTitle = uniqueTitle(documents, "未命名文档.md");
-  const newDoc = createDocument(newTitle, "");
-
-  documents.push(newDoc);
-  renderFileList();
-  switchDocument(newDoc.id);
-  editor.focus();
+  openBlankDocument();
 }
 
 btnNewFile.addEventListener("click", handleNewFile);
@@ -2451,6 +2526,75 @@ function ensureSourceSearch(): SourceSearchPanel {
     sourceSearchPanel = new SourceSearchPanel(sourceEditor);
   }
   return sourceSearchPanel;
+}
+
+/**
+ * 把图片复制到系统剪贴板。
+ *
+ * Markdown 里的 src 可能是相对路径、data URL 或网络地址：
+ * 前两种能拿到真实像素，网络地址交给浏览器读图。
+ */
+async function copyImageToClipboard(src: string, absolutePath: string | null): Promise<boolean> {
+  const api = getDesktopAPI();
+  try {
+    if (/^data:/i.test(src)) {
+      const r = await api?.copyImage?.({ dataUrl: src });
+      return Boolean(r?.ok);
+    }
+    if (absolutePath) {
+      const r = await api?.copyImage?.({ path: absolutePath });
+      if (r?.ok) return true;
+    }
+    const dataUrl = await fetchImageAsDataUrl(src);
+    if (dataUrl) {
+      const r = await api?.copyImage?.({ dataUrl });
+      return Boolean(r?.ok);
+    }
+  } catch (err) {
+    console.warn("复制图片失败", err);
+  }
+  toast("无法复制这张图片", "error");
+  return false;
+}
+
+/** 用浏览器把任意可加载的图片转成 data URL */
+async function fetchImageAsDataUrl(src: string): Promise<string | null> {
+  try {
+    const response = await fetch(src);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    return await new Promise<string | null>((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** 图片「另存为」：交给主进程弹保存对话框 */
+async function saveImageWithDialog(src: string, suggestedName: string): Promise<boolean> {
+  const api = getDesktopAPI();
+  if (!api?.saveImageAs) {
+    toast("仅桌面版支持另存图片", "info");
+    return false;
+  }
+  const doc = documents.find((d) => d.id === activeDocId);
+  const absolute = resolveImageFilePath(src, doc?.filePath ?? null);
+
+  const result = /^data:/i.test(src)
+    ? await api.saveImageAs({ dataUrl: src, suggestedName })
+    : await api.saveImageAs({ path: absolute ?? src, suggestedName });
+
+  if (result?.canceled) return false;
+  if (result?.ok) {
+    toast("图片已保存：" + extractFileName(result.path ?? suggestedName), "success");
+    return true;
+  }
+  toast("图片保存失败", "error");
+  return false;
 }
 
 /** 图片附件的目录名（与笔记同级） */
@@ -5122,12 +5266,19 @@ function scheduleAutoSaveOnChange() {
  * 但用户什么都没写时不该弹窗打扰。
  * 因此额外要求内容非空白。
  */
+/**
+ * 是否存在"真正需要保存"的内容。
+ *
+ * 三条规则：
+ * - 已落盘文件：dirty 就说明与磁盘不一致；
+ * - 未命名文档：只有写了字才算未保存（空白临时文档不打扰用户）；
+ * - 空白临时文档（关掉全部标签后自动生成的那张）：同样按"有字才算"处理，
+ *   因此用户没输入时直接退出，输入过才提示保存。
+ */
 function hasUnsavedContent(): boolean {
   return documents.some((doc) => {
     if (!doc.dirty) return false;
-    // 已落盘的文件，只要 dirty 就说明与磁盘不一致
     if (doc.filePath) return true;
-    // 未命名文档：有实际文字才算未保存
     return doc.content.trim().length > 0;
   });
 }
@@ -5556,26 +5707,37 @@ async function exportPdf(): Promise<void> {
   const options = frontPaper
     ? normalizePdfOptions({ ...settings.pdf, paper: frontPaper as PaperSize })
     : settings.pdf;
-  // 必须用能识别反斜杠的 dirname：Windows 路径直接 slice 会把整条
-  // 文件名当成目录，拼出 `D:\notes\a.md\a.pdf` 导致 ENOTDIR。
-  const suggestedName = currentDoc?.filePath
-    ? joinPath(dirname(currentDoc.filePath), `${title}.pdf`)
-    : `${title}.pdf`;
 
+  // 默认位置：文档旁边；没有路径时交给主进程退回系统「文档」目录。
+  // 用户仍会在保存对话框里确认最终位置（与 HTML / Markdown 导出一致）。
+  const suggestedPath = currentDoc?.filePath
+    ? joinPath(dirname(currentDoc.filePath), `${title}.pdf`)
+    : undefined;
+
+  showSaveStatus("导出中…", "saving");
   const result = await api.printToPdf({
-    path: suggestedName,
+    path: suggestedPath,
+    suggestedName: `${title}.pdf`,
     options: toElectronPdfOptions(options),
   });
 
+  if (result?.canceled) {
+    showSaveStatus("已取消", "idle");
+    return;
+  }
   if (result?.path) {
+    showSaveStatus("已导出", "saved");
     toast(`已导出 PDF：${extractFileName(result.path)}`, "success");
     return;
   }
+
+  showSaveStatus("导出失败", "error");
   await alertDialog(
-    `PDF 导出失败${result?.error ? `：${result.error}` : ""}\n\n目标路径：${suggestedName}`,
+    `PDF 导出失败${result?.error ? `：${result.error}` : ""}`,
     "导出失败"
   );
 }
+
 
 // Electron 桌面菜单与文件打开集成
 const desktopAPI = getDesktopAPI();

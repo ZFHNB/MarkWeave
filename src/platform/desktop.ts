@@ -51,6 +51,17 @@ export interface MarkWeaveDesktopAPI {
   readFile?: (filePath: string) => Promise<OpenFileResult | null>;
   /** 把本地图片读成 data URL（二进制安全，供 HTML 导出内联） */
   readImage?: (filePath: string) => Promise<{ dataUrl: string } | null>;
+  /** 把图片写入系统剪贴板（dataUrl 或磁盘路径二选一） */
+  copyImage?: (payload: {
+    dataUrl?: string;
+    path?: string;
+  }) => Promise<{ ok: boolean; error?: string } | null>;
+  /** 图片另存为；用户取消时返回 canceled */
+  saveImageAs?: (payload: {
+    dataUrl?: string;
+    path?: string;
+    suggestedName?: string;
+  }) => Promise<{ ok: boolean; path?: string; error?: string; canceled?: boolean } | null>;
   writeFile?: (payload: { path: string; content: string }) => Promise<{ path: string } | null>;
   /** 把 data URL 图片写入文档旁附件目录，返回绝对路径 */
   saveImage?: (payload: {
@@ -60,9 +71,18 @@ export interface MarkWeaveDesktopAPI {
   }) => Promise<{ ok: boolean; path?: string; bytes?: number; error?: string } | null>;
   statFile?: (filePath: string) => Promise<{ path: string; mtime: number; size: number } | null>;
   printToPdf?: (payload: {
+    /** 建议路径（保存对话框的初始位置）；最终位置由用户确认 */
     path?: string;
+    suggestedName?: string;
     options: Record<string, unknown>;
-  }) => Promise<{ path?: string; data?: string; bytes?: number; error?: string } | null>;
+  }) => Promise<{
+    path?: string;
+    data?: string;
+    bytes?: number;
+    error?: string;
+    /** 用户取消了保存对话框 */
+    canceled?: boolean;
+  } | null>;
   createFile?: (payload: { path: string; content: string }) => Promise<{ path?: string; error?: string } | null>;
   createFolder?: (folderPath: string) => Promise<{ path?: string; error?: string } | null>;
   renamePath?: (payload: { from: string; to: string }) => Promise<{ path?: string; error?: string } | null>;

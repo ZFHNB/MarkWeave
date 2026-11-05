@@ -51,14 +51,24 @@ describe("pdf options", () => {
     expect(out.startsWith("<style")).toBe(true);
   });
 
-  it("swaps width and height in landscape", () => {
+  it("uses a Chromium-recognised paper name instead of micron objects", () => {
+    // 曾经的 bug：把微米尺寸直接塞进 pageSize，Chromium 判为非法尺寸，
+    // printToPDF 抛 "Failed to generate PDF: Printing failed"。
     const portrait = toElectronPdfOptions({ ...DEFAULT_PDF_OPTIONS, landscape: false });
+    expect(portrait.pageSize).toBe("A4");
+    expect(portrait.landscape).toBe(false);
+
     const landscape = toElectronPdfOptions({ ...DEFAULT_PDF_OPTIONS, landscape: true });
-    expect(portrait.pageSize).toEqual(PAPER_SIZES_MICRONS.A4);
-    expect(landscape.pageSize).toEqual({
-      width: PAPER_SIZES_MICRONS.A4.height,
-      height: PAPER_SIZES_MICRONS.A4.width,
-    });
+    // 横向由 landscape 标志处理，纸张名保持不变
+    expect(landscape.pageSize).toBe("A4");
+    expect(landscape.landscape).toBe(true);
+  });
+
+  it("falls back to inch dimensions for sizes Chromium has no name for", () => {
+    const opts = toElectronPdfOptions({ ...DEFAULT_PDF_OPTIONS, paper: "Tabloid" });
+    expect(typeof opts.pageSize).toBe("object");
+    // 11 x 17 英寸
+    expect(opts.pageSize).toEqual({ width: 11, height: 17 });
   });
 
   it("converts millimetre margins to inches", () => {

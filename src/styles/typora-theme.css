@@ -314,17 +314,11 @@ html, body {
   font-weight: 500;
 }
 
-/* 已在标签栏打开的文档：右侧一个小圆点，与"仅存在于工作区"的条目区分 */
-.ty-file-item.is-tab-open .ty-file-title::after {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 6px;
-  border-radius: 50%;
-  background: var(--primary-color, #4285f4);
-  vertical-align: middle;
-  opacity: 0.75;
+/* 未保存标记：与标签页同一个语义（•），"已打开"本身不画点 */
+.ty-file-item.is-dirty .ty-file-title::after {
+  content: " •";
+  color: var(--primary-color, #4285f4);
+  font-weight: 700;
 }
 
 /* ================= 主编辑区 (#write) ================= */

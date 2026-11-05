@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("markweave", {
   saveFile: (payload) => ipcRenderer.invoke("file:save", payload),
   readFile: (filePath) => ipcRenderer.invoke("file:read", filePath),
   readImage: (filePath) => ipcRenderer.invoke("file:read-image", filePath),
+  copyImage: (payload) => ipcRenderer.invoke("image:copy", payload),
+  saveImageAs: (payload) => ipcRenderer.invoke("image:save-as", payload),
   writeFile: (payload) => ipcRenderer.invoke("file:write", payload),
   saveImage: (payload) => ipcRenderer.invoke("file:save-image", payload),
   statFile: (filePath) => ipcRenderer.invoke("file:stat", filePath),

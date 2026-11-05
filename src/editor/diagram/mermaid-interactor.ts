@@ -1087,9 +1087,30 @@ export class MermaidInteractor {
 
     this.container.appendChild(popover);
     this.popoverEl = popover;
+
+    // 点空白处要能关掉：否则浮层会一直挂在页面上（截图里那种残留）
+    const onOutsideDown = (evt: MouseEvent) => {
+      if (!this.popoverEl) return;
+      if (this.popoverEl.contains(evt.target as Node)) return;
+      this.closePopover();
+    };
+    const onKeyDown = (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") this.closePopover();
+    };
+    // 延后一拍注册，避免触发它的那次点击立刻把它关掉
+    setTimeout(() => {
+      document.addEventListener("mousedown", onOutsideDown, true);
+      document.addEventListener("keydown", onKeyDown, true);
+    }, 0);
+    const previousClose = this.closePopover.bind(this);
+    this.closePopover = () => {
+      document.removeEventListener("mousedown", onOutsideDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+      previousClose();
+    };
   }
 
-  private closePopover() {
+  private closePopover(): void {
     if (this.popoverEl) {
       if (this.popoverEl.parentNode) {
         this.popoverEl.remove();

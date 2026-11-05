@@ -70,6 +70,10 @@ export interface EditorOptions {
    * 返回 null 时退回 data URL 内联。
    */
   persistImage?: (file: File) => Promise<string | null>;
+  /** 图片右键菜单用到的平台能力 */
+  revealImageInFolder?: (path: string) => Promise<boolean> | void;
+  copyImageToClipboard?: (src: string, absolutePath: string | null) => Promise<boolean>;
+  saveImageAs?: (src: string, suggestedName: string) => Promise<boolean>;
 }
 
 export class MarkWeaveEditor {
@@ -190,6 +194,12 @@ export class MarkWeaveEditor {
                 null,
                 this.options.isDesktop?.() ?? false
               ),
+            getDocumentPath: () => this.options.getDocumentPath?.() ?? null,
+            revealPath: (path) => this.options.revealImageInFolder?.(path),
+            copyImage: (src, absolute) =>
+              this.options.copyImageToClipboard?.(src, absolute) ?? Promise.resolve(false),
+            saveImageAs: (src, name) =>
+              this.options.saveImageAs?.(src, name) ?? Promise.resolve(false),
           }),
       },
       dispatchTransaction: (tr) => {
