@@ -2515,19 +2515,31 @@ body.theme-night .md-inline-node-input {
 /* 图片节点视图 */
 .md-image-wrap {
   position: relative;
-  display: inline-block;
+  display: block;
   max-width: 100%;
+  /* 默认居中：与 Typora 一致 */
+  text-align: center;
   vertical-align: middle;
 }
 
+/* 对齐只影响整行排布；图片自身尺寸由 width 属性决定，不随之拉伸 */
+.md-image-wrap[data-align="left"] {
+  text-align: left;
+}
+
 .md-image-wrap[data-align="center"] {
-  display: block;
   text-align: center;
 }
 
 .md-image-wrap[data-align="right"] {
-  display: block;
   text-align: right;
+}
+
+/* 图片本身保持自然比例，宽度受 max-width 约束，不会被父级拉伸 */
+.md-image-wrap > .md-image {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
 }
 
 .md-image-wrap.is-selected .md-image {
@@ -2557,9 +2569,10 @@ body.theme-night .md-inline-node-input {
 }
 
 .md-image-toolbar {
-  position: absolute;
+  /* 固定在视口顶部附近，不随图片滚动/缩放移动，保证连续点按不跑偏 */
+  position: fixed;
   left: 50%;
-  bottom: calc(100% + 6px);
+  top: 96px;
   transform: translateX(-50%);
   display: inline-flex;
   gap: 2px;
@@ -2591,6 +2604,12 @@ body.theme-night .md-image-toolbar {
 
 .md-image-btn:hover {
   background: var(--item-hover-bg-color);
+}
+
+/* 缩放百分比数字：等宽便于点击时不跳动 */
+.md-image-zoom-label {
+  min-width: 46px;
+  font-variant-numeric: tabular-nums;
 }
 
 /* ================= 打印样式适配 ================= */

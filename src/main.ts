@@ -570,6 +570,7 @@ const editor = new MarkWeaveEditor({
   revealImageInFolder: (path) => revealPath(path),
   copyImageToClipboard: (src, absolute) => copyImageToClipboard(src, absolute),
   saveImageAs: (src, name) => saveImageWithDialog(src, name),
+  getImageDefaultAlign: () => loadSettings().imageDefaultAlign,
   onSelectionChange: (cursorPos) => {
     syncActiveOutline(cursorPos);
     updateSelectionStats();
@@ -2956,6 +2957,8 @@ function downloadMarkdown() {
 };
 
 export interface MarkWeaveSettings {
+  /** 插入图片的默认对齐（center / left / right） */
+  imageDefaultAlign: "center" | "left" | "right";
   mermaidDefaultMode: "custom" | "standard";
   mermaidDefaultCurve: "step-round" | "step" | "basis" | "linear";
   mermaidTheme: MermaidThemePreference;
@@ -3068,6 +3071,11 @@ function loadAutoSaveSettings(): AutoSaveSettings {
   }
 }
 
+/** 归一化图片默认对齐设置 */
+function normalizeImageAlign(raw: string | null): "center" | "left" | "right" {
+  return raw === "left" || raw === "right" ? raw : "center";
+}
+
 function loadSettings(): MarkWeaveSettings {
   return {
     mermaidDefaultMode: (localStorage.getItem("markweave_mermaid_default_mode") as any) || "custom",
@@ -3089,6 +3097,7 @@ function loadSettings(): MarkWeaveSettings {
     theme: (localStorage.getItem("markweave_theme") as any) || "light",
     language: normalizeLanguage(localStorage.getItem("markweave_language")),
     editorTheme: normalizeThemeId(localStorage.getItem("markweave_editor_theme")),
+    imageDefaultAlign: normalizeImageAlign(localStorage.getItem("markweave_image_align")),
     pdf: normalizePdfOptions(loadPdfOptions()),
     autoPair: localStorage.getItem("markweave_auto_pair") !== "false",
     smartPunctuation: localStorage.getItem("markweave_smart_punctuation") !== "false",
@@ -3122,6 +3131,7 @@ function saveSettings(settings: MarkWeaveSettings) {
   localStorage.setItem("markweave_theme", settings.theme);
   localStorage.setItem("markweave_language", settings.language);
   localStorage.setItem("markweave_editor_theme", settings.editorTheme);
+  localStorage.setItem("markweave_image_align", settings.imageDefaultAlign);
   localStorage.setItem("markweave_pdf_options", JSON.stringify(settings.pdf));
   localStorage.setItem("markweave_auto_pair", String(settings.autoPair));
   localStorage.setItem("markweave_smart_punctuation", String(settings.smartPunctuation));
@@ -3579,6 +3589,18 @@ function openSettingsModal() {
               <input type="checkbox" id="setting-toggle-restore" ${currentSettings.behavior.restoreSession ? "checked" : ""} aria-label="恢复上次会话" />
               <span class="ty-toggle-slider"></span>
             </label>
+          </div>
+
+          <div class="ty-settings-row">
+            <div class="ty-settings-info">
+              <span class="ty-settings-label">图片默认对齐</span>
+              <span class="ty-settings-desc">插入图片时的默认对齐方式；单张图片可在右键菜单里单独调整</span>
+            </div>
+            <select class="ty-settings-select" id="setting-select-image-align" aria-label="图片默认对齐">
+              <option value="center" ${currentSettings.imageDefaultAlign === "center" ? "selected" : ""}>居中（推荐）</option>
+              <option value="left" ${currentSettings.imageDefaultAlign === "left" ? "selected" : ""}>左对齐</option>
+              <option value="right" ${currentSettings.imageDefaultAlign === "right" ? "selected" : ""}>右对齐</option>
+            </select>
           </div>
 
           <div class="ty-settings-section-title" style="margin-top: 18px;">Markdown 语法</div>
@@ -4303,6 +4325,9 @@ function openSettingsModal() {
     const selectLanguage = normalizeLanguage((modalOverlay.querySelector("#setting-select-language") as HTMLSelectElement)?.value);
     const selectMermaidTheme = normalizeMermaidTheme((modalOverlay.querySelector("#setting-select-mermaid-theme") as HTMLSelectElement)?.value);
     const selectEditorTheme = normalizeThemeId((modalOverlay.querySelector("#setting-select-editor-theme") as HTMLSelectElement)?.value);
+    const imageDefaultAlign = normalizeImageAlign(
+      (modalOverlay.querySelector("#setting-select-image-align") as HTMLSelectElement)?.value
+    );
     const selectPaper = ((modalOverlay.querySelector("#setting-select-paper") as HTMLSelectElement)?.value as PaperSize) || "A4";
     const pdfLandscape = (modalOverlay.querySelector("#setting-pdf-landscape") as HTMLInputElement)?.checked ?? false;
     const pdfBackground = (modalOverlay.querySelector("#setting-pdf-background") as HTMLInputElement)?.checked ?? true;
@@ -4352,6 +4377,7 @@ function openSettingsModal() {
       theme: selectTheme,
       language: selectLanguage,
       editorTheme: selectEditorTheme,
+      imageDefaultAlign,
       pdf: normalizePdfOptions({ ...loadPdfOptions(), paper: selectPaper, landscape: pdfLandscape, printBackground: pdfBackground }),
       autoPair,
       smartPunctuation,

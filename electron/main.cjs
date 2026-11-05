@@ -383,24 +383,74 @@ ipcMain.handle("file:read-image", async (_event, targetPath) => {
  *
  * 支持两路输入：
  * - dataUrl：粘贴得到的图片（内存里只有 base64）
- * - targetPath：磁盘上的图片文件
- * 两者都没有时返回 ok:false，由渲染层提示用户。
+ * - path：磁盘上的图片文件
+ *
+ * 注意 Electron 44 的 clipboard 是异步 API（write(List<ClipboardItem>)），
+ * 旧版的 writeImage/readImage 已移除。这里优先用新 API，旧版本才回退。
  */
 ipcMain.handle("image:copy", async (_event, payload) => {
   try {
     let buffer = null;
+    let mime = "image/png";
     if (payload && typeof payload.dataUrl === "string") {
-      const m = /^data:[^;]+;base64,(.+)$/i.exec(payload.dataUrl);
-      if (m) buffer = Buffer.from(m[1], "base64");
+      const m = /^data:([^;]+);base64,(.+)$/i.exec(payload.dataUrl);
+      if (m) {
+        mime = m[1].toLowerCase();
+        buffer = Buffer.from(m[2], "base64");
+      }
     } else if (payload && typeof payload.path === "string") {
       buffer = await fs.promises.readFile(payload.path);
+      const ext = path.extname(payload.path).toLowerCase();
+      const MIME = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
+        ".bmp": "image/bmp",
+      };
+      mime = MIME[ext] || "image/png";
     }
     if (!buffer) return { ok: false, error: "no-image-data" };
 
     const image = nativeImage.createFromBuffer(buffer);
     if (image.isEmpty()) return { ok: false, error: "unsupported-format" };
-    clipboard.writeImage(image);
-    return { ok: true };
+
+    const electron = require("electron");
+    const clip = electron.clipboard || clipboard;
+
+    // Electron 44 起 clipboard 换成 W3C 风格异步 API：
+    //   await clipboard.write([new ClipboardItem({ "image/png": blob })])
+    // 旧的 writeImage/readImage 已移除。
+    if (clip && typeof clip.write === "function" && typeof electron.ClipboardItem === "function") {
+      // 统一转成 PNG，避免某些格式（如 svg）系统剪贴板不认
+      const png = image.toPNG();
+      const blob = new Blob([png], { type: "image/png" });
+      const item = new electron.ClipboardItem({ "image/png": blob });
+      await clip.write([item]);
+
+      // 回读确认系统确实接收了图片
+      if (typeof clip.read === "function") {
+        const items = await clip.read();
+        const hasImage =
+          Array.isArray(items) &&
+          items.length > 0 &&
+          items.some((entry) =>
+            Array.isArray(entry.types) ? entry.types.some((t) => t.startsWith("image/")) : false
+          );
+        if (!hasImage) return { ok: false, error: "clipboard-rejected" };
+      }
+      return { ok: true };
+    }
+
+    // 旧版同步 API 回退
+    if (typeof clip?.writeImage === "function") {
+      clip.writeImage(image);
+      return { ok: true };
+    }
+
+    return { ok: false, error: "clipboard-unavailable" };
   } catch (err) {
     console.error("Failed to copy image:", err);
     return { ok: false, error: err?.code || "copy-failed" };

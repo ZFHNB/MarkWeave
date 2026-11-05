@@ -368,16 +368,41 @@ export function openMenuAt(
       btn.appendChild(key);
     }
 
+    // 有子菜单的项：鼠标悬停即展开（与 Typora / 系统菜单一致），
+    // 点击不关闭父菜单，避免"点一下才有菜单"的反直觉行为。
+    if (item.submenu && item.submenu.length > 0) {
+      let submenuClose: (() => void) | null = null;
+      let openTimer: ReturnType<typeof setTimeout> | null = null;
+
+      const openSubmenu = () => {
+        if (submenuClose) return;
+        const rect = btn.getBoundingClientRect();
+        submenuClose = openMenuAt(rect, item.submenu!, undefined, "end") ?? null;
+      };
+
+      btn.addEventListener("mouseenter", () => {
+        if (openTimer) clearTimeout(openTimer);
+        // 轻微延迟：快速划过时不会连弹多个子菜单
+        openTimer = setTimeout(openSubmenu, 80);
+      });
+      btn.addEventListener("mouseleave", () => {
+        if (openTimer) {
+          clearTimeout(openTimer);
+          openTimer = null;
+        }
+      });
+      btn.addEventListener("click", (event) => {
+        event.preventDefault();
+        openSubmenu();
+      });
+      menu.appendChild(btn);
+      continue;
+    }
+
     btn.addEventListener("click", () => {
       // 记录本行位置，供二级菜单定位（一级菜单随后会被关闭）
       itemRowRect = btn.getBoundingClientRect();
       close();
-      if (item.submenu && item.submenu.length > 0) {
-        // 子菜单在右侧展开；anchor 传空，避免父菜单已销毁
-        const rect = itemRowRect;
-        openMenuAt(rect, item.submenu, undefined, "end");
-        return;
-      }
       item.onClick?.();
     });
     menu.appendChild(btn);

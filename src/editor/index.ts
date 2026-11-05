@@ -74,6 +74,7 @@ export interface EditorOptions {
   revealImageInFolder?: (path: string) => Promise<boolean> | void;
   copyImageToClipboard?: (src: string, absolutePath: string | null) => Promise<boolean>;
   saveImageAs?: (src: string, suggestedName: string) => Promise<boolean>;
+  getImageDefaultAlign?: () => "center" | "left" | "right";
 }
 
 export class MarkWeaveEditor {
@@ -200,6 +201,7 @@ export class MarkWeaveEditor {
               this.options.copyImageToClipboard?.(src, absolute) ?? Promise.resolve(false),
             saveImageAs: (src, name) =>
               this.options.saveImageAs?.(src, name) ?? Promise.resolve(false),
+            getDefaultAlign: () => this.options.getImageDefaultAlign?.() ?? "center",
           }),
       },
       dispatchTransaction: (tr) => {

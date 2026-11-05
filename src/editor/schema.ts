@@ -366,6 +366,8 @@ const nodes: Record<string, NodeSpec> = {
       title: { default: null },
       /** 显示宽度（px）。有值时该图片以 HTML 语法存储（与 Typora 一致） */
       width: { default: null },
+      /** 对齐方式：center（默认）/ left / right，同样用 HTML 语法持久化 */
+      align: { default: null },
     },
     group: "inline",
     draggable: true,
@@ -376,19 +378,22 @@ const nodes: Record<string, NodeSpec> = {
           const el = dom as HTMLElement;
           const rawWidth = el.getAttribute("width") || el.style.width;
           const width = rawWidth ? parseInt(rawWidth, 10) : null;
+          const align = el.getAttribute("data-align") || el.style.textAlign || null;
           return {
             src: el.getAttribute("src"),
             title: el.getAttribute("title"),
             alt: el.getAttribute("alt"),
             width: Number.isFinite(width as number) ? width : null,
+            align: align === "left" || align === "right" || align === "center" ? align : null,
           };
         },
       },
     ],
     toDOM(node) {
-      const { src, alt, title, width } = node.attrs;
+      const { src, alt, title, width, align } = node.attrs;
       const attrs: Record<string, string> = { src, alt, title, class: "md-image" };
       if (width) attrs.width = String(width);
+      if (align) attrs["data-align"] = align;
       return ["img", attrs];
     },
   },

@@ -441,14 +441,17 @@ export function docToMarkdown(doc: PMNode): string {
 
       if (child.type.name === "image") {
         const width = child.attrs.width;
-        if (width) {
+        const align = child.attrs.align;
+        if (width || align) {
           // 带尺寸的图片只能用 HTML 语法表达（Typora 同样如此）
           const alt = String(child.attrs.alt || "");
           const titleAttr = child.attrs.title
             ? ` title="${String(child.attrs.title).replace(/"/g, "&quot;")}"`
             : "";
+          const widthAttr = width ? ` width="${width}"` : "";
+          const alignAttr = align ? ` data-align="${align}"` : "";
           pieces.push({
-            text: `<img src="${child.attrs.src}" alt="${alt}"${titleAttr} width="${width}" />`,
+            text: `<img src="${child.attrs.src}" alt="${alt}"${titleAttr}${widthAttr}${alignAttr} />`,
             marks: [],
           });
         } else {

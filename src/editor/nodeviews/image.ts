@@ -28,6 +28,8 @@ export interface ImageViewOptions {
   saveImageAs?: (src: string, suggestedName: string) => Promise<boolean>;
   /** 删除图片节点 */
   deleteNode?: () => void;
+  /** 插入图片的默认对齐（center / left / right） */
+  getDefaultAlign?: () => "center" | "left" | "right";
 }
 
 export class ImageView implements NodeView {
@@ -38,7 +40,6 @@ export class ImageView implements NodeView {
 
   private img: HTMLImageElement;
   private toolbar: HTMLElement;
-  private zoom = 100;
   private options: ImageViewOptions;
 
   constructor(
@@ -54,6 +55,9 @@ export class ImageView implements NodeView {
 
     this.dom = document.createElement("span");
     this.dom.className = "md-image-wrap";
+    // 对齐优先级：节点自身属性 > 偏好设置里的默认值 > 居中
+    this.dom.dataset.align =
+      node.attrs.align || (options.getDefaultAlign?.() ?? "center");
 
     this.img = document.createElement("img");
     this.img.className = "md-image";
@@ -63,13 +67,13 @@ export class ImageView implements NodeView {
     this.img.draggable = false;
     if (node.attrs.width) {
       this.img.setAttribute("width", String(node.attrs.width));
-      this.zoom = 100;
     }
     this.img.addEventListener("error", () => {
       this.dom.classList.add("md-image-broken");
     });
     this.img.addEventListener("load", () => {
       this.dom.classList.remove("md-image-broken");
+      this.updateZoomLabel();
     });
 
     this.toolbar = document.createElement("span");
@@ -92,9 +96,23 @@ export class ImageView implements NodeView {
       this.toolbar.appendChild(btn);
     };
 
-    addButton("−", "缩小", () => this.setZoom(this.zoom - 10));
-    addButton("＋", "放大", () => this.setZoom(this.zoom + 10));
-    addButton("100%", "恢复原始大小", () => this.setZoom(100));
+    addButton("−", "缩小", () => this.setZoom(this.currentPercent() - 10));
+    addButton("＋", "放大", () => this.setZoom(this.currentPercent() + 10));
+
+    // 百分比数字随实际显示尺寸变化，而不是固定写死 "100%"
+    const zoomLabel = document.createElement("button");
+    zoomLabel.type = "button";
+    zoomLabel.className = "md-image-btn md-image-zoom-label";
+    zoomLabel.title = "恢复为与正文等宽";
+    zoomLabel.textContent = "100%";
+    zoomLabel.addEventListener("mousedown", (e) => e.preventDefault());
+    zoomLabel.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.setZoom(100);
+    });
+    this.toolbar.appendChild(zoomLabel);
+
     addButton("⇤", "左对齐", () => this.setAlign("left"));
     addButton("⇔", "居中", () => this.setAlign("center"));
     addButton("⇥", "右对齐", () => this.setAlign("right"));
@@ -181,6 +199,11 @@ export class ImageView implements NodeView {
     const documentPath = this.options.getDocumentPath?.() ?? null;
     const absolute = resolveImageFilePath(src, documentPath);
 
+    // 可复制路径的优先级：绝对磁盘路径 > 原始相对路径 / 网络地址。
+    // data URL 不提供（粘贴的图片没有路径可复制）。
+    const isDataUrl = /^data:/i.test(src);
+    const copyablePath = isDataUrl ? null : (absolute || src);
+
     const items = [
       {
         label: "打开图片位置",
@@ -196,10 +219,12 @@ export class ImageView implements NodeView {
         },
       },
       {
+        // 只复制"有用的路径"：绝对是磁盘文件路径，或原始 Markdown 里的
+        // 相对路径 / 网络地址。data URL 是几万字符的 base64，复制出去没用。
         label: "复制图片路径",
-        disabled: !src,
+        disabled: !copyablePath,
         onClick: () => {
-          void navigator.clipboard?.writeText(src);
+          if (copyablePath) void navigator.clipboard?.writeText(copyablePath);
         },
       },
       { kind: "separator" as const },
@@ -272,27 +297,27 @@ export class ImageView implements NodeView {
    * 节点属性：有宽度时序列化成 `<img width="...">`（Typora 同款），
    * 没有宽度时仍是标准 Markdown 语法。
    */
+  /**
+   * 缩放图片并写回文档。
+   *
+   * 基准是「正文可用宽度」而不是图片自身的当前宽度：
+   * - 100% = 撑满正文宽度（与 Typora 的"放大到与文字区域等宽"一致）
+   * - 百分比按正文宽度换算成像素，因此反复点放大不会越缩越小
+   * 按钮显示的数字始终反映当前相对正文宽度的比例。
+   */
   private setZoom(percent: number): void {
-    const clamped = Math.max(10, Math.min(400, percent));
     const located = this.locateSelf();
     if (!located) return;
     const { pos, node: live } = located;
 
-    // 以「当前文档宽度」或「自然尺寸」为基准换算。
-    // 注意 1x1 这类超小图片的自然尺寸不足以作为基准，此时用当前显示宽度。
-    const currentWidth =
-      (live.attrs.width as number | null) ||
-      Math.round(this.img.getBoundingClientRect().width) ||
-      this.img.naturalWidth ||
-      0;
-
-    // 100% 视作「原始大小」，清掉宽度属性，让文档恢复为纯 Markdown
+    const availWidth = this.measureAvailableWidth();
+    // 上限 100% = 与正文区域等宽（用户要的"放大到与文字显示区域等宽"）；
+    // 再大就会溢出正文列，没有意义。
+    const clamped = Math.max(5, Math.min(100, percent));
     const nextWidth =
-      clamped === 100 || currentWidth <= 0
-        ? null
-        : Math.max(16, Math.round((currentWidth * clamped) / 100));
+      availWidth <= 0 ? null : Math.max(16, Math.round((availWidth * clamped) / 100));
 
-    this.zoom = clamped;
+    this.img.removeAttribute("width");
     this.img.style.width = "";
     if (nextWidth) this.img.setAttribute("width", String(nextWidth));
 
@@ -302,10 +327,66 @@ export class ImageView implements NodeView {
         width: nextWidth,
       })
     );
+    this.updateZoomLabel();
   }
 
+  /** 正文可用宽度（图片最大可显示到的宽度） */
+  private measureAvailableWidth(): number {
+    const editorRoot =
+      (this.img.closest("#write") as HTMLElement | null) ||
+      (this.view.dom.closest("#write") as HTMLElement | null);
+    if (editorRoot) {
+      const style = getComputedStyle(editorRoot);
+      const inner =
+        editorRoot.clientWidth -
+        parseFloat(style.paddingLeft || "0") -
+        parseFloat(style.paddingRight || "0");
+      if (inner > 0) return inner;
+    }
+    return this.view.dom.clientWidth || 0;
+  }
+
+  /**
+   * 当前缩放比例（相对正文宽度）。
+   *
+   * 没有 width 属性（标准 Markdown 语法）时视为"原始大小"，显示 100%；
+   * 只有显式设过宽度才按实际显示宽度换算。
+   */
+  private currentPercent(): number {
+    if (!this.node.attrs.width) return 100;
+    const avail = this.measureAvailableWidth();
+    const shown = this.img.getBoundingClientRect().width;
+    if (avail <= 0 || shown <= 0) return 100;
+    return Math.min(100, Math.round((shown / avail) * 100));
+  }
+
+  /** 更新工具条上的百分比数字 */
+  private updateZoomLabel(): void {
+    const label = this.toolbar.querySelector<HTMLElement>(".md-image-zoom-label");
+    if (label) label.textContent = `${this.currentPercent()}%`;
+  }
+
+
+  /**
+   * 设置对齐并写回文档。
+   *
+   * 之前只改 DOM 的 data-align，切换文档或刷新就丢。现在写进节点属性，
+   * 以 HTML 语法持久化（Markdown 语法本身无法表达对齐）。
+   * 对齐只影响整行排布，不改变图片尺寸。
+   */
   private setAlign(align: "left" | "center" | "right"): void {
+    const located = this.locateSelf();
+    if (!located) return;
+    const { pos, node: live } = located;
+
+    const nextAlign = align === "center" ? null : align;
     this.dom.dataset.align = align;
+    this.view.dispatch(
+      this.view.state.tr.setNodeMarkup(pos, undefined, {
+        ...live.attrs,
+        align: nextAlign,
+      })
+    );
   }
 
   private remove(): void {
@@ -330,16 +411,18 @@ export class ImageView implements NodeView {
     this.img.alt = node.attrs.alt || "";
     this.img.title = node.attrs.title || "";
 
+    // 对齐同样以节点属性为准，缺失时回落到默认值
+    this.dom.dataset.align =
+      node.attrs.align || (this.options.getDefaultAlign?.() ?? "center");
+
     // 文档里存了宽度（HTML 语法）时按它显示；否则回到自然大小
     const width = node.attrs.width as number | null;
     if (width) {
       this.img.setAttribute("width", String(width));
       this.img.style.width = "";
-      this.zoom = Math.round((width / (this.img.naturalWidth || width)) * 100);
     } else {
       this.img.removeAttribute("width");
       this.img.style.width = "";
-      this.zoom = 100;
     }
     return true;
   }
