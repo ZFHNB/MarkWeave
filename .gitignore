@@ -91,3 +91,4 @@ powershell.cmd
 # 目录版发布产物
 released/
 .package-staging/
+dist-web/

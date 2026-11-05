@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MarkWeave · Web 内核验证</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+        color: #24292f;
+        background: #fff;
+      }
+      #app, .p0-shell { height: 100%; display: flex; flex-direction: column; }
+      .p0-bar {
+        display: flex; align-items: center; justify-content: space-between;
+        height: 40px; padding: 0 16px; flex: 0 0 auto;
+        border-bottom: 1px solid #d0d7de; background: #f6f8fa;
+        font-size: 12px;
+      }
+      .p0-brand { font-weight: 600; }
+      .p0-status { color: #57606a; }
+      .p0-main { flex: 1; overflow-y: auto; }
+      #mount { max-width: 820px; margin: 0 auto; padding: 40px 24px 120px; }
+      .p0-footer {
+        display: flex; align-items: center; justify-content: space-between;
+        height: 26px; padding: 0 16px; flex: 0 0 auto;
+        border-top: 1px solid #d0d7de; background: #f6f8fa;
+        font-size: 11px; color: #57606a;
+      }
+      .p0-hint { opacity: 0.7; }
+      /* 编辑器本身的样式来自 typora-theme.css，这里只保证挂载点铺满 */
+      #mount .ProseMirror { outline: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
