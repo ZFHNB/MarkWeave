@@ -287,6 +287,11 @@ export interface MenuItem {
   disabled?: boolean;
   /** 是否显示勾选标记 */
   checked?: boolean;
+  /**
+   * 子菜单。为空的项点击后不会关闭当前菜单。
+   * 与 openMenuAt 配合：点开时关闭父菜单并在右侧展开。
+   */
+  submenu?: MenuItem[];
 }
 
 /**
@@ -351,7 +356,12 @@ export function openMenuAt(
     label.textContent = item.label ?? "";
     btn.appendChild(label);
 
-    if (item.shortcut) {
+    if (item.submenu && item.submenu.length > 0) {
+      const arrow = document.createElement("span");
+      arrow.className = "ty-menu-shortcut";
+      arrow.textContent = "›";
+      btn.appendChild(arrow);
+    } else if (item.shortcut) {
       const key = document.createElement("span");
       key.className = "ty-menu-shortcut";
       key.textContent = item.shortcut;
@@ -362,6 +372,12 @@ export function openMenuAt(
       // 记录本行位置，供二级菜单定位（一级菜单随后会被关闭）
       itemRowRect = btn.getBoundingClientRect();
       close();
+      if (item.submenu && item.submenu.length > 0) {
+        // 子菜单在右侧展开；anchor 传空，避免父菜单已销毁
+        const rect = itemRowRect;
+        openMenuAt(rect, item.submenu, undefined, "end");
+        return;
+      }
       item.onClick?.();
     });
     menu.appendChild(btn);

@@ -440,11 +440,24 @@ export function docToMarkdown(doc: PMNode): string {
       }
 
       if (child.type.name === "image") {
-        const title = child.attrs.title ? ` "${child.attrs.title}"` : "";
-        pieces.push({
-          text: `![${child.attrs.alt || ""}](${child.attrs.src}${title})`,
-          marks: [],
-        });
+        const width = child.attrs.width;
+        if (width) {
+          // 带尺寸的图片只能用 HTML 语法表达（Typora 同样如此）
+          const alt = String(child.attrs.alt || "");
+          const titleAttr = child.attrs.title
+            ? ` title="${String(child.attrs.title).replace(/"/g, "&quot;")}"`
+            : "";
+          pieces.push({
+            text: `<img src="${child.attrs.src}" alt="${alt}"${titleAttr} width="${width}" />`,
+            marks: [],
+          });
+        } else {
+          const title = child.attrs.title ? ` "${child.attrs.title}"` : "";
+          pieces.push({
+            text: `![${child.attrs.alt || ""}](${child.attrs.src}${title})`,
+            marks: [],
+          });
+        }
       } else if (child.type.name === "hard_break") {
         pieces.push({ text: inTable ? "<br>" : "  \n", marks: [] });
       } else if (child.type.name === "footnote_ref") {

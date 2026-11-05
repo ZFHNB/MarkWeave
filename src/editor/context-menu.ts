@@ -47,6 +47,10 @@ export class ContextMenu {
     document.body.appendChild(this.dom);
 
     view.dom.addEventListener("contextmenu", (event) => {
+      // 图片有自己的一套右键菜单（复制/缩放/转换语法…），这里让位。
+      // 图片 NodeView 的 handler 会 stopPropagation，但事件已冒泡到 view.dom
+      // 之前就已登记，所以这里按目标元素判断更稳妥。
+      if ((event.target as HTMLElement | null)?.closest(".md-image-wrap")) return;
       event.preventDefault();
       this.showAt(event.clientX, event.clientY);
     });

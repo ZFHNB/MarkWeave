@@ -61,6 +61,10 @@ export class ImageView implements NodeView {
     this.img.alt = node.attrs.alt || "";
     if (node.attrs.title) this.img.title = node.attrs.title;
     this.img.draggable = false;
+    if (node.attrs.width) {
+      this.img.setAttribute("width", String(node.attrs.width));
+      this.zoom = 100;
+    }
     this.img.addEventListener("error", () => {
       this.dom.classList.add("md-image-broken");
     });
@@ -109,6 +113,68 @@ export class ImageView implements NodeView {
     });
   }
 
+  /**
+   * 在文档里定位本节点。
+   *
+   * getPos() 在节点被重建后可能指向别处，这里按「img 节点 + 相同 src」
+   * 回查，找不到再退回 getPos。返回值一定是文档里真实的 image 节点位置。
+   */
+  private locateSelf(): { pos: number; node: PMNode } | null {
+    const src = this.node.attrs.src;
+    const hinted = this.getPos();
+    if (typeof hinted === "number") {
+      const at = this.view.state.doc.nodeAt(hinted);
+      if (at && at.type === this.node.type && at.attrs.src === src) {
+        return { pos: hinted, node: at };
+      }
+    }
+    let found: { pos: number; node: PMNode } | null = null;
+    this.view.state.doc.descendants((node, pos) => {
+      if (found) return false;
+      if (node.type === this.node.type && node.attrs.src === src) {
+        found = { pos, node };
+        return false;
+      }
+      return true;
+    });
+    return found;
+  }
+
+  /**
+   * 切换图片语法。
+   *
+   * 两者的区别就是「有没有宽度属性」：
+   * - Markdown：`![alt](src)`
+   * - HTML：`<img src alt width>`
+   * 转成 HTML 时若原本没有宽度，先按当前显示尺寸固定下来。
+   */
+  private setSyntax(kind: "markdown" | "html"): void {
+    const located = this.locateSelf();
+    if (!located) return;
+    const { pos, node: live } = located;
+
+    // 以文档里的实时属性为准；this.node 只在 update() 时刷新，
+    // 连续操作（先缩放再切语法）时可能已经过期。
+    const width = live.attrs.width as number | null;
+    if (kind === "markdown") {
+      if (!width) return; // 已是 Markdown 语法
+      this.view.dispatch(
+        this.view.state.tr.setNodeMarkup(pos, undefined, { ...live.attrs, width: null })
+      );
+      return;
+    }
+
+    // 转 HTML：没有宽度时取当前渲染宽度
+    const current =
+      width || this.img.getBoundingClientRect().width || this.img.naturalWidth || null;
+    this.view.dispatch(
+      this.view.state.tr.setNodeMarkup(pos, undefined, {
+        ...live.attrs,
+        width: current ? Math.round(current) : null,
+      })
+    );
+  }
+
   /** 图片右键菜单 */
   private openContextMenu(x: number, y: number): void {
     const src: string = this.node.attrs.src || "";
@@ -135,6 +201,35 @@ export class ImageView implements NodeView {
         onClick: () => {
           void navigator.clipboard?.writeText(src);
         },
+      },
+      { kind: "separator" as const },
+      {
+        label: "缩放图片",
+        submenu: [
+          { label: "25%", onClick: () => this.setZoom(25) },
+          { label: "33%", onClick: () => this.setZoom(33) },
+          { label: "50%", onClick: () => this.setZoom(50) },
+          { label: "67%", onClick: () => this.setZoom(67) },
+          { label: "80%", onClick: () => this.setZoom(80) },
+          { label: "100%（原始大小）", onClick: () => this.setZoom(100) },
+          { label: "150%", onClick: () => this.setZoom(150) },
+          { label: "200%", onClick: () => this.setZoom(200) },
+        ],
+      },
+      {
+        label: "转换图片语法",
+        submenu: [
+          {
+            label: "Markdown 语法",
+            checked: !this.node.attrs.width,
+            onClick: () => this.setSyntax("markdown"),
+          },
+          {
+            label: "HTML 语法",
+            checked: Boolean(this.node.attrs.width),
+            onClick: () => this.setSyntax("html"),
+          },
+        ],
       },
       { kind: "separator" as const },
       {
@@ -170,9 +265,43 @@ export class ImageView implements NodeView {
     setTimeout(() => document.addEventListener("mousedown", hide), 0);
   }
 
+  /**
+   * 缩放图片并写回文档。
+   *
+   * 之前只改 DOM 的 style.width，刷新或切换文档就丢了。现在把宽度写进
+   * 节点属性：有宽度时序列化成 `<img width="...">`（Typora 同款），
+   * 没有宽度时仍是标准 Markdown 语法。
+   */
   private setZoom(percent: number): void {
-    this.zoom = Math.max(10, Math.min(400, percent));
-    this.img.style.width = `${this.zoom}%`;
+    const clamped = Math.max(10, Math.min(400, percent));
+    const located = this.locateSelf();
+    if (!located) return;
+    const { pos, node: live } = located;
+
+    // 以「当前文档宽度」或「自然尺寸」为基准换算。
+    // 注意 1x1 这类超小图片的自然尺寸不足以作为基准，此时用当前显示宽度。
+    const currentWidth =
+      (live.attrs.width as number | null) ||
+      Math.round(this.img.getBoundingClientRect().width) ||
+      this.img.naturalWidth ||
+      0;
+
+    // 100% 视作「原始大小」，清掉宽度属性，让文档恢复为纯 Markdown
+    const nextWidth =
+      clamped === 100 || currentWidth <= 0
+        ? null
+        : Math.max(16, Math.round((currentWidth * clamped) / 100));
+
+    this.zoom = clamped;
+    this.img.style.width = "";
+    if (nextWidth) this.img.setAttribute("width", String(nextWidth));
+
+    this.view.dispatch(
+      this.view.state.tr.setNodeMarkup(pos, undefined, {
+        ...live.attrs,
+        width: nextWidth,
+      })
+    );
   }
 
   private setAlign(align: "left" | "center" | "right"): void {
@@ -200,6 +329,18 @@ export class ImageView implements NodeView {
     }
     this.img.alt = node.attrs.alt || "";
     this.img.title = node.attrs.title || "";
+
+    // 文档里存了宽度（HTML 语法）时按它显示；否则回到自然大小
+    const width = node.attrs.width as number | null;
+    if (width) {
+      this.img.setAttribute("width", String(width));
+      this.img.style.width = "";
+      this.zoom = Math.round((width / (this.img.naturalWidth || width)) * 100);
+    } else {
+      this.img.removeAttribute("width");
+      this.img.style.width = "";
+      this.zoom = 100;
+    }
     return true;
   }
 
