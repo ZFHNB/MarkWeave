@@ -44,7 +44,10 @@ function metaSpan(className: string, text: string, visible: boolean): HTMLSpanEl
   const el = document.createElement("span");
   el.className = `${className} ${visible ? "md-visible" : "md-hidden"}`;
   el.textContent = text;
-  el.setAttribute("contenteditable", "false");
+  // 不设 contenteditable="false"：ProseMirror 的 widget 本身已不可编辑，
+  // 额外标成 false 会让浏览器把它当成一个"整体对象"，光标无法越过它，
+  // 表现为「光标移不到收尾 ** 后面」。
+  el.setAttribute("aria-hidden", "true");
   return el;
 }
 
@@ -87,13 +90,23 @@ function buildExpandedDecorations(
       const endPos = pos + node.nodeSize;
       const near = from <= endPos + 1 && to >= startPos - 1;
 
+      // 光标正好停在标记文字的一端时，把该侧的标记隐藏掉。
+      // 否则光标会被画在不可编辑 widget 的内侧，看起来像"移不过去"；
+      // 与 Typora 一致：光标所在的那一端不需要显示标记。
+      const caretAtStart = from === startPos && to === startPos;
+      const caretAtEnd = from === endPos && to === endPos;
+
       decorations.push(
-        Decoration.widget(startPos, metaSpan("md-meta md-inline-mark md-before", markers[0], near), {
-          side: -1,
-        }),
-        Decoration.widget(endPos, metaSpan("md-meta md-inline-mark md-after", markers[1], near), {
-          side: 1,
-        })
+        Decoration.widget(
+          startPos,
+          metaSpan("md-meta md-inline-mark md-before", markers[0], near && !caretAtStart),
+          { side: -1 }
+        ),
+        Decoration.widget(
+          endPos,
+          metaSpan("md-meta md-inline-mark md-after", markers[1], near && !caretAtEnd),
+          { side: 1 }
+        )
       );
     }
   });
