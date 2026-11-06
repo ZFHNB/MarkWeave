@@ -2020,12 +2020,40 @@ async function refreshTrackedFile(docId: string, path: string): Promise<void> {
   );
 }
 
+/**
+ * 正在弹「外部修改」对话框的文档。
+ *
+ * 轮询每 2 秒触发一次，而确认框是模态的、会一直 await。若不加锁，
+ * 下一次轮询会在弹窗还开着时再弹一个，叠出多层对话框——用户关掉最上面
+ * 一个后下面还有，表现就是"弹窗关不掉"。
+ */
+const externalChangePrompting = new Set<string>();
+
+/** 整轮轮询是否已经弹过一个确认框（同一轮只打扰一次） */
+let externalChangeRoundBusy = false;
+
 async function pollExternalChanges(): Promise<void> {
   if (isSourceMode) return;
+  if (externalChangeRoundBusy) return;
   const api = getDesktopAPI();
   if (!api?.statFile) return;
 
+  externalChangeRoundBusy = true;
+  try {
+    await runExternalChangePass(api);
+  } finally {
+    externalChangeRoundBusy = false;
+  }
+}
+
+async function runExternalChangePass(
+  api: NonNullable<ReturnType<typeof getDesktopAPI>>
+): Promise<void> {
   for (const [docId, tracked] of Array.from(trackedFiles.entries())) {
+    // 该文档的确认框还开着，本轮跳过，避免重复弹窗
+    if (externalChangePrompting.has(docId)) continue;
+    // 本轮已经问过用户一次了，剩下的留到下一轮，避免连点
+    if (externalChangePrompting.size > 0) break;
     const stat = await getFileStat(tracked.path);
     if (!stat) continue;
     if (!hasExternalChange(tracked, stat)) continue;
@@ -2036,10 +2064,17 @@ async function pollExternalChanges(): Promise<void> {
       continue;
     }
 
-    const reload = await confirmDialog(
-      `「${doc.title}」已在外部被修改。是否重新载入磁盘内容？（选择取消则保留当前编辑）`,
-      { title: "文件已被外部修改", confirmLabel: "重新载入" }
-    );
+    let reload = false;
+    externalChangePrompting.add(docId);
+    try {
+      reload = await confirmDialog(
+        `「${doc.title}」已在外部被修改。是否重新载入磁盘内容？（选择取消则保留当前编辑）`,
+        { title: "文件已被外部修改", confirmLabel: "重新载入" }
+      );
+    } finally {
+      // 无论用户怎么关闭（确定/取消/Esc/点遮罩），都要解锁
+      externalChangePrompting.delete(docId);
+    }
     if (!reload) {
       trackedFiles.set(docId, markLocalWrite(tracked, stat));
       continue;
