@@ -1,0 +1,19 @@
+#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "pandoc 3.1.9"
+  echo "Features: +server +lua"
+  exit 0
+fi
+# 找到 -o 参数并写入内容
+out=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-o" ]; then out="$a"; fi
+  prev="$a"
+done
+if [ -n "$out" ]; then
+  printf 'FAKE-DOCX-CONTENT' > "$out"
+  exit 0
+fi
+echo "no output path" >&2
+exit 2

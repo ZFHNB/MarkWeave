@@ -6,7 +6,7 @@
  * 3. 改变箭头指向 (➔ 正向 / ⬅ 反向 / ⮂ 双向 / — 无向)
  * 4. 修改箭头横线上的文字 (点击 edgeLabel 原地行内编辑并双向同步源码)
  * 5. 一键横纵排布切换 (TD ↕ ↔ LR) 与画布平移缩放 (Pan & Zoom)
- * 6. 纯文本坐标元数据持久化 (%% {typemark_positions: ...} %%) 与一键还原原生排版
+ * 6. 纯文本坐标元数据持久化 (%% {markweave_positions: ...} %%) 与一键还原原生排版
  */
 
 interface Point {
@@ -30,6 +30,8 @@ interface NodeTopology {
   dx: number;
   dy: number;
   bbox: { x: number; y: number; width: number; height: number };
+  labelText?: string;
+  labelEl?: Element;
 }
 
 interface EdgeTopology {
@@ -45,6 +47,47 @@ interface EdgeTopology {
 
 const GRID_SIZE = 20;
 
+/** 设置项「节点拖拽吸附网格」对应的像素步长；关闭时返回 0（自由拖拽） */
+export function readGridSnapSize(): number {
+  try {
+    return localStorage.getItem("markweave_grid_snap") === "false" ? 0 : GRID_SIZE;
+  } catch {
+    return GRID_SIZE;
+  }
+}
+
+/** 设置项「默认折线拐角风格」→ 交互器内部风格（step-round 复用 stepBefore 的渲染） */
+export function readDefaultCurveStyle(): "basis" | "stepBefore" | "linear" {
+  try {
+    const raw = localStorage.getItem("markweave_mermaid_default_curve");
+    if (raw === "linear") return "linear";
+    if (raw === "step" || raw === "step-round") return "stepBefore";
+    return "basis";
+  } catch {
+    return "basis";
+  }
+}
+
+export function resolvePreviewModeOnAttach(
+  currentMode: "custom" | "standard",
+  modeInitialized: boolean,
+  defaultMode: "custom" | "standard"
+): "custom" | "standard" {
+  return modeInitialized ? currentMode : defaultMode;
+}
+
+/**
+ * 图表坐标元数据的注释格式。
+ *
+ * 早期版本写入的是 `typemark_positions`，现已更名为 `markweave_positions`。
+ * 读取与清除同时兼容两种前缀，保证旧文档的拖拽布局不丢失；
+ * 新写入一律使用新名称。
+ */
+const POSITION_ANNOTATION_NAME = "markweave_positions";
+const POSITION_ANNOTATION_PATTERN_G = /%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?/g;
+const POSITION_ANNOTATION_PATTERN = /%%\s*\{(?:typemark|markweave)_positions:\s*(\{.*?\})\}\s*%%/;
+const POSITION_ANNOTATION_HEAD_PATTERN = /^(%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?)/;
+
 export class MermaidInteractor {
   private svg!: SVGSVGElement;
   private container!: HTMLElement;
@@ -55,6 +98,14 @@ export class MermaidInteractor {
   private edgesList: EdgeTopology[] = [];
   public isEditMode: boolean = false; // 原 isDragMode 更名为 isEditMode
   public activeCurveStyle: "basis" | "stepBefore" | "linear" | null = null;
+  public previewMode: "custom" | "standard" = "custom";
+  private modeInitialized = false;
+  private btnModeCustom: HTMLButtonElement | null = null;
+  private btnModeStandard: HTMLButtonElement | null = null;
+  private curveGroupEl: HTMLElement | null = null;
+  private resetBtnEl: HTMLElement | null = null;
+  private onDefaultModeChange: ((e: any) => void) | null = null;
+
   private isDraggingNode: boolean = false;
   private activeNodeKey: string | null = null;
   private dragStartPointer: Point = { x: 0, y: 0 };
@@ -68,7 +119,9 @@ export class MermaidInteractor {
   private initialViewBox: { x: number; y: number; w: number; h: number } = { x: 0, y: 0, w: 0, h: 0 };
 
   // 浮动控制栏 DOM 与浮层
+  private toolbarWrapEl: HTMLElement | null = null;
   private toolbarEl: HTMLElement | null = null;
+  private hideToolbarTimer: any = null;
   private editModeBtn!: HTMLButtonElement;
   private zoomDisplay!: HTMLSpanElement;
   private popoverEl: HTMLElement | null = null;
@@ -77,6 +130,10 @@ export class MermaidInteractor {
   private cleanupFns: Array<() => void> = [];
 
   constructor() {}
+
+  public static getDefaultPreviewMode(): "custom" | "standard" {
+    return (localStorage.getItem("markweave_mermaid_default_mode") as any) || "custom";
+  }
 
   /**
    * 挂载至已渲染的 Mermaid SVG
@@ -97,22 +154,36 @@ export class MermaidInteractor {
     this.getCurrentCode = getCurrentCode;
     this.onSourceChange = onSourceChange;
 
+    const defaultMode = MermaidInteractor.getDefaultPreviewMode();
+    const initialMode = resolvePreviewModeOnAttach(
+      this.previewMode,
+      this.modeInitialized,
+      defaultMode
+    );
+    this.previewMode = initialMode;
+
     this.initViewBox();
     this.buildTopology();
     this.createToolbar();
     this.bindEvents();
-    this.applySavedPositions();
 
-    // 状态保持：始终同步代码或已选线型，并应用实时路由，确保渲染后线型 100% 保持稳定
-    const code = this.getCurrentCode();
-    const detectedCurve = this.detectCurveStyle(code);
-    this.activeCurveStyle = detectedCurve;
-    this.rerouteAllEdges(true);
+    this.switchPreviewMode(initialMode);
+    this.modeInitialized = true;
 
-    // 状态保持：如果先前开启了编辑模式或调整了缩放，持续保持！
-    if (prevEditMode) {
-      this.toggleEditMode(true);
+    if (initialMode === "custom") {
+      // 状态保持：始终同步代码或已选线型，并应用实时路由，确保渲染后线型 100% 保持稳定
+      const code = this.getCurrentCode();
+      const detectedCurve = this.detectCurveStyle(code);
+      this.activeCurveStyle = detectedCurve;
+      this.applySavedPositions();
+      this.rerouteAllEdges(true);
+
+      // 状态保持：如果先前开启了编辑模式，持续保持！
+      if (prevEditMode) {
+        this.toggleEditMode(true);
+      }
     }
+
     if (prevZoom !== 1.0) {
       this.currentZoom = prevZoom;
       this.updateSvgViewBox();
@@ -173,6 +244,14 @@ export class MermaidInteractor {
         }
       } catch (_) {}
 
+      // 提取节点文本与对应的标签容器元素
+      const labelEl =
+        el.querySelector(".label") ||
+        el.querySelector(".nodeLabel") ||
+        el.querySelector("text") ||
+        el;
+      const labelText = labelEl ? (labelEl.textContent || "").trim() : "";
+
       this.nodesMap.set(key, {
         key,
         el,
@@ -184,6 +263,8 @@ export class MermaidInteractor {
         dx: 0,
         dy: 0,
         bbox,
+        labelText,
+        labelEl,
       });
     });
 
@@ -194,6 +275,15 @@ export class MermaidInteractor {
     const allLabelGroups = Array.from(this.svg.querySelectorAll<SVGGElement>(".edgeLabels > g.edgeLabel"));
 
     linkPaths.forEach((pathEl) => {
+      // 彻底消除 Mermaid 引擎内部设置的 stroke-dasharray 导致实线出现 4px 断续残缺间隙的问题
+      if (
+        !pathEl.classList.contains("edge-pattern-dots") &&
+        !pathEl.classList.contains("edge-pattern-dashed")
+      ) {
+        pathEl.style.strokeDasharray = "none";
+        pathEl.removeAttribute("stroke-dasharray");
+      }
+
       const id = pathEl.id || pathEl.parentElement?.id || "";
       const match = /L_([^_]+)_([^_]+)(?:_(\d+))?$/.exec(id);
       if (match) {
@@ -246,10 +336,41 @@ export class MermaidInteractor {
    * 创建并挂载顶部精致交互工具条
    */
   private createToolbar() {
+    this.toolbarWrapEl?.remove();
     this.toolbarEl?.remove();
+
+    const wrap = document.createElement("div");
+    wrap.className = "md-diagram-toolbar-wrap";
+    wrap.setAttribute("contenteditable", "false");
 
     const bar = document.createElement("div");
     bar.className = "md-diagram-toolbar";
+    bar.setAttribute("contenteditable", "false");
+
+    // 0. 模式切换按钮组 (增强模式 vs 兼容模式)
+    const modeGroup = document.createElement("div");
+    modeGroup.className = "md-diagram-btn-group md-diagram-mode-group";
+
+    this.btnModeCustom = document.createElement("button");
+    this.btnModeCustom.className = `md-diagram-btn md-mode-btn-custom ${this.previewMode === "custom" ? "active" : ""}`;
+    this.btnModeCustom.innerHTML = `✨ 增强`;
+    this.btnModeCustom.title = "增强模式支持拖拽排版、折线、箭头与文字编辑";
+    this.btnModeCustom.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.switchPreviewMode("custom");
+    });
+
+    this.btnModeStandard = document.createElement("button");
+    this.btnModeStandard.className = `md-diagram-btn md-mode-btn-standard ${this.previewMode === "standard" ? "active" : ""}`;
+    this.btnModeStandard.innerHTML = `🌐 兼容`;
+    this.btnModeStandard.title = "兼容模式为主流标准 Mermaid 样式，仅保留纵横向切换";
+    this.btnModeStandard.addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.switchPreviewMode("standard");
+    });
+
+    modeGroup.appendChild(this.btnModeCustom);
+    modeGroup.appendChild(this.btnModeStandard);
 
     // 1. 方向切换按钮组 (TD, LR)
     const dirGroup = document.createElement("div");
@@ -281,13 +402,14 @@ export class MermaidInteractor {
     // 2. 线型风格切换按钮组 (圆角弧线 / 直角折线 / 直线)
     const curveGroup = document.createElement("div");
     curveGroup.className = "md-diagram-btn-group";
+    this.curveGroupEl = curveGroup;
 
     const currentCurve = this.detectCurveStyle();
 
     const btnBasis = document.createElement("button");
     btnBasis.className = `md-diagram-btn ${currentCurve === "basis" ? "active" : ""}`;
     btnBasis.innerHTML = `⌒ 圆角`;
-    btnBasis.title = "连线风格：拐弯处平滑圆角 (Basis/Cardinal)";
+    btnBasis.title = "连线风格：拐角圆弧倒角折线 (Rounded Elbow)";
     btnBasis.addEventListener("click", (e) => {
       e.stopPropagation();
       this.switchCurveStyle("basis");
@@ -296,7 +418,7 @@ export class MermaidInteractor {
     const btnStep = document.createElement("button");
     btnStep.className = `md-diagram-btn ${currentCurve === "stepBefore" ? "active" : ""}`;
     btnStep.innerHTML = `⌐ 直角`;
-    btnStep.title = "连线风格：全直角折线 (Step，工整正交排布)";
+    btnStep.title = "连线风格：严谨 90 度全直角折线 (Sharp Elbow)";
     btnStep.addEventListener("click", (e) => {
       e.stopPropagation();
       this.switchCurveStyle("stepBefore");
@@ -334,6 +456,7 @@ export class MermaidInteractor {
       e.stopPropagation();
       this.resetLayout();
     });
+    this.resetBtnEl = resetBtn;
 
     // 5. 缩放控制组
     const zoomGroup = document.createElement("div");
@@ -370,14 +493,93 @@ export class MermaidInteractor {
     zoomGroup.appendChild(this.zoomDisplay);
     zoomGroup.appendChild(zoomInBtn);
 
+    bar.appendChild(modeGroup);
     bar.appendChild(dirGroup);
     bar.appendChild(curveGroup);
     bar.appendChild(this.editModeBtn);
     bar.appendChild(resetBtn);
     bar.appendChild(zoomGroup);
 
-    this.container.appendChild(bar);
+    // 根据初始模式配置元素显隐
+    if (this.previewMode === "standard") {
+      curveGroup.style.display = "none";
+      this.editModeBtn.style.display = "none";
+      resetBtn.style.display = "none";
+    }
+
+    // 彻底杜绝所有工具栏按钮出现光标、文字被选或文字被误修改的可能
+    bar.querySelectorAll("button, span, div").forEach((el) => {
+      el.setAttribute("contenteditable", "false");
+      el.addEventListener("mousedown", (e) => e.preventDefault());
+    });
+
+    wrap.appendChild(bar);
+    this.container.appendChild(wrap);
+    this.toolbarWrapEl = wrap;
     this.toolbarEl = bar;
+  }
+
+  /**
+   * 切换图表预览模式：
+   * - "custom": MarkWeave 增强模式，展示拖拽排版、正交圆角/直角折线等全部特性
+   * - "standard": 兼容模式，展示 100% 官方主流标准排版，仅保留纵向与横向排布转换
+   */
+  public switchPreviewMode(mode: "custom" | "standard") {
+    this.previewMode = mode;
+    this.modeInitialized = true;
+
+    // 1. 更新工具栏按钮高亮与各组件显示/隐藏
+    if (this.btnModeCustom && this.btnModeStandard) {
+      if (mode === "custom") {
+        this.btnModeCustom.classList.add("active");
+        this.btnModeStandard.classList.remove("active");
+        if (this.curveGroupEl) this.curveGroupEl.style.display = "inline-flex";
+        if (this.editModeBtn) this.editModeBtn.style.display = "inline-flex";
+        if (this.resetBtnEl) this.resetBtnEl.style.display = "inline-flex";
+      } else {
+        this.btnModeStandard.classList.add("active");
+        this.btnModeCustom.classList.remove("active");
+        if (this.curveGroupEl) this.curveGroupEl.style.display = "none";
+        if (this.editModeBtn) this.editModeBtn.style.display = "none";
+        if (this.resetBtnEl) this.resetBtnEl.style.display = "none";
+        if (this.isEditMode) {
+          this.toggleEditMode(false);
+        }
+      }
+    }
+
+    // 2. 根据模式呈现对应图表样式
+    if (mode === "standard") {
+      this.container.classList.add("is-standard-mode");
+      this.container.classList.remove("is-custom-mode");
+
+      // 还原原生节点流动坐标 (不应用手动拖拽坐标)
+      this.nodesMap.forEach((node) => {
+        node.currentX = node.baseX;
+        node.currentY = node.baseY;
+        node.dx = 0;
+        node.dy = 0;
+        node.el.setAttribute("transform", node.initialTransform);
+      });
+
+      // 还原官方标准连线
+      this.edgesList.forEach((edge) => {
+        edge.el.setAttribute("d", edge.initialD);
+        if (edge.labelEl) {
+          const origTransform = edge.labelEl.getAttribute("data-orig-transform") || "";
+          if (origTransform) {
+            edge.labelEl.setAttribute("transform", origTransform);
+          }
+        }
+      });
+    } else {
+      this.container.classList.add("is-custom-mode");
+      this.container.classList.remove("is-standard-mode");
+
+      // 恢复自定义拖拽坐标与正交航线
+      this.applySavedPositions();
+      this.rerouteAllEdges(true);
+    }
   }
 
   /**
@@ -407,7 +609,9 @@ export class MermaidInteractor {
         if (c === "linear") return "linear";
         return "basis";
       }
-      return "basis";
+      // 代码里没写 curve，也没有用户本会话的显式选择时，
+      // 落到偏好设置里的「默认折线拐角风格」（否则这个设置是死的）
+      return this.activeCurveStyle ?? readDefaultCurveStyle();
     }
 
     // 2. 如果当前交互器已有明确的活跃风格（用户在工具栏点击了对应按钮），必须优先以用户的活跃选择为准
@@ -426,7 +630,8 @@ export class MermaidInteractor {
         return "basis";
       }
     }
-    return "basis"; // 默认平滑
+    // 代码里没写 curve：用偏好设置里的默认风格
+    return readDefaultCurveStyle();
   }
 
   /**
@@ -436,7 +641,7 @@ export class MermaidInteractor {
     let code = this.getCurrentCode();
 
     // 关键优化：切换方向时清除旧方向下的自定义坐标，避免旧坐标与新排布方向产生冲突与连线畸变
-    code = code.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
+    code = code.replace(POSITION_ANNOTATION_PATTERN_G, "").trim();
 
     const dirRegex = /^(\s*(?:flowchart|graph))\s+(TD|TB|LR|RL|BT)(.*)$/im;
 
@@ -503,7 +708,7 @@ export class MermaidInteractor {
       }
     } else {
       const newInit = `%%{init: {"flowchart": {"curve": "${curve}"}}}%%\n`;
-      const posMatch = /^(%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%\n?)/.exec(code);
+      const posMatch = POSITION_ANNOTATION_HEAD_PATTERN.exec(code);
       if (posMatch) {
         updatedCode = posMatch[0] + newInit + code.slice(posMatch[0].length);
       } else {
@@ -520,6 +725,9 @@ export class MermaidInteractor {
    * 开关可视化编辑模式
    */
   public toggleEditMode(forceState?: boolean) {
+    if (this.previewMode === "standard" && forceState !== false) {
+      return; // 普通模式下不支持拖拽与连线编辑
+    }
     this.isEditMode = typeof forceState === "boolean" ? forceState : !this.isEditMode;
 
     if (this.isEditMode) {
@@ -563,7 +771,7 @@ export class MermaidInteractor {
     });
 
     const code = this.getCurrentCode();
-    const cleanCode = code.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
+    const cleanCode = code.replace(POSITION_ANNOTATION_PATTERN_G, "").trim();
     if (cleanCode !== code) {
       this.onSourceChange(cleanCode);
     }
@@ -603,9 +811,57 @@ export class MermaidInteractor {
    * 绑定 Pointer / Click / Wheel 事件
    */
   private bindEvents() {
-    // 1. 节点拖拽事件绑定 (含格点吸附)
+    // 0. 顶部浮动控制栏专属感应区域交互优化 (四周外延 24-30px 的感应缓冲区域，挪开后消失)
+    const onContainerMouseMove = (e: MouseEvent) => {
+      if (this.isEditMode || !this.toolbarEl || !this.toolbarWrapEl) return;
+      const rect = this.toolbarEl.getBoundingClientRect();
+      const inZone =
+        e.clientX >= rect.left - 30 &&
+        e.clientX <= rect.right + 20 &&
+        e.clientY >= rect.top - 20 &&
+        e.clientY <= rect.bottom + 30;
+
+      if (inZone) {
+        if (this.hideToolbarTimer) {
+          clearTimeout(this.hideToolbarTimer);
+          this.hideToolbarTimer = null;
+        }
+        this.toolbarWrapEl.classList.add("is-toolbar-visible");
+      } else {
+        if (!this.hideToolbarTimer && this.toolbarWrapEl.classList.contains("is-toolbar-visible")) {
+          this.hideToolbarTimer = setTimeout(() => {
+            this.toolbarWrapEl?.classList.remove("is-toolbar-visible");
+            this.hideToolbarTimer = null;
+          }, 200);
+        }
+      }
+    };
+
+    const onContainerMouseLeave = () => {
+      if (this.isEditMode || !this.toolbarWrapEl) return;
+      this.hideToolbarTimer = setTimeout(() => {
+        this.toolbarWrapEl?.classList.remove("is-toolbar-visible");
+        this.hideToolbarTimer = null;
+      }, 200);
+    };
+
+    this.container.addEventListener("mousemove", onContainerMouseMove);
+    this.container.addEventListener("mouseleave", onContainerMouseLeave);
+    this.cleanupFns.push(() => {
+      this.container.removeEventListener("mousemove", onContainerMouseMove);
+      this.container.removeEventListener("mouseleave", onContainerMouseLeave);
+      if (this.hideToolbarTimer) clearTimeout(this.hideToolbarTimer);
+    });
+
+    // 1. 节点拖拽与文字实时编辑事件绑定 (区分拖拽位移与点击，防范历史错误)
     this.nodesMap.forEach((node) => {
+      let dragStartScreen = { x: 0, y: 0 };
+      let hasDragged = false;
+
       const onPointerDown = (e: PointerEvent) => {
+        dragStartScreen = { x: e.clientX, y: e.clientY };
+        hasDragged = false;
+
         if (!this.isEditMode) return;
         e.stopPropagation();
         e.preventDefault();
@@ -620,8 +876,38 @@ export class MermaidInteractor {
         this.svg.setPointerCapture(e.pointerId);
       };
 
+      const onPointerMove = (e: PointerEvent) => {
+        if (Math.hypot(e.clientX - dragStartScreen.x, e.clientY - dragStartScreen.y) > 4) {
+          hasDragged = true;
+        }
+      };
+
+      const onClick = (e: MouseEvent) => {
+        // 编辑模式下未发生拖动时，单击节点文字直接原地编辑
+        if (!this.isEditMode || hasDragged) return;
+        e.stopPropagation();
+        e.preventDefault();
+        this.openInlineNodeEditor(node, e);
+      };
+
+      const onDblClick = (e: MouseEvent) => {
+        // 任何模式下双击节点均可直接呼出原地文字编辑
+        e.stopPropagation();
+        e.preventDefault();
+        this.openInlineNodeEditor(node, e);
+      };
+
       node.el.addEventListener("pointerdown", onPointerDown);
-      this.cleanupFns.push(() => node.el.removeEventListener("pointerdown", onPointerDown));
+      node.el.addEventListener("pointermove", onPointerMove);
+      node.el.addEventListener("click", onClick);
+      node.el.addEventListener("dblclick", onDblClick);
+
+      this.cleanupFns.push(() => {
+        node.el.removeEventListener("pointerdown", onPointerDown);
+        node.el.removeEventListener("pointermove", onPointerMove);
+        node.el.removeEventListener("click", onClick);
+        node.el.removeEventListener("dblclick", onDblClick);
+      });
     });
 
     // 2. 连线点击事件 (改变箭头方向)
@@ -665,11 +951,12 @@ export class MermaidInteractor {
 
         const node = this.nodesMap.get(this.activeNodeKey);
         if (node) {
-          // 格点吸附 (Snap to Grid)
+          // 格点吸附 (Snap to Grid)：设置里关掉时按 0 处理，即自由拖拽
+          const grid = readGridSnapSize();
           const rawTargetX = this.nodeOriginBeforeDrag.x + deltaX;
           const rawTargetY = this.nodeOriginBeforeDrag.y + deltaY;
-          node.currentX = Math.round(rawTargetX / GRID_SIZE) * GRID_SIZE;
-          node.currentY = Math.round(rawTargetY / GRID_SIZE) * GRID_SIZE;
+          node.currentX = grid > 0 ? Math.round(rawTargetX / grid) * grid : rawTargetX;
+          node.currentY = grid > 0 ? Math.round(rawTargetY / grid) * grid : rawTargetY;
           node.dx = node.currentX - node.baseX;
           node.dy = node.currentY - node.baseY;
 
@@ -737,11 +1024,22 @@ export class MermaidInteractor {
     window.addEventListener("pointerup", onPointerUp);
     this.container.addEventListener("wheel", onWheel, { passive: false });
 
+    this.onDefaultModeChange = (e: any) => {
+      const newMode = e?.detail?.mode;
+      if (newMode === "custom" || newMode === "standard") {
+        this.switchPreviewMode(newMode);
+      }
+    };
+    window.addEventListener("markweave-default-mode-change", this.onDefaultModeChange);
+
     this.cleanupFns.push(() => {
       this.svg.removeEventListener("pointerdown", onSvgPointerDown);
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       this.container.removeEventListener("wheel", onWheel);
+      if (this.onDefaultModeChange) {
+        window.removeEventListener("markweave-default-mode-change", this.onDefaultModeChange);
+      }
     });
   }
 
@@ -755,6 +1053,7 @@ export class MermaidInteractor {
     const rect = this.container.getBoundingClientRect();
     const popover = document.createElement("div");
     popover.className = "md-edge-popover";
+    popover.setAttribute("contenteditable", "false");
     let left = e.clientX ? e.clientX - rect.left : 0;
     let top = e.clientY ? e.clientY - rect.top - 36 : 0;
     if ((!e.clientX && !e.clientY) || left <= 0 || top <= 0) {
@@ -776,6 +1075,8 @@ export class MermaidInteractor {
       const btn = document.createElement("button");
       btn.className = "md-edge-popover-btn";
       btn.innerHTML = `${opt.icon} ${opt.label}`;
+      btn.setAttribute("contenteditable", "false");
+      btn.addEventListener("mousedown", (evt) => evt.preventDefault());
       btn.addEventListener("click", (evt) => {
         evt.stopPropagation();
         this.changeArrowDirection(edge, opt.style);
@@ -786,9 +1087,30 @@ export class MermaidInteractor {
 
     this.container.appendChild(popover);
     this.popoverEl = popover;
+
+    // 点空白处要能关掉：否则浮层会一直挂在页面上（截图里那种残留）
+    const onOutsideDown = (evt: MouseEvent) => {
+      if (!this.popoverEl) return;
+      if (this.popoverEl.contains(evt.target as Node)) return;
+      this.closePopover();
+    };
+    const onKeyDown = (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") this.closePopover();
+    };
+    // 延后一拍注册，避免触发它的那次点击立刻把它关掉
+    setTimeout(() => {
+      document.addEventListener("mousedown", onOutsideDown, true);
+      document.addEventListener("keydown", onKeyDown, true);
+    }, 0);
+    const previousClose = this.closePopover.bind(this);
+    this.closePopover = () => {
+      document.removeEventListener("mousedown", onOutsideDown, true);
+      document.removeEventListener("keydown", onKeyDown, true);
+      previousClose();
+    };
   }
 
-  private closePopover() {
+  private closePopover(): void {
     if (this.popoverEl) {
       if (this.popoverEl.parentNode) {
         this.popoverEl.remove();
@@ -951,6 +1273,133 @@ export class MermaidInteractor {
     });
   }
 
+  /**
+   * 打开节点文字原地行内编辑框 (实时修改图表中的文字)
+   */
+  public openInlineNodeEditor(node: NodeTopology, _e?: MouseEvent) {
+    this.closeInlineInput();
+    this.closePopover();
+
+    const rect = this.container.getBoundingClientRect();
+    const wrapper = document.createElement("div");
+    wrapper.className = "md-inline-node-editor";
+
+    const targetEl = node.labelEl || node.el;
+    const box = targetEl.getBoundingClientRect();
+
+    const centerX = box.left + box.width / 2 - rect.left;
+    const centerY = box.top + box.height / 2 - rect.top;
+
+    wrapper.style.left = `${Math.max(10, centerX)}px`;
+    wrapper.style.top = `${Math.max(10, centerY)}px`;
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "md-inline-node-input";
+    input.value = node.labelText || "";
+    input.placeholder = "节点文字...";
+
+    let isSaving = false;
+    const save = () => {
+      if (isSaving) return;
+      isSaving = true;
+      const newText = input.value.trim();
+      this.closeInlineInput();
+      if (newText && newText !== node.labelText) {
+        this.updateNodeLabelInSource(node.key, newText, node.labelText);
+      }
+    };
+
+    input.addEventListener("keydown", (evt) => {
+      if (evt.key === "Enter") {
+        evt.preventDefault();
+        save();
+      } else if (evt.key === "Escape") {
+        this.closeInlineInput();
+      }
+    });
+
+    input.addEventListener("blur", save);
+
+    wrapper.appendChild(input);
+    this.container.appendChild(wrapper);
+    this.activeInlineInput = wrapper;
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 50);
+  }
+
+  /**
+   * 更新节点文字并无缝同步回 Markdown 源码
+   * 保留节点的形状括号符号、避免破坏任何相邻连线与位置元数据
+   */
+  public updateNodeLabelInSource(nodeKey: string, newText: string, oldText?: string) {
+    const code = this.getCurrentCode();
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    // Mermaid 形状括号对（按长度降序排序，杜绝短符号先行吞噬长符号）
+    const bracketPairs = [
+      { open: "[[", close: "]]" },
+      { open: "[(", close: ")]" },
+      { open: "([", close: "])" },
+      { open: "((", close: "))" },
+      { open: "{{", close: "}}" },
+      { open: "[/", close: "/]" },
+      { open: "[\\", close: "\\]" },
+      { open: "[/", close: "\\]" },
+      { open: "[\\", close: "/]" },
+      { open: ">", close: "]" },
+      { open: "[", close: "]" },
+      { open: "(", close: ")" },
+      { open: "{", close: "}" },
+    ];
+
+    let updatedCode = code;
+    let matched = false;
+
+    for (const pair of bracketPairs) {
+      const openEsc = escapeRegex(pair.open);
+      const closeEsc = escapeRegex(pair.close);
+      const pattern = new RegExp(
+        `((?:^|[^\\w\\-])\\b${escapeRegex(nodeKey)}\\b\\s*${openEsc})([\\s\\S]*?)(${closeEsc})`,
+        "m"
+      );
+      if (pattern.test(updatedCode)) {
+        updatedCode = updatedCode.replace(pattern, (_m, p1, oldContent, p3) => {
+          if (oldContent.trim().startsWith('"') && oldContent.trim().endsWith('"')) {
+            return `${p1}"${newText}"${p3}`;
+          }
+          return `${p1}${newText}${p3}`;
+        });
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      // 容错 1：若是无括号节点（如 A --> B），为其补充标准矩形 [newText]
+      const barePattern = new RegExp(`((?:^|[^\\w\\-])\\b)(${escapeRegex(nodeKey)})(\\b(?![\\w\\-\\[\\(\\{>]))`, "m");
+      if (barePattern.test(updatedCode)) {
+        updatedCode = updatedCode.replace(barePattern, `$1$2[${newText}]`);
+        matched = true;
+      }
+    }
+
+    if (!matched && oldText) {
+      // 容错 2：非 flowchart 图表或特殊语法，安全替换已知旧文字
+      const textPattern = new RegExp(escapeRegex(oldText), "g");
+      if (textPattern.test(updatedCode)) {
+        updatedCode = updatedCode.replace(textPattern, newText);
+        matched = true;
+      }
+    }
+
+    if (matched && updatedCode !== code) {
+      this.onSourceChange(updatedCode);
+    }
+  }
+
   private getSvgPoint(e: PointerEvent): Point {
     const pt = this.svg.createSVGPoint();
     pt.x = e.clientX;
@@ -1061,45 +1510,131 @@ export class MermaidInteractor {
 
     if (curveStyle === "linear") {
       // 1. 直线风格 (Linear)
-      pathD = `M${Math.round(start.x)},${Math.round(start.y)}L${Math.round(end.x)},${Math.round(end.y)}`;
-      labelPos = { x: Math.round((start.x + end.x) / 2), y: Math.round((start.y + end.y) / 2) };
-    } else if (curveStyle === "stepBefore") {
-      // 2. 全直角折线风格 (Orthogonal Manhattan Routing) - 严谨保持 90 度工整折角
-      if (exitDir === "down" || exitDir === "up") {
-        const yMid = Math.round((start.y + end.y) / 2 + laneOffset);
-        const sx = Math.round(start.x);
-        const sy = Math.round(start.y);
-        const ex = Math.round(end.x);
-        const ey = Math.round(end.y);
-        pathD = `M${sx},${sy}L${sx},${yMid}L${ex},${yMid}L${ex},${ey}`;
-        labelPos = { x: Math.round((sx + ex) / 2), y: yMid };
-      } else {
-        const xMid = Math.round((start.x + end.x) / 2 + laneOffset);
-        const sx = Math.round(start.x);
-        const sy = Math.round(start.y);
-        const ex = Math.round(end.x);
-        const ey = Math.round(end.y);
-        pathD = `M${sx},${sy}L${xMid},${sy}L${xMid},${ey}L${ex},${ey}`;
-        labelPos = { x: xMid, y: Math.round((sy + ey) / 2) };
-      }
-    } else {
-      // 3. 圆角弧线风格 (Smooth Bezier)
       const sx = Math.round(start.x);
       const sy = Math.round(start.y);
       const ex = Math.round(end.x);
       const ey = Math.round(end.y);
+      pathD = `M${sx},${sy}L${ex},${ey}`;
+      labelPos = { x: Math.round((sx + ex) / 2), y: Math.round((sy + ey) / 2) };
+    } else {
+      // 2. 正交折线体系 (Orthogonal Manhattan / Elbow)
+      // - "stepBefore": 严谨 90 度全直角折线 (cornerRadius = 0)
+      // - "basis": 折弯处带有平滑圆润弧度的圆角折线 (cornerRadius = 10，保持横平竖直主干，拐角圆弧倒角)
+      const cornerRadius = curveStyle === "stepBefore" ? 0 : 10;
+      const sx = Math.round(start.x);
+      const sy = Math.round(start.y);
+      const ex = Math.round(end.x);
+      const ey = Math.round(end.y);
+
+      let waypoints: Point[];
+
       if (exitDir === "down" || exitDir === "up") {
         const yMid = Math.round((sy + ey) / 2 + laneOffset);
-        pathD = `M${sx},${sy}C${sx},${yMid} ${ex},${yMid} ${ex},${ey}`;
+        waypoints = [
+          { x: sx, y: sy },
+          { x: sx, y: yMid },
+          { x: ex, y: yMid },
+          { x: ex, y: ey },
+        ];
         labelPos = { x: Math.round((sx + ex) / 2), y: yMid };
       } else {
         const xMid = Math.round((sx + ex) / 2 + laneOffset);
-        pathD = `M${sx},${sy}C${xMid},${sy} ${xMid},${ey} ${ex},${ey}`;
+        waypoints = [
+          { x: sx, y: sy },
+          { x: xMid, y: sy },
+          { x: xMid, y: ey },
+          { x: ex, y: ey },
+        ];
         labelPos = { x: xMid, y: Math.round((sy + ey) / 2) };
       }
+
+      pathD = this.buildOrthogonalPath(waypoints, cornerRadius);
     }
 
     return { pathD, labelPos };
+  }
+
+  /**
+   * 构造正交航线 SVG 路径 (支持指定折角圆弧半径 cornerRadius)
+   * - cornerRadius = 0: 严谨 90 度尖角全直角折线
+   * - cornerRadius > 0: 折弯处平滑圆弧倒角过渡 (Rounded Elbow)
+   */
+  private buildOrthogonalPath(rawPoints: Point[], cornerRadius: number = 0): string {
+    // 1. 过滤连续重合点 (避免零长度线段畸变)
+    const points: Point[] = [];
+    for (const p of rawPoints) {
+      if (points.length === 0) {
+        points.push(p);
+      } else {
+        const last = points[points.length - 1];
+        if (Math.abs(last.x - p.x) >= 1 || Math.abs(last.y - p.y) >= 1) {
+          points.push(p);
+        }
+      }
+    }
+
+    if (points.length <= 1) return "";
+    if (points.length === 2 || cornerRadius <= 0) {
+      // 纯直线或 90 度尖角全直角正交折线
+      let d = `M${points[0].x},${points[0].y}`;
+      for (let i = 1; i < points.length; i++) {
+        d += `L${points[i].x},${points[i].y}`;
+      }
+      return d;
+    }
+
+    // 2. 带圆角弧度的正交折线 (Rounded Elbow Routing)
+    // 每个折弯角通过二次贝塞尔曲线 Q 进行平滑圆弧倒角过渡
+    let d = `M${points[0].x},${points[0].y}`;
+
+    for (let i = 1; i < points.length - 1; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const next = points[i + 1];
+
+      // 入向向量
+      const dx1 = curr.x - prev.x;
+      const dy1 = curr.y - prev.y;
+      const len1 = Math.hypot(dx1, dy1);
+
+      // 出向向量
+      const dx2 = next.x - curr.x;
+      const dy2 = next.y - curr.y;
+      const len2 = Math.hypot(dx2, dy2);
+
+      // 如果共线或段长极短，直接直线连接当前点
+      if (
+        len1 < 2 ||
+        len2 < 2 ||
+        (dx1 === 0 && dx2 === 0) ||
+        (dy1 === 0 && dy2 === 0)
+      ) {
+        d += `L${curr.x},${curr.y}`;
+        continue;
+      }
+
+      // 单位向量
+      const ux1 = dx1 / len1;
+      const uy1 = dy1 / len1;
+      const ux2 = dx2 / len2;
+      const uy2 = dy2 / len2;
+
+      // 动态自适应拐角弧度半径（不超过相邻任一线段长度的一半，防止过冲）
+      const r = Math.min(cornerRadius, len1 / 2, len2 / 2);
+
+      const startX = Math.round(curr.x - ux1 * r);
+      const startY = Math.round(curr.y - uy1 * r);
+      const endX = Math.round(curr.x + ux2 * r);
+      const endY = Math.round(curr.y + uy2 * r);
+
+      // 直线段抵达倒角起点，使用 Q 二次贝塞尔曲线优雅圆弧过渡到出线点
+      d += `L${startX},${startY}Q${curr.x},${curr.y} ${endX},${endY}`;
+    }
+
+    // 连接终点
+    const last = points[points.length - 1];
+    d += `L${last.x},${last.y}`;
+    return d;
   }
 
   private rerouteEdgesForNode(_node: NodeTopology) {
@@ -1126,6 +1661,14 @@ export class MermaidInteractor {
       const { pathD, labelPos } = this.calculateEdgeRoute(edge, idx);
       edge.el.setAttribute("d", pathD);
 
+      if (
+        !edge.el.classList.contains("edge-pattern-dots") &&
+        !edge.el.classList.contains("edge-pattern-dashed")
+      ) {
+        edge.el.style.strokeDasharray = "none";
+        edge.el.removeAttribute("stroke-dasharray");
+      }
+
       if (edge.labelEl) {
         edge.labelEl.setAttribute("transform", `translate(${labelPos.x}, ${labelPos.y})`);
       }
@@ -1144,7 +1687,7 @@ export class MermaidInteractor {
     });
 
     const code = this.getCurrentCode();
-    const cleanCode = code.replace(/%%\s*\{typemark_positions:.*?\}\s*%%\n?/g, "").trim();
+    const cleanCode = code.replace(POSITION_ANNOTATION_PATTERN_G, "").trim();
 
     if (!hasMoved) {
       if (cleanCode !== code) {
@@ -1153,7 +1696,7 @@ export class MermaidInteractor {
       return;
     }
 
-    const annotation = `%% {typemark_positions: ${JSON.stringify(posRecord)}} %%`;
+    const annotation = `%% {${POSITION_ANNOTATION_NAME}: ${JSON.stringify(posRecord)}} %%`;
     const newCode = `${annotation}\n${cleanCode}`;
     if (newCode !== code) {
       this.onSourceChange(newCode);
@@ -1162,7 +1705,7 @@ export class MermaidInteractor {
 
   private applySavedPositions() {
     const code = this.getCurrentCode();
-    const match = /%%\s*\{typemark_positions:\s*(\{.*?\})\}\s*%%/.exec(code);
+    const match = POSITION_ANNOTATION_PATTERN.exec(code);
     if (!match) return;
 
     try {

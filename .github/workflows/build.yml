@@ -1,0 +1,93 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check and build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-report
+          path: reports/junit.xml
+          if-no-files-found: ignore
+
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: markweave-web
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    name: Portable release
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build portable executable
+        id: build
+        shell: pwsh
+        run: |
+          npm run package:portable
+          $exe = Get-ChildItem release -Filter "MarkWeave-*-portable.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Portable executable was not produced" }
+          "artifact_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "artifact_name=$($exe.Name)" >> $env:GITHUB_OUTPUT
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+
+      - name: Write checksum
+        shell: pwsh
+        run: |
+          "${{ steps.build.outputs.sha256 }}  ${{ steps.build.outputs.artifact_name }}" |
+            Out-File -Encoding ascii -NoNewline "${{ steps.build.outputs.artifact_path }}.sha256"
+
+      - name: Attach artifact to draft release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.build.outputs.artifact_path }}
+            ${{ steps.build.outputs.artifact_path }}.sha256
+          draft: true
+          generate_release_notes: true

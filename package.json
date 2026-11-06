@@ -1,24 +1,31 @@
 {
   "name": "markweave",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "description": "MarkWeave - 现代即时渲染、支持可拖拽 Mermaid 图表可视化排版的 Markdown 编辑器",
   "private": true,
   "type": "module",
+  "main": "electron/main.cjs",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test:e2e": "node scripts/test-e2e.mjs"
+    "test": "vitest run --reporter=default --reporter=junit --outputFile.junit=reports/junit.xml",
+    "test:e2e": "node scripts/test-e2e.mjs",
+    "electron:dev": "cross-env MARKWEAVE_DEV_URL=http://localhost:5173 electron .",
+    "electron:start": "npm run build && electron .",
+    "package": "node scripts/package.mjs",
+    "package:dir": "node scripts/package.mjs --dir",
+    "package:portable": "node scripts/package.mjs --portable"
   },
   "devDependencies": {
     "@types/katex": "^0.16.8",
     "@types/markdown-it": "^14.2.0",
-    "puppeteer-core": "^25.14.0",
-    "typescript": "~6.0.2",
-    "vite": "^8.3.0"
-  },
-  "dependencies": {
+    "cross-env": "^7.0.3",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "jsdom": "^29.1.1",
     "katex": "^0.19.0",
+    "lowlight": "^3.3.0",
     "lucide": "^1.59.0",
     "markdown-it": "^15.0.3",
     "mermaid": "^12.2.0",
@@ -29,7 +36,40 @@
     "prosemirror-model": "^1.25.12",
     "prosemirror-schema-list": "^1.5.1",
     "prosemirror-state": "^1.4.4",
+    "prosemirror-tables": "^1.8.5",
     "prosemirror-transform": "^1.12.2",
-    "prosemirror-view": "^1.42.6"
+    "prosemirror-view": "^1.42.6",
+    "puppeteer-core": "^25.14.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {},
+  "build": {
+    "appId": "com.markweave.app",
+    "productName": "MarkWeave",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "asar": true,
+    "win": {
+      "target": [
+        "dir"
+      ],
+      "icon": "resources/icon.png"
+    },
+    "portable": {
+      "artifactName": "MarkWeave-${version}-portable.exe"
+    }
+  },
+  "scripts_extra": {
+    "_comment": "便携版每次启动要把约 475MB 解压到临时目录（约 15 秒）。dir 形式免解压，启动约 1-2 秒。"
   }
 }

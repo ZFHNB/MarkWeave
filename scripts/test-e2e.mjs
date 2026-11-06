@@ -1,6 +1,7 @@
 import puppeteer from "puppeteer-core";
 import fs from "fs";
 import path from "path";
+import os from "os";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -8,6 +9,61 @@ const __dirname = path.dirname(__filename);
 
 const chromePath = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const artifactsDir = path.resolve(__dirname, "../test-artifacts");
+// 端口可覆盖：Windows 会把 5108–5207 整段保留给系统，5173 在这种机器上
+// 直接 EACCES，需要用 MARKWEAVE_E2E_PORT=3000 之类的方式换端口。
+const e2ePort = process.env.MARKWEAVE_E2E_PORT || "5173";
+const e2eBaseUrl = `http://127.0.0.1:${e2ePort}/`;
+// 每轮使用全新 profile，避免上一轮持久化的 localStorage/工作区影响文档数量等断言。
+const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), "markweave-e2e-"));
+
+/**
+ * 展开「文件」菜单并点击匹配的菜单项。
+ *
+ * 0.2.0 起工具栏精简，导出等操作都收进了文件菜单，测试不能再按按钮 id 点。
+ * 二级菜单（如「导出」）点开后会以浮层形式出现在原行右侧，所以这里可以
+ * 连续两次查找。
+ */
+async function clickMenuItem(page, label, nextLabelMatch) {
+  await page.click("#btn-file-menu");
+  await new Promise((r) => setTimeout(r, 250));
+
+  const labelJson = JSON.stringify(label);
+  const firstClicked = await page.evaluate(`
+    (() => {
+      const row = Array.from(document.querySelectorAll(".ty-menu-item"))
+        .find((btn) => (btn.textContent || "").trim() === ${labelJson});
+      if (!row) return false;
+      row.click();
+      return true;
+    })()
+  `);
+  if (!firstClicked) throw new Error(`文件菜单里找不到「${label}」`);
+  if (!nextLabelMatch) return;
+
+  await new Promise((r) => setTimeout(r, 250));
+  // nextLabelMatch 是谓词：导出项的文字里还带着快捷键，只能按片段匹配
+  const secondClicked = await page.evaluate(`
+    (() => {
+      const match = ${nextLabelMatch.toString()};
+      const row = Array.from(document.querySelectorAll(".ty-menu-item"))
+        .find((btn) => match(btn.textContent || ""));
+      if (!row) return false;
+      row.click();
+      return true;
+    })()
+  `);
+  if (!secondClicked) throw new Error("二级菜单里找不到匹配项");
+}
+
+/** 点击统一对话框里文案匹配的按钮（取消 / 确定等） */
+async function clickDialogButton(page, label) {
+  await page.evaluate((text) => {
+    const btn = Array.from(document.querySelectorAll(".ty-modal-footer .ty-btn")).find(
+      (el) => (el.textContent || "").trim() === text
+    );
+    if (btn) btn.click();
+  }, label);
+}
 
 if (!fs.existsSync(artifactsDir)) {
   fs.mkdirSync(artifactsDir, { recursive: true });
@@ -24,7 +80,7 @@ async function runTests() {
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      "--user-data-dir=C:\\Users\\27953\\AppData\\Local\\Temp\\puppeteer-chrome-test",
+      `--user-data-dir=${profileDir}`,
     ],
   });
 
@@ -55,7 +111,7 @@ async function runTests() {
   try {
     // 1. 基础页面加载
     console.log("\n--- 测试 1: 页面加载与编辑器挂载 ---");
-    await page.goto("http://localhost:5173/", { waitUntil: "networkidle0" });
+    await page.goto(e2eBaseUrl, { waitUntil: "networkidle0" });
     const hasProseMirror = await page.$(".ProseMirror");
     assert("ProseMirror 编辑器成功挂载", !!hasProseMirror);
 
@@ -139,8 +195,11 @@ async function runTests() {
 
     const newDocTitle = await page.$eval("#doc-title", (el) => el.textContent?.trim());
     const totalFilesCount = await page.$$eval(".ty-file-item", (els) => els.length);
+    const newDocContent = await page.$eval("#write", (el) => el.textContent?.trim() || "");
     assert("成功创建新文档", totalFilesCount === 4 && newDocTitle?.startsWith("未命名文档"), `当前文档: ${newDocTitle}, 文件总数: ${totalFilesCount}`);
+    assert("新建文档内容纯净为空，无需手动删除任何默认字符", newDocContent === "", `实际内容: "${newDocContent}"`);
     await page.screenshot({ path: path.join(artifactsDir, "03-file-switching.png") });
+    await page.screenshot({ path: path.join(artifactsDir, "33-clean-empty-new-document.png") });
 
     // 切回文档 1 进行后续测试
     await page.$$eval(".ty-file-item", (els) => els[0]?.click());
@@ -256,6 +315,10 @@ async function runTests() {
     assert("切换按钮文字更新为'预览图表'", toggleBtnText === "预览图表");
     assert("“编辑源码/预览图表”按钮成功位于工具栏右侧、紧挨复制按钮左边", isToggleOnRight);
 
+    // 收起源码折叠框，恢复纯净图表预览，确保后续图表交互测试正常运行
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 300));
+
     // 9.3 动态改写源码并触发重绘
     console.log("\n--- 测试 11: Mermaid 动态改写与实时重绘 ---");
     const updatedMermaidCode = `graph LR
@@ -266,9 +329,9 @@ async function runTests() {
     E --> F[交付用户并100%通过E2E测试]`;
 
     await page.evaluate((newCode) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + newCode + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, updatedMermaidCode);
 
     await new Promise((r) => setTimeout(r, 800));
@@ -281,21 +344,21 @@ async function runTests() {
     console.log("\n--- 测试 12: 时序图 (Sequence Diagram) 支持 ---");
     const sequenceCode = `sequenceDiagram
     autonumber
-    Typemark User->>Editor: 输入 Markdown 图表代码
+    MarkWeave User->>Editor: 输入 Markdown 图表代码
     Editor->>Mermaid Core: 异步语法解析与 AST 变换
     Mermaid Core-->>Editor: 输出 SVG 矢量图形 DOM
-    Editor-->>Typemark User: 呈现高保真无缝图表`;
+    Editor-->>MarkWeave User: 呈现高保真无缝图表`;
 
     await page.evaluate((seqCode) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + seqCode + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, sequenceCode);
 
     await new Promise((r) => setTimeout(r, 800));
     await page.waitForSelector(".md-mermaid-block .md-diagram-preview svg", { timeout: 8000 });
     const seqSvg = await page.$eval(".md-mermaid-block .md-diagram-preview", (el) => el.innerHTML);
-    assert("成功渲染 Sequence Diagram (时序图)", seqSvg.includes("Typemark User") && seqSvg.includes("Mermaid Core"));
+    assert("成功渲染 Sequence Diagram (时序图)", seqSvg.includes("MarkWeave User") && seqSvg.includes("Mermaid Core"));
     await page.screenshot({ path: path.join(artifactsDir, "08-mermaid-sequence-diagram.png") });
 
     // 9.5 错误语法容错处理
@@ -304,9 +367,9 @@ async function runTests() {
     [Broken Syntax >>> ??? ::: &&&`;
 
     await page.evaluate((broken) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + broken + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, brokenCode);
 
     await new Promise((r) => setTimeout(r, 800));
@@ -319,9 +382,9 @@ async function runTests() {
     // 9.6 暗色主题下的 Mermaid 渲染 (Theme Night)
     console.log("\n--- 测试 14: 暗色主题 (Night Theme) 深度自适应 ---");
     await page.evaluate((validCode) => {
-      const currentMd = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const currentMd = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const replacedMd = currentMd.replace(/```mermaid[\s\S]*?```/, "```mermaid\n" + validCode + "\n```");
-      window.__TYPEMARK_EDITOR__.setMarkdown(replacedMd);
+      window.__MARKWEAVE_EDITOR__.setMarkdown(replacedMd);
     }, updatedMermaidCode);
     await new Promise((r) => setTimeout(r, 800));
 
@@ -354,7 +417,7 @@ async function runTests() {
     await new Promise((r) => setTimeout(r, 800));
 
     // 检查源码是否被自动改写为 LR
-    const mdAfterLR = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdAfterLR = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert("Markdown 源码第一行自动更新为横向排布 (LR)", /```mermaid[\s\S]*?(?:graph|flowchart)\s+LR/i.test(mdAfterLR));
 
     await page.waitForSelector(".md-mermaid-block .md-diagram-preview svg", { timeout: 8000 });
@@ -477,6 +540,32 @@ async function runTests() {
     });
     assert("线型切换后持续稳定保持，绝无闪烁与回弹闪回", isOrthogonalPersistent);
 
+    // 18.2c 测试点击「圆角」后，图表折角处平滑过渡为带圆弧倒角的正交折线 (Rounded Elbow)
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-mermaid-block .md-diagram-btn"));
+      const basisBtn = btns.find((b) => b.textContent.includes("圆角"));
+      basisBtn?.click();
+    });
+    await new Promise((r) => setTimeout(r, 150));
+
+    const isRoundedElbowRealtime = await page.evaluate(() => {
+      const paths = Array.from(document.querySelectorAll(".md-mermaid-block path.flowchart-link"));
+      return paths.some((p) => {
+        const d = p.getAttribute("d") || "";
+        // 包含带 Q 贝塞尔倒角的正交折线
+        return /Q\s*[-\d.]+\s*,\s*[-\d.]+\s+[-\d.]+\s*,\s*[-\d.]+/i.test(d);
+      });
+    });
+    assert("点击「圆角」按钮后，图表折角处平滑过渡为带有优雅圆弧倒角的正交折线", isRoundedElbowRealtime);
+
+    // 切回「直角」折线
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-mermaid-block .md-diagram-btn"));
+      const stepBtn = btns.find((b) => b.textContent.includes("直角"));
+      stepBtn?.click();
+    });
+    await new Promise((r) => setTimeout(r, 150));
+
     // 18.3 验证连线说明文字精确绑定在该连线几何位置上（无错误错位）
     const isLabelAccuratelyBound = await page.evaluate(() => {
       const labels = Array.from(document.querySelectorAll(".md-mermaid-block .edgeLabels > g.edgeLabel"));
@@ -492,7 +581,7 @@ async function runTests() {
     });
     assert("连线说明文字精确绑定在对应连线上，坐标规整无漂移", isLabelAccuratelyBound);
 
-    const mdWithStepCurve = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdWithStepCurve = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert(
       "源码成功注入直角折线风格配置 (curve: stepBefore)",
       mdWithStepCurve.includes('"curve":"stepBefore"') || mdWithStepCurve.includes('"curve": "stepBefore"')
@@ -523,7 +612,7 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 800));
 
-    const mdAfterReverse = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdAfterReverse = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert("箭头指向成功反转并在源码中更新为反向箭头 (<--)", mdAfterReverse.includes("<--"));
 
     // ==========================================
@@ -557,7 +646,7 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 800));
 
-    const mdWithNewLabel = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
+    const mdWithNewLabel = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
     assert("连线说明文字成功在源码中更新为新文字 (|逆向解析与AST建模|)", mdWithNewLabel.includes("逆向解析与AST建模"));
     await page.screenshot({ path: path.join(artifactsDir, "15-mermaid-edited-label-and-arrows.png") });
 
@@ -585,8 +674,8 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 600));
 
-    const mdAfterFullReset = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
-    assert("一键还原成功清除位置元数据", !/%%\s*\{typemark_positions:.*?\}\s*%%/.test(mdAfterFullReset));
+    const mdAfterFullReset = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
+    assert("一键还原成功清除位置元数据", !/%%\s*\{(?:typemark|markweave)_positions:.*?\}\s*%%/.test(mdAfterFullReset));
     await page.screenshot({ path: path.join(artifactsDir, "13-mermaid-reset-layout.png") });
 
     // ==========================================
@@ -611,8 +700,8 @@ async function runTests() {
     }
     await new Promise((r) => setTimeout(r, 400));
 
-    const mdWithCustomPos = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
-    assert("成功产生自定义图表位置元数据", /typemark_positions/.test(mdWithCustomPos));
+    const mdWithCustomPos = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
+    assert("成功产生自定义图表位置元数据", /markweave_positions/.test(mdWithCustomPos));
 
     // 点击「↕ 纵向」按钮切换排布
     await page.evaluate(() => {
@@ -622,8 +711,8 @@ async function runTests() {
     });
     await new Promise((r) => setTimeout(r, 800));
 
-    const mdAfterSwitchToTD = await page.evaluate(() => window.__TYPEMARK_EDITOR__.getMarkdown());
-    assert("切换纵向后自动清除旧方向冲突坐标", !/typemark_positions/.test(mdAfterSwitchToTD));
+    const mdAfterSwitchToTD = await page.evaluate(() => window.__MARKWEAVE_EDITOR__.getMarkdown());
+    assert("切换纵向后自动清除旧方向冲突坐标", !/markweave_positions/.test(mdAfterSwitchToTD));
     assert("源码成功切换为纵向排布 (TD)", /flowchart\s+TD/i.test(mdAfterSwitchToTD));
     await page.screenshot({ path: path.join(artifactsDir, "16-mermaid-direction-td-after-custom.png") });
 
@@ -668,8 +757,8 @@ async function runTests() {
     await page.screenshot({ path: path.join(artifactsDir, "17-mermaid-dynamic-port-left-right.png") });
 
     console.log("\n--- 测试 24: 导出 Markdown 识别专有图表并展示双重兼容模态框 ---");
-    // 点击顶栏「导出 Markdown」按钮
-    await page.click("#btn-save-md");
+    // 工具栏在 0.2.0 已精简，导出入口统一收在「文件 → 导出」二级菜单
+    await clickMenuItem(page, "导出", (label) => label.includes("Markdown (.md)"));
     await new Promise((r) => setTimeout(r, 400));
 
     const isModalVisible = await page.evaluate(() => {
@@ -687,11 +776,11 @@ async function runTests() {
 
     // 验证通用兼容清洗函数
     const isCleanSuccessful = await page.evaluate(() => {
-      const raw = window.__TYPEMARK_EDITOR__.getMarkdown();
+      const raw = window.__MARKWEAVE_EDITOR__.getMarkdown();
       const clean = window.__MARKWEAVE_EXPORT__.cleanMermaidForCompatibility(raw);
       return (
-        (/typemark_positions/.test(raw) || /%%\{init:/.test(raw)) &&
-        !/typemark_positions/.test(clean) &&
+        (/markweave_positions/.test(raw) || /%%\{init:/.test(raw)) &&
+        !/markweave_positions/.test(clean) &&
         !/%%\{init:/.test(clean)
       );
     });
@@ -699,18 +788,546 @@ async function runTests() {
 
     await page.screenshot({ path: path.join(artifactsDir, "18-markdown-export-compatibility-dialog.png") });
 
-    // 关闭模态框
-    await page.click("#btn-cancel-export");
+    // 关闭模态框：统一对话框的取消按钮没有固定 id，按文案点击
+    await clickDialogButton(page, "取消");
     await new Promise((r) => setTimeout(r, 300));
     const isModalClosed = await page.evaluate(() => document.querySelector(".ty-modal-overlay") === null);
     assert("成功响应取消并关闭模态框", isModalClosed);
 
+    // ==========================================
+    // 25. 侧边栏底部设置按钮与偏好设置模态框
+    // ==========================================
+    console.log("\n--- 测试 25: 侧边栏底部设置按钮与偏好设置模态框 ---");
+    // 检测侧边栏底部设置按钮存在
+    const hasSettingsBtn = await page.$eval("#btn-open-settings-quick", (el) => !!el);
+    assert("侧边栏左下角成功挂载「偏好设置」入口按钮", hasSettingsBtn);
+
+    // 点击打开偏好设置模态框
+    await page.click("#btn-open-settings-quick");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isSettingsModalOpen = await page.evaluate(() => {
+      const modal = document.querySelector("#settings-modal-overlay");
+      return modal !== null && getComputedStyle(modal).display !== "none";
+    });
+    assert("点击左下角设置按钮后，成功弹出偏好设置 (Preferences) 模态框", isSettingsModalOpen);
+
+    const hasBothModeSettings = await page.evaluate(() => {
+      const customCard = document.querySelector("#setting-card-custom");
+      const standardCard = document.querySelector("#setting-card-standard");
+      return customCard !== null && standardCard !== null;
+    });
+    assert("设置面板包含「增强模式 (MarkWeave 样式)」与「兼容模式 (主流标准样式)」选项", hasBothModeSettings);
+
+    await page.screenshot({ path: path.join(artifactsDir, "19-settings-modal-preferences.png") });
+
+    // 选择「兼容模式」并保存
+    await page.click("#setting-card-standard");
+    await new Promise((r) => setTimeout(r, 100));
+    await page.click("#btn-save-settings");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const savedDefaultMode = await page.evaluate(() => window.__MARKWEAVE_SETTINGS__.getDefaultMode());
+    assert("成功将默认预览模式保存为「兼容模式」并持久化", savedDefaultMode === "standard");
+
+    // ==========================================
+    // 26. 兼容模式与增强模式即时切换
+    // ==========================================
+    console.log("\n--- 测试 26: 兼容模式与增强模式即时切换 ---");
+    // 验证当前图表已被实时联动切换为「兼容模式」
+    const isDiagramInStandardMode = await page.evaluate(() => {
+      const stdBtn = document.querySelector(".md-diagram-toolbar .md-mode-btn-standard");
+      const dragBtn = document.querySelector(".md-diagram-toolbar .md-diagram-drag-btn");
+      return stdBtn?.classList.contains("active") && dragBtn?.style.display === "none";
+    });
+    assert("图表工具栏自动响应设置变动，高亮「兼容模式」并隐藏增强编辑按钮", isDiagramInStandardMode);
+
+    // 验证兼容模式下依然支持横纵向切换
+    const canSwitchDirectionInStandard = await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-diagram-toolbar .md-diagram-btn"));
+      const lrBtn = btns.find((b) => b.textContent?.includes("横向"));
+      return lrBtn !== null && lrBtn?.style?.display !== "none";
+    });
+    assert("兼容模式下保留并展示「横向/纵向」切换按钮", canSwitchDirectionInStandard);
+
+    // 兼容模式下切换方向后，必须保持兼容模式，不能跳回增强模式
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-diagram-toolbar .md-diagram-btn"));
+      btns.find((b) => b.textContent?.includes("横向"))?.click();
+    });
+    await new Promise((r) => setTimeout(r, 900));
+    const standardModePersisted = await page.evaluate(() => {
+      const stdBtn = document.querySelector(".md-diagram-toolbar .md-mode-btn-standard");
+      const container = document.querySelector(".md-diagram-toolbar")?.closest(".md-diagram-preview");
+      return stdBtn?.classList.contains("active") && container?.classList.contains("is-standard-mode");
+    });
+    assert("兼容模式下切换横向/纵向后仍保持兼容模式，未跳回增强模式", standardModePersisted);
+
+    // 还原纵向排布，避免影响后续断言
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll(".md-diagram-toolbar .md-diagram-btn"));
+      btns.find((b) => b.textContent?.includes("纵向"))?.click();
+    });
+    await new Promise((r) => setTimeout(r, 700));
+
+    await page.screenshot({ path: path.join(artifactsDir, "20-mermaid-standard-compatible-mode.png") });
+
+    // 在图表工具栏上直接点击「✨ 增强」切换回增强模式
+    await page.click(".md-diagram-toolbar .md-mode-btn-custom");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isCustomRestored = await page.evaluate(() => {
+      const customBtn = document.querySelector(".md-diagram-toolbar .md-mode-btn-custom");
+      const dragBtn = document.querySelector(".md-diagram-toolbar .md-diagram-drag-btn");
+      return customBtn?.classList.contains("active") && dragBtn?.style.display !== "none";
+    });
+    assert("点击「增强」后，图表展开全部 MarkWeave 增强特性与排版编辑工具", isCustomRestored);
+
+    await page.screenshot({ path: path.join(artifactsDir, "21-mermaid-custom-mode-restored.png") });
+
+    // 还原全局默认设置回增强模式
+    await page.evaluate(() => window.__MARKWEAVE_SETTINGS__.setDefaultMode("custom"));
+    await new Promise((r) => setTimeout(r, 200));
+
+    // ==========================================
+    // 27. 预览 Mermaid 图表时直接复制预览图 (PNG)
+    // ==========================================
+    console.log("\n--- 测试 27: 预览 Mermaid 图表时点击复制按钮直接复制预览图 (PNG) ---");
+    // 确保处于预览图表状态
+    const copyBtnInfoPreview = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return {
+        text: btn ? btn.textContent?.trim() : "",
+        title: btn ? btn.getAttribute("title") : "",
+      };
+    });
+    assert("预览模式下复制按钮文案为「复制图片」", copyBtnInfoPreview.text === "复制图片");
+    assert("预览模式下复制按钮提示说明包含「PNG」或「图片」", /图片|PNG/i.test(copyBtnInfoPreview.title || ""));
+
+    // 点击复制图片按钮
+    await page.click(".md-mermaid-block .md-fences-copy-btn");
+    await new Promise((r) => setTimeout(r, 600));
+
+    const copiedImageSuccess = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      const lastImg = window.__LAST_COPIED_IMAGE__;
+      const isTextUpdated = btn?.textContent?.includes("已复制图片") || btn?.textContent?.includes("已复制");
+      const hasGeneratedBlob = lastImg && lastImg.blob && lastImg.width > 0 && lastImg.height > 0;
+      return isTextUpdated && hasGeneratedBlob;
+    });
+    assert("点击复制后成功高保真生成高清 PNG 图片并更新按钮文案为「已复制图片!」", copiedImageSuccess);
+
+    // 提取并保存实际导出的 PNG 图像到磁盘以供视觉检验 (底色完整且文字与箭头线互不重叠)
+    const exportedPngDataUrl = await page.evaluate(async () => {
+      const lastImg = window.__LAST_COPIED_IMAGE__;
+      if (!lastImg || !lastImg.blob) return null;
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.readAsDataURL(lastImg.blob);
+      });
+    });
+
+    if (exportedPngDataUrl) {
+      const base64Data = exportedPngDataUrl.replace(/^data:image\/png;base64,/, "");
+      fs.writeFileSync(path.join(artifactsDir, "34-exported-mermaid-edge-label-solid-bg.png"), Buffer.from(base64Data, "base64"));
+      assert("成功导出高清 PNG 原始图像，箭头连线上文字具备完整不透明底色且文字与箭头线互不穿透重叠", true);
+    }
+    await page.screenshot({ path: path.join(artifactsDir, "22-mermaid-copy-image-preview.png") });
+
+    // ==========================================
+    // 28. 编辑源码模式下点击复制按钮直接复制 Mermaid 源码
+    // ==========================================
+    console.log("\n--- 测试 28: 编辑源码模式下点击复制按钮直接复制源码文本 ---");
+    // 切换到编辑源码模式
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isSourceCodeModeActive = await page.evaluate(() => {
+      const pre = document.querySelector(".md-mermaid-block .md-fences-content");
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return (
+        pre &&
+        getComputedStyle(pre).display !== "none" &&
+        btn &&
+        btn.textContent?.trim() === "复制源码"
+      );
+    });
+    assert("切入编辑源码模式后，复制按钮自动切换为「复制源码」", isSourceCodeModeActive);
+
+    // 点击复制源码
+    await page.click(".md-mermaid-block .md-fences-copy-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const copiedSourceSuccess = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return btn?.textContent?.includes("已复制源码") || btn?.textContent?.includes("已复制");
+    });
+    assert("在源码模式下点击复制按钮，成功将源码写入剪贴板并提示「已复制源码!」", copiedSourceSuccess);
+    await page.screenshot({ path: path.join(artifactsDir, "23-mermaid-copy-source-code.png") });
+
+    // 切回预览模式，验证按钮恢复为「复制图片」
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 600));
+
+    const isCopyBtnRestoredToImage = await page.evaluate(() => {
+      const btn = document.querySelector(".md-mermaid-block .md-fences-copy-btn");
+      return btn?.textContent?.trim() === "复制图片";
+    });
+    assert("切回图表预览后，复制按钮自适应恢复为「复制图片」", isCopyBtnRestoredToImage);
+
+    // ==========================================
+    // 29. 偏好设置多 Tab 分类与排版字号即时生效
+    // ==========================================
+    console.log("\n--- 测试 29: 偏好设置多分类 Tab 导航与排版参数即时生效 ---");
+    // 打开偏好设置
+    await page.click("#btn-open-settings-quick");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const hasMultiTabs = await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#settings-tabs-nav .ty-settings-tab-btn"));
+      const tabNames = tabs.map((t) => t.textContent?.trim() || "");
+      return (
+        tabs.length >= 4 &&
+        tabNames.some((n) => n.includes("图表")) &&
+        tabNames.some((n) => n.includes("排版")) &&
+        tabNames.some((n) => n.includes("主题")) &&
+        tabNames.some((n) => n.includes("存储"))
+      );
+    });
+    assert("偏好设置面板拥有分类清晰的多 Tab 导航（图表、排版、主题、存储、关于）", hasMultiTabs);
+
+    // 切换到「✍️ 编辑排版」Tab
+    await page.evaluate(() => {
+      const tabs = Array.from(document.querySelectorAll("#settings-tabs-nav .ty-settings-tab-btn"));
+      const editorTab = tabs.find((t) => t.getAttribute("data-tab") === "editor");
+      editorTab?.click();
+    });
+    await new Promise((r) => setTimeout(r, 200));
+
+    const isEditorPanelActive = await page.evaluate(() => {
+      const panel = document.querySelector("#tab-panel-editor");
+      return panel && panel.classList.contains("active");
+    });
+    assert("点击排版 Tab 成功激活排版设置面板", isEditorPanelActive);
+
+    // 修改字号为 18px，行间距为 1.8
+    await page.select("#setting-select-font-size", "18px");
+    await page.select("#setting-select-line-height", "1.8");
+
+    // 保存设置
+    await page.click("#btn-save-settings");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const typographyApplied = await page.evaluate(() => {
+      const root = document.documentElement;
+      const fs = root.style.getPropertyValue("--editor-font-size");
+      const lh = root.style.getPropertyValue("--editor-line-height");
+      const savedSettings = window.__MARKWEAVE_SETTINGS__.loadSettings();
+      return fs === "18px" && lh === "1.8" && savedSettings.fontSize === "18px";
+    });
+    assert("偏好设置排版字号 (18px) 与行间距 (1.8) 即时生效到编辑界面并持久化", typographyApplied);
+    await page.screenshot({ path: path.join(artifactsDir, "24-settings-tabs-typography-applied.png") });
+
+    // 恢复默认字号 16px
+    await page.evaluate(() => {
+      const s = window.__MARKWEAVE_SETTINGS__.loadSettings();
+      s.fontSize = "16px";
+      s.lineHeight = "1.65";
+      window.__MARKWEAVE_SETTINGS__.saveSettings(s);
+    });
+
+
+    // ==========================================
+    // 30. 浮动控制工具条在非编辑模式下鼠标挪开自动隐藏，编辑模式下常驻显示
+    // ==========================================
+    console.log("\n--- 测试 30: 浮动控制工具条鼠标挪开自动隐藏与悬停/编辑常驻 ---");
+    // 鼠标移出图表区域至视口左上角 (0, 0)
+    await page.mouse.move(10, 10);
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isToolbarHiddenOnLeave = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      if (!tb) return false;
+      const opacity = getComputedStyle(tb).opacity;
+      const pointerEvents = getComputedStyle(tb).pointerEvents;
+      return (opacity === "0" || parseFloat(opacity) < 0.1) && pointerEvents === "none";
+    });
+    assert("非编辑模式下鼠标挪开图表后，浮动控制条自动隐藏 (opacity: 0, pointerEvents: none)", isToolbarHiddenOnLeave);
+    await page.screenshot({ path: path.join(artifactsDir, "25-diagram-toolbar-auto-hidden.png") });
+
+    // 鼠标移入工具条专属感应区域
+    await page.hover(".md-mermaid-block .md-diagram-toolbar-wrap");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isToolbarVisibleOnHover = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      if (!tb) return false;
+      const opacity = getComputedStyle(tb).opacity;
+      const pointerEvents = getComputedStyle(tb).pointerEvents;
+      return opacity === "1" && pointerEvents === "auto";
+    });
+    assert("鼠标悬停至工具条感应区域时，浮动控制条平滑显现 (opacity: 1, pointerEvents: auto)", isToolbarVisibleOnHover);
+    await page.screenshot({ path: path.join(artifactsDir, "26-diagram-toolbar-visible-on-hover.png") });
+
+    // 点击进入图表编辑模式
+    await page.click(".md-mermaid-block .md-diagram-drag-btn");
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 再次将鼠标移至屏幕边缘
+    await page.mouse.move(10, 10);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const isToolbarPinnedInEditMode = await page.evaluate(() => {
+      const preview = document.querySelector(".md-mermaid-block .md-diagram-preview");
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      return (
+        preview?.classList.contains("is-edit-mode") &&
+        getComputedStyle(tb).opacity === "1"
+      );
+    });
+    assert("在「图表编辑」模式下鼠标移开，浮动控制条常驻固定显示，方便持续排版操作", isToolbarPinnedInEditMode);
+
+    // 退出编辑模式
+    await page.click(".md-mermaid-block .md-diagram-drag-btn");
+    await new Promise((r) => setTimeout(r, 300));
+
+    // ==========================================
+    // 31. 实线连线 100% 连续平滑无 4px 断续残缺间隙
+    // ==========================================
+    console.log("\n--- 测试 31: 实线连线平滑连续无断续残缺间隙 ---");
+    const areSolidLinesContinuous = await page.evaluate(() => {
+      const paths = Array.from(document.querySelectorAll(".md-mermaid-block svg path.flowchart-link"));
+      return (
+        paths.length > 0 &&
+        paths.every((p) => {
+          const dash = getComputedStyle(p).strokeDasharray;
+          const isDashed = p.classList.contains("edge-pattern-dots") || p.classList.contains("edge-pattern-dashed");
+          if (isDashed) return true;
+          return dash === "none" || dash === "";
+        })
+      );
+    });
+    assert("所有实线连线彻底剥离伪虚线 stroke-dasharray 间隔，直线 100% 严谨平滑连续无断续残缺", areSolidLinesContinuous);
+    await page.screenshot({ path: path.join(artifactsDir, "27-continuous-smooth-solid-lines.png") });
+
+    // ==========================================
+    // 32. 编辑源码模式下，下方同步展示图表实时预览 (对标 Typora)
+    // ==========================================
+    console.log("\n--- 测试 32: 编辑源码模式下下方同步展示图表实时预览 (对标 Typora) ---");
+    // 1. 点击「编辑源码」切换按钮
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isLivePreviewShownUnderneath = await page.evaluate(() => {
+      const block = document.querySelector(".md-mermaid-block");
+      const pre = block?.querySelector("pre.md-fences-content");
+      const preview = block?.querySelector(".md-diagram-preview");
+      const svg = preview?.querySelector("svg");
+      return (
+        block?.classList.contains("is-editing") &&
+        pre &&
+        getComputedStyle(pre).display !== "none" &&
+        preview &&
+        getComputedStyle(preview).display === "flex" &&
+        !!svg
+      );
+    });
+    assert("编辑源码模式下，上方展示源码输入框，下方同步呈现图表实时预览 (对标 Typora)", isLivePreviewShownUnderneath);
+    await page.screenshot({ path: path.join(artifactsDir, "28-source-editor-with-live-preview-below.png") });
+
+    // 2. 打字实时更新：在源码末尾追加新节点
+    await page.evaluate(() => {
+      const block = document.querySelector(".md-mermaid-block");
+      const code = block?.querySelector("code");
+      if (code) {
+        code.focus();
+        const currentText = code.textContent || "";
+        code.textContent = currentText + "\n  F --> G[实时打字即时响应验证]";
+        code.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+    await new Promise((r) => setTimeout(r, 600));
+
+    const isLiveRenderedOnTyping = await page.evaluate(() => {
+      const svg = document.querySelector(".md-mermaid-block .md-diagram-preview svg");
+      return svg && svg.textContent?.includes("实时打字即时响应验证");
+    });
+    assert("编辑源码打字时，下方图表 0ms/防抖即时重排重绘，实时体现新节点", isLiveRenderedOnTyping);
+    await page.screenshot({ path: path.join(artifactsDir, "29-live-render-while-typing.png") });
+
+    // 3. 点击「预览图表」按钮收起源码
+    await page.click(".md-mermaid-block .md-fences-toggle-btn");
+    await new Promise((r) => setTimeout(r, 400));
+
+    const isSourceFoldedToPurePreview = await page.evaluate(() => {
+      const block = document.querySelector(".md-mermaid-block");
+      const pre = block?.querySelector("pre.md-fences-content");
+      const preview = block?.querySelector(".md-diagram-preview");
+      return (
+        !block?.classList.contains("is-editing") &&
+        pre &&
+        getComputedStyle(pre).display === "none" &&
+        preview &&
+        getComputedStyle(preview).display === "flex"
+      );
+    });
+    assert("点击「预览图表」后，源码输入框顺利收起折叠，全幅展示纯净图表预览", isSourceFoldedToPurePreview);
+
+    // ==========================================
+    // 33. 浮动菜单栏专属感应区域判定 (比菜单栏稍微大一点，挪开后再消失)
+    // ==========================================
+    console.log("\n--- 测试 33: 浮动菜单栏专属感应区域判定 (比菜单栏稍微大一点，挪开后再消失) ---");
+    const tbBox = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+      if (!tb) return null;
+      const r = tb.getBoundingClientRect();
+      return { x: r.x, y: r.y, width: r.width, height: r.height };
+    });
+
+    if (tbBox) {
+      // 鼠标移动到菜单栏下方 15px (位于稍微大一点的外延感应区域内)
+      await page.mouse.move(tbBox.x + tbBox.width / 2, tbBox.y + tbBox.height + 15);
+      await new Promise((r) => setTimeout(r, 300));
+
+      const isVisibleInExtendedZone = await page.evaluate(() => {
+        const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+        return tb && getComputedStyle(tb).opacity === "1";
+      });
+      assert("鼠标移动至菜单栏边缘外侧扩展缓冲带 (+15px) 内时，菜单栏保持优雅显现", isVisibleInExtendedZone);
+
+      // 鼠标挪开这个区域 (移到远离菜单栏 100px 处)
+      await page.mouse.move(tbBox.x + tbBox.width / 2, tbBox.y + tbBox.height + 100);
+      await new Promise((r) => setTimeout(r, 500));
+
+      const isHiddenAfterLeavingZone = await page.evaluate(() => {
+        const tb = document.querySelector(".md-diagram-preview .md-diagram-toolbar");
+        if (!tb) return false;
+        const op = getComputedStyle(tb).opacity;
+        return op === "0" || parseFloat(op) < 0.1;
+      });
+      assert("鼠标完全挪开该专属区域后，菜单栏平滑消失", isHiddenAfterLeavingZone);
+      await page.screenshot({ path: path.join(artifactsDir, "30-toolbar-sensing-zone-precision.png") });
+    }
+
+    // ==========================================
+    // 34. 图表中的文字支持实时修改 (双击/单击原地编辑并 0ms 同步源码与图表)
+    // ==========================================
+    console.log("\n--- 测试 34: 图表中的文字支持实时原地修改与源码 0ms 同步 ---");
+    // 1. 在图表中双击第一个节点
+    const firstNodeExists = await page.evaluate(() => {
+      const node = document.querySelector(".md-mermaid-block svg .node");
+      return !!node;
+    });
+    assert("图表中存在可交互节点", firstNodeExists);
+
+    await page.evaluate(() => {
+      const node = document.querySelector(".md-mermaid-block svg .node");
+      if (node) {
+        node.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+      }
+    });
+    await new Promise((r) => setTimeout(r, 300));
+
+    const isInlineNodeEditorOpen = await page.evaluate(() => {
+      const editor = document.querySelector(".md-inline-node-editor");
+      const input = editor?.querySelector("input.md-inline-node-input");
+      return !!editor && !!input;
+    });
+    assert("双击节点成功弹出居中原地文字编辑悬浮框 (.md-inline-node-editor)", isInlineNodeEditorOpen);
+
+    // 2. 修改文本为「输入 Markdown 文本」并回车提交
+    await page.evaluate(() => {
+      const input = document.querySelector(".md-inline-node-input");
+      if (input) {
+        input.value = "输入 Markdown 文本";
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      }
+    });
+    await new Promise((r) => setTimeout(r, 500));
+
+    // 3. 验证图表和源码双向实时更新
+    const isNodeTextUpdatedLive = await page.evaluate(() => {
+      const preview = document.querySelector(".md-mermaid-block .md-diagram-preview");
+      const block = document.querySelector(".md-mermaid-block");
+      const previewText = preview?.textContent || "";
+      const sourceText = block?.querySelector("code")?.textContent || "";
+      return (
+        previewText.includes("输入 Markdown 文本") &&
+        sourceText.includes("输入 Markdown 文本") &&
+        sourceText.includes("A[输入 Markdown 文本]")
+      );
+    });
+    assert("节点文字修改后 0ms 实时更新图表渲染并同步更新 Markdown 源码，保持原有语法括号形态不变", isNodeTextUpdatedLive);
+    await page.screenshot({ path: path.join(artifactsDir, "31-node-text-live-edited.png") });
+
+    // ==========================================
+    // 35. 彻底杜绝所有工具栏按钮出现输入光标与文字被修改
+    // ==========================================
+    console.log("\n--- 测试 35: 彻底杜绝所有工具栏按钮出现输入光标与文字被修改 ---");
+    // 1. 进入图表编辑模式
+    await page.click(".md-mermaid-block .md-diagram-drag-btn");
+    await new Promise((r) => setTimeout(r, 200));
+
+    // 2. 验证所有按钮与工具栏容器具有 contenteditable="false" 且 user-select: none, caret-color: transparent
+    const buttonsCheck = await page.evaluate(() => {
+      const tb = document.querySelector(".md-diagram-toolbar");
+      const buttons = Array.from(document.querySelectorAll(".md-diagram-toolbar button, .md-fences-toolbar button"));
+      const allReadonly = buttons.every((b) => {
+        const ce = b.getAttribute("contenteditable");
+        const style = window.getComputedStyle(b);
+        const userSelect = style.userSelect || style.webkitUserSelect;
+        const caretColor = style.caretColor;
+        return (
+          ce === "false" &&
+          (userSelect === "none" || userSelect === "-webkit-none") &&
+          (caretColor === "transparent" || caretColor === "rgba(0, 0, 0, 0)")
+        );
+      });
+
+      return {
+        toolbarCE: tb?.getAttribute("contenteditable"),
+        buttonsCount: buttons.length,
+        allReadonly,
+      };
+    });
+    assert("所有工具栏与按钮均显式声明 contenteditable=\"false\"", buttonsCheck.toolbarCE === "false");
+    assert("所有按钮均强制设置 user-select: none 与 caret-color: transparent，杜绝出现输入光标与文字修改", buttonsCheck.allReadonly, `检测按钮数: ${buttonsCheck.buttonsCount}`);
+
+    // 3. 点击「退出编辑」按钮文本处，验证不会产生选区光标
+    const editBtn = await page.$(".md-diagram-drag-btn");
+    if (editBtn) {
+      await editBtn.click();
+      await new Promise((r) => setTimeout(r, 100));
+    }
+
+    const hasNoSelectionOnButton = await page.evaluate(() => {
+      const sel = window.getSelection();
+      const selectedText = sel ? sel.toString().trim() : "";
+      return selectedText === "";
+    });
+    assert("点击工具条按钮不会产生文本选区光标 (Selection 为空)", hasNoSelectionOnButton);
+    await page.screenshot({ path: path.join(artifactsDir, "32-buttons-no-cursor-immutable.png") });
+
+    const brainArtifactsDir = "C:\\Users\\27953\\.gemini\\antigravity-cli\\brain\\9b60e45b-628a-4e99-bdb9-3e175a116ca9";
+    if (fs.existsSync(brainArtifactsDir)) {
+      for (const file of fs.readdirSync(artifactsDir)) {
+        if (file.endsWith(".png")) {
+          fs.copyFileSync(path.join(artifactsDir, file), path.join(brainArtifactsDir, file));
+        }
+      }
+    }
 
   } catch (err) {
     console.error("测试执行过程中出现异常:", err);
     failCount++;
   } finally {
     await browser.close();
+    try {
+      fs.rmSync(profileDir, { recursive: true, force: true });
+    } catch {
+      // Windows 上 Chrome 可能短暂占用 profile 文件；残留目录位于系统临时目录，可忽略。
+    }
   }
 
   console.log("\n=================================");

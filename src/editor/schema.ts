@@ -1,4 +1,21 @@
 import { Schema, type NodeSpec, type MarkSpec } from "prosemirror-model";
+import { tableNodes } from "prosemirror-tables";
+
+const tableSpecs = tableNodes({
+  tableGroup: "block",
+  cellContent: "paragraph",
+  cellAttributes: {
+    alignment: {
+      default: "left",
+      getFromDOM(dom: HTMLElement) {
+        return (dom.style.textAlign || dom.getAttribute("align") || "left").toLowerCase();
+      },
+      setDOMAttr(value, attrs) {
+        if (value) attrs.style = `${attrs.style || ""}text-align:${value};`;
+      },
+    },
+  },
+});
 
 const nodes: Record<string, NodeSpec> = {
   doc: {
@@ -11,6 +28,39 @@ const nodes: Record<string, NodeSpec> = {
     parseDOM: [{ tag: "p" }],
     toDOM() {
       return ["p", { class: "md-p md-block" }, 0];
+    },
+  },
+
+  ...tableSpecs,
+
+  table: {
+    ...tableSpecs.table,
+    attrs: {
+      ...(tableSpecs.table.attrs || {}),
+      layout: { default: "equal" },
+      rowLayout: { default: "wrap" },
+    },
+    parseDOM: [
+      {
+        tag: "table",
+        getAttrs(dom) {
+          const el = dom as HTMLElement;
+          return {
+            layout: el.getAttribute?.("data-md-table-layout") === "auto" ? "auto" : "equal",
+            rowLayout: el.getAttribute?.("data-md-table-nowrap") === "true" ? "nowrap" : "wrap",
+          };
+        },
+      },
+    ],
+    toDOM(node) {
+      const attrs: Record<string, string> = {};
+      if (node.attrs.layout === "auto") {
+        attrs["data-md-table-layout"] = "auto";
+      }
+      if (node.attrs.rowLayout === "nowrap") {
+        attrs["data-md-table-nowrap"] = "true";
+      }
+      return ["table", attrs, ["tbody", 0]];
     },
   },
 
@@ -106,6 +156,101 @@ const nodes: Record<string, NodeSpec> = {
     },
   },
 
+  yaml_frontmatter: {
+    attrs: { content: { default: "" } },
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div.md-yaml-frontmatter",
+        getAttrs: (dom) => ({
+          content: decodeURIComponent((dom as HTMLElement).getAttribute("data-yaml") || ""),
+        }),
+      },
+    ],
+    toDOM(node) {
+      return [
+        "div",
+        {
+          class: "md-yaml-frontmatter md-block",
+          "data-yaml": encodeURIComponent(node.attrs.content || ""),
+          "data-yaml-frontmatter": "true",
+        },
+      ];
+    },
+  },
+
+  toc_block: {
+    group: "block",
+    defining: true,
+    parseDOM: [{ tag: "div.md-toc-block" }],
+    toDOM() {
+      return ["div", { class: "md-toc-block md-block", "data-toc": "true" }];
+    },
+  },
+
+  link_reference_definition: {
+    attrs: {
+      id: { default: "" },
+      href: { default: "" },
+      title: { default: null },
+    },
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div.md-link-def",
+        getAttrs: (dom) => {
+          const el = dom as HTMLElement;
+          return {
+            id: el.getAttribute("data-ref-id") || "",
+            href: el.getAttribute("data-ref-href") || "",
+            title: el.getAttribute("data-ref-title"),
+          };
+        },
+      },
+    ],
+    toDOM(node) {
+      return [
+        "div",
+        {
+          class: "md-link-def md-block",
+          "data-ref-id": node.attrs.id || "",
+          "data-ref-href": node.attrs.href || "",
+          "data-ref-title": node.attrs.title || "",
+        },
+      ];
+    },
+  },
+
+  footnote_definition: {
+    attrs: { id: { default: "" }, content: { default: "" } },
+    group: "block",
+    defining: true,
+    parseDOM: [
+      {
+        tag: "div.md-footnote-def",
+        getAttrs: (dom) => {
+          const el = dom as HTMLElement;
+          return {
+            id: el.getAttribute("data-footnote-id") || "",
+            content: decodeURIComponent(el.getAttribute("data-content") || ""),
+          };
+        },
+      },
+    ],
+    toDOM(node) {
+      return [
+        "div",
+        {
+          class: "md-footnote-def md-block",
+          "data-footnote-id": node.attrs.id || "",
+          "data-content": encodeURIComponent(node.attrs.content || ""),
+        },
+      ];
+    },
+  },
+
   ordered_list: {
     content: "list_item+",
     group: "block",
@@ -134,7 +279,6 @@ const nodes: Record<string, NodeSpec> = {
       return ["ul", { class: "md-ul-list md-block" }, 0];
     },
   },
-
   list_item: {
     content: "paragraph block*",
     defining: true,
@@ -161,8 +305,13 @@ const nodes: Record<string, NodeSpec> = {
       {
         tag: "li.md-task-item",
         getAttrs(dom) {
-          const checkbox = (dom as HTMLElement).querySelector("input[type=checkbox]") as HTMLInputElement | null;
-          return { checked: checkbox?.checked || false };
+          const el = dom as HTMLElement;
+          const checkbox = el.querySelector("input[type=checkbox]") as HTMLInputElement | null;
+          const checked =
+            checkbox?.hasAttribute("checked") ||
+            checkbox?.checked === true ||
+            el.classList.contains("task-done");
+          return { checked: Boolean(checked) };
         },
       },
     ],
@@ -190,12 +339,35 @@ const nodes: Record<string, NodeSpec> = {
     },
   },
 
+  footnote_ref: {
+    inline: true,
+    group: "inline",
+    attrs: { id: { default: "" } },
+    atom: true,
+    selectable: true,
+    parseDOM: [
+      {
+        tag: "sup.md-footnote-ref",
+        getAttrs: (dom) => ({
+          id: (dom as HTMLElement).getAttribute("data-footnote-id") || "",
+        }),
+      },
+    ],
+    toDOM(node) {
+      return ["sup", { class: "md-footnote-ref", "data-footnote-id": node.attrs.id }, 0];
+    },
+  },
+
   image: {
     inline: true,
     attrs: {
       src: {},
       alt: { default: null },
       title: { default: null },
+      /** 显示宽度（px）。有值时该图片以 HTML 语法存储（与 Typora 一致） */
+      width: { default: null },
+      /** 对齐方式：center（默认）/ left / right，同样用 HTML 语法持久化 */
+      align: { default: null },
     },
     group: "inline",
     draggable: true,
@@ -204,17 +376,25 @@ const nodes: Record<string, NodeSpec> = {
         tag: "img[src]",
         getAttrs(dom) {
           const el = dom as HTMLElement;
+          const rawWidth = el.getAttribute("width") || el.style.width;
+          const width = rawWidth ? parseInt(rawWidth, 10) : null;
+          const align = el.getAttribute("data-align") || el.style.textAlign || null;
           return {
             src: el.getAttribute("src"),
             title: el.getAttribute("title"),
             alt: el.getAttribute("alt"),
+            width: Number.isFinite(width as number) ? width : null,
+            align: align === "left" || align === "right" || align === "center" ? align : null,
           };
         },
       },
     ],
     toDOM(node) {
-      const { src, alt, title } = node.attrs;
-      return ["img", { src, alt, title, class: "md-image" }];
+      const { src, alt, title, width, align } = node.attrs;
+      const attrs: Record<string, string> = { src, alt, title, class: "md-image" };
+      if (width) attrs.width = String(width);
+      if (align) attrs["data-align"] = align;
+      return ["img", attrs];
     },
   },
 };
@@ -245,6 +425,27 @@ const marks: Record<string, MarkSpec> = {
     },
   },
 
+  highlight: {
+    parseDOM: [{ tag: "mark" }, { tag: "mark.md-highlight" }],
+    toDOM() {
+      return ["mark", { class: "md-highlight" }, 0];
+    },
+  },
+
+  superscript: {
+    parseDOM: [{ tag: "sup:not(.md-footnote-ref)" }],
+    toDOM() {
+      return ["sup", { class: "md-superscript" }, 0];
+    },
+  },
+
+  subscript: {
+    parseDOM: [{ tag: "sub" }],
+    toDOM() {
+      return ["sub", { class: "md-subscript" }, 0];
+    },
+  },
+
   code: {
     parseDOM: [{ tag: "code" }],
     toDOM() {
@@ -256,6 +457,9 @@ const marks: Record<string, MarkSpec> = {
     attrs: {
       href: {},
       title: { default: null },
+      reference: { default: null },
+      referenceCollapsed: { default: false },
+      anchor: { default: null },
     },
     inclusive: false,
     parseDOM: [
@@ -263,13 +467,28 @@ const marks: Record<string, MarkSpec> = {
         tag: "a[href]",
         getAttrs(dom) {
           const el = dom as HTMLElement;
-          return { href: el.getAttribute("href"), title: el.getAttribute("title") };
+          return {
+            href: el.getAttribute("href"),
+            title: el.getAttribute("title"),
+            reference: el.getAttribute("data-link-reference"),
+            referenceCollapsed: el.getAttribute("data-link-reference-collapsed") === "true",
+            anchor: el.getAttribute("data-anchor"),
+          };
         },
       },
     ],
     toDOM(node) {
-      const { href, title } = node.attrs;
-      return ["a", { href, title, class: "md-link", target: "_blank", rel: "noopener noreferrer" }, 0];
+      const { href, title, reference, anchor } = node.attrs;
+      const attrs: Record<string, string> = {
+        href,
+        class: "md-link",
+        target: "_blank",
+        rel: "noopener noreferrer",
+      };
+      if (title) attrs.title = title;
+      if (reference) attrs["data-link-reference"] = reference;
+      if (anchor) attrs["data-anchor"] = anchor;
+      return ["a", attrs, 0];
     },
   },
 

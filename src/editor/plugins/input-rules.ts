@@ -125,5 +125,22 @@ export function buildInputRules(schema: Schema) {
     rules.push(createMarkInputRule(/(?:^|[^`])(`([^`]+)`)$/, schema.marks.code));
   }
 
+  // 13. 高亮 (==highlight==)
+  if (schema.marks.highlight) {
+    rules.push(createMarkInputRule(/==([^=\n]+)==$/, schema.marks.highlight));
+  }
+
+  // 14. 上标 (^text^)
+  if (schema.marks.superscript) {
+    rules.push(createMarkInputRule(/(?:^|[^\^])(\^([^\^\s][^\^]*[^\^\s]|[^\^\s])\^)$/, schema.marks.superscript));
+  }
+
+  // 15. 下标 (~text~)，排除 ~~strike~~
+  if (schema.marks.subscript) {
+    rules.push(
+      createMarkInputRule(/(?:^|[^~])(?:~([^~\s][^~]*[^~\s]|[^~\s])~)$/, schema.marks.subscript)
+    );
+  }
+
   return inputRules({ rules });
 }

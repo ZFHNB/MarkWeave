@@ -1,5 +1,38 @@
-# Logs
-logs
+# ==========================================
+# MarkWeave - Git Ignore Configuration
+# ==========================================
+
+# 1. 依赖目录 (Dependencies)
+node_modules/
+.pnp/
+.pnp.js
+
+# 2. 编译与打包产物 (Production Build Outputs)
+dist/
+dist-ssr/
+build/
+out/
+release/
+
+# 3. 缓存目录 (Caches)
+.vite/
+.cache/
+.eslintcache
+.stylelintcache
+.turbo/
+.parcel-cache/
+
+# 4. 自动化测试产物与覆盖率 (Test Artifacts & Coverage)
+test-artifacts/
+coverage/
+.nyc_output/
+playwright-report/
+blob-report/
+test-results/
+reports/
+
+# 5. 运行时日志 (Logs & Debugging)
+logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
@@ -7,19 +40,55 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# 6. 本地环境变量与私有配置 (Local Environment & Secrets)
+.env
+.env.local
+.env.*.local
 *.local
+*.pem
+*.key
 
-# Editor directories and files
+# 7. 编辑器与 IDE 配置 (Editor & IDE Settings)
 .vscode/*
 !.vscode/extensions.json
-.idea
-.DS_Store
+!.vscode/settings.json
+!.vscode/launch.json
+.idea/
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+*.bak
+*.orig
+.project
+.settings/
+.classpath
+
+# 8. 操作系统与临时文件 (Operating System & Temporary Files)
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
 powershell.cmd
+*.tmp
+*.temp
+
+# 9. 本地开发与代理临时目录 (Agent & Workspace Temp)
+.agents/
+.gemini/
+
+# 10. 删除回收站与本地 Claude 配置 (Deletion Trash & Local Agent Config)
+.deleted/
+.claude/
+
+# 打包中间产物
+
+# 目录版发布产物
+released/
+.package-staging/
+dist-web/
