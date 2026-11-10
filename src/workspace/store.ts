@@ -7,6 +7,15 @@ export interface StoredDocument {
   updatedAt: number;
   dirty: boolean;
   filePath?: string;
+  /**
+   * 上次与磁盘一致时的编辑器内容（归一化后）。
+   *
+   * 不能用 `content` 直接和磁盘原文比较：Markdown 往返序列化会规范化
+   * 末尾换行、列表缩进等写法，字符串必然不相等，文档一打开就被标成
+   * "有未保存修改"。这里记录"载入那一刻编辑器给出的内容"作为基线，
+   * 只有真正偏离基线才算脏。
+   */
+  savedContent?: string;
 }
 
 export interface WorkspaceStateV1 {
@@ -91,6 +100,9 @@ export function parseWorkspace(raw: string | null): WorkspaceStateV1 | null {
         return null;
       }
       if (doc.filePath !== undefined && typeof doc.filePath !== "string") {
+        return null;
+      }
+      if (doc.savedContent !== undefined && typeof doc.savedContent !== "string") {
         return null;
       }
     }

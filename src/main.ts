@@ -33,6 +33,7 @@ import {
   uniqueTitle,
 } from "./workspace/store";
 import { applyDocumentSwitch } from "./workspace/session";
+import { isContentDirty } from "./workspace/dirty-state";
 import { getDesktopAPI } from "./platform/desktop";
 import { pickLocalImage } from "./editor/plugins/images";
 import { resolveImageFilePath } from "./editor/nodeviews/image-actions";
@@ -544,11 +545,13 @@ window.addEventListener("beforeunload", () => {
 });
 
 // 标题同步辅助函数
+
 function syncTitle(title: string) {
   const currentDoc = documents.find((d) => d.id === activeDocId);
   const isDirty = Boolean(currentDoc && currentDoc.filePath && currentDoc.dirty);
   const displayTitle = isDirty ? `• ${title}` : title;
-  docTitleEl.textContent = title;
+  // 两处保持一致：界面标题栏与窗口标题都反映"是否未保存"
+  docTitleEl.textContent = displayTitle;
   document.title = displayTitle;
 }
 
@@ -581,16 +584,24 @@ const editor = new MarkWeaveEditor({
     if (doc) {
       if (doc.content !== md) {
         doc.content = md;
-        doc.dirty = true;
+        // 与基线比较，而不是「和上一次序列化结果是否一致」：
+        // 后者在打开文件时就会因为末尾换行等规范化差异被误判为已修改。
+        const dirty = isContentDirty(doc);
+        const changed = dirty !== doc.dirty;
+        doc.dirty = dirty;
         doc.updatedAt = Date.now();
         syncTitle(doc.title);
-        // 标签页上的「未保存」圆点依赖 tabState，必须一起刷新
-        tabState = updateTabTitle(tabState, doc.id, doc.title, true);
-        renderTabs();
+        if (changed) {
+          tabState = updateTabTitle(tabState, doc.id, doc.title, dirty);
+          renderTabs();
+          renderFileList();
+        }
         scheduleSave();
-        scheduleAutoSaveOnChange();
-        // 草稿镜像与自动保存开关无关：改了就要留一份，防止误操作丢稿
-        scheduleDraftMirror(doc.id);
+        if (dirty) {
+          scheduleAutoSaveOnChange();
+          // 草稿镜像与自动保存开关无关：改了就要留一份，防止误操作丢稿
+          scheduleDraftMirror(doc.id);
+        }
       }
     }
   },
@@ -1326,6 +1337,12 @@ function switchDocument(newDocId: string) {
   syncTitle(nextDoc.title);
 
   editor.setMarkdown(result.contentForNextDoc, { resetHistory: true });
+
+  // 切换文档后重建基线：载入的内容与保存在内存里的写法可能有细微差异
+  // （例如末尾换行），不重建的话切回来会被误判成"有未保存修改"。
+  if (!nextDoc.dirty) {
+    nextDoc.savedContent = editor.getMarkdown();
+  }
   syncTabsFromDocuments();
 
   if (isSourceMode) {
@@ -1540,6 +1557,10 @@ async function handleFileOpened(file: DesktopFile): Promise<boolean> {
   const current = documents.find((d) => d.id === activeDocId)!;
   syncTitle(current.title);
   editor.setMarkdown(current.content, { resetHistory: true });
+  // 基线取「编辑器实际载入后的内容」，而不是磁盘原文：
+  // 两者在末尾换行、行尾空白等处会有等价差异。
+  current.savedContent = editor.getMarkdown();
+  current.dirty = false;
   // 重新打开同一路径时也要重新取基线快照，否则会沿用上一次会话的旧基线
   resetSessionBaseline(current.id);
   if (isSourceMode) {
@@ -2753,6 +2774,8 @@ async function handleSave() {
       if (doc && (!currentDoc.filePath || doc.title !== fileName)) {
         doc.title = fileName;
       }
+      // 另存成功后重建基线，避免立刻又被判为"有未保存修改"
+      if (doc) doc.savedContent = rawContent;
       syncTitle(doc ? doc.title : currentDoc.title);
       renderFileList();
       flushSave();
@@ -2796,6 +2819,7 @@ async function handleSaveAs() {
       if (doc && doc.title !== fileName) {
         doc.title = fileName;
       }
+      if (doc) doc.savedContent = content;
       syncTitle(doc ? doc.title : currentDoc.title);
       renderFileList();
       flushSave();
@@ -4626,6 +4650,8 @@ async function writeDocumentToDisk(docId: string): Promise<boolean> {
   const updated = documents.find((d) => d.id === doc.id);
   if (updated) {
     updated.content = raw;
+    // 保存成功后以当前内容为新基线，否则下次打开/比较仍被判为脏
+    updated.savedContent = raw;
     syncTitle(updated.title);
   }
   renderFileList();
