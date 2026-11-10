@@ -70,11 +70,18 @@ jobs:
         shell: pwsh
         run: |
           npm run package:portable
-          $exe = Get-ChildItem release -Filter "MarkWeave-*-portable.exe" | Select-Object -First 1
-          if (-not $exe) { throw "Portable executable was not produced" }
-          "artifact_path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
-          "artifact_name=$($exe.Name)" >> $env:GITHUB_OUTPUT
-          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          # 打包脚本把产物放在 released/v<version>/（见 scripts/package.mjs），
+          # 不是 electron-builder 的 release/ 中间目录。
+          # 版本号用 node 读，避免 PowerShell 的编码差异（5.1 默认 ANSI，
+          # package.json 里的中文会被读花导致 ConvertFrom-Json 失败）。
+          $version = node -p "require('./package.json').version"
+          # 注意用嵌套 Join-Path：PowerShell 5.1 不支持三参数的 Join-Path
+          $exe = Join-Path (Join-Path "released" "v$version") "MarkWeave-$version-portable.exe"
+          if (-not (Test-Path -LiteralPath $exe)) { throw "Portable executable not found: $exe" }
+          $exe = (Resolve-Path -LiteralPath $exe).Path
+          "artifact_path=$exe" >> $env:GITHUB_OUTPUT
+          "artifact_name=$(Split-Path $exe -Leaf)" >> $env:GITHUB_OUTPUT
+          $hash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash
           "sha256=$hash" >> $env:GITHUB_OUTPUT
 
       - name: Write checksum
